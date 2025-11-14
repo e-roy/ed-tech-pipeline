@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic versions (migrations are useful to see, but compiled cache is not)
+alembic/versions/__pycache__/
+
+# Docker
+*.pid
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Video outputs
+outputs/
+videos/
+thumbnails/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
