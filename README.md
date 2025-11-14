@@ -155,6 +155,8 @@ pipeline/
 └── README.md                  # This file
 ```
 
+**Architecture Diagram**: [Workflowy Brainlift Diagram](https://workflowy.com/s/gauntlet-ai-video-ge/DU6xAqfBk5XyIBmS)
+
 ---
 
 ## API Documentation
@@ -222,6 +224,8 @@ Response: 200 OK
 ```
 
 For complete API spec, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**Architecture Diagram**: [Workflowy Brainlift Diagram](https://workflowy.com/s/gauntlet-ai-video-ge/DU6xAqfBk5XyIBmS)
 
 ---
 

@@ -1,0 +1,10 @@
+{
+  "prompt": "Create a 30 second luxury watch ad with elegant gold aesthetics",
+  "duration": 30,
+  "aspect_ratio": "9:16",
+  "brand_guidelines": {
+    "primary_color": "#D4AF37",
+    "secondary_color": "#000000",
+    "style": "luxury minimalist"
+  }
+}
