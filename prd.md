@@ -163,6 +163,8 @@ Acceptance Criteria:
 
 ## Technical Architecture
 
+**Architecture Diagram**: [Workflowy Brainlift Diagram](https://workflowy.com/s/gauntlet-ai-video-ge/DU6xAqfBk5XyIBmS)
+
 ### System Context
 
 ```
