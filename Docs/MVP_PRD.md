@@ -422,7 +422,7 @@ class VideoGenerationOrchestrator:
 
 **Key Design Principles:**
 
-1. **Sequential Execution:** Agents run one after another (not parallel) for MVP simplicity
+1. **Sequential Execution:** Agents run one after another (not parallel) for MVP simplicity, also have a feature to call the agent before sending the request to make sure the agent is available.
 2. **State Persistence:** Every stage saves to PostgreSQL before proceeding
 3. **Progress Tracking:** WebSocket updates at every substep
 4. **Error Handling:** Try-catch at orchestrator level, single retry logic
