@@ -33,6 +33,11 @@ class TokenData(BaseModel):
     email: Optional[str] = None
 
 
+class TokenExchangeRequest(BaseModel):
+    """Request model for token exchange endpoint."""
+    email: str
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash."""
     return get_password_hash(plain_password) == hashed_password
@@ -154,6 +159,49 @@ async def get_current_user(
         raise credentials_exception
 
     return user
+
+
+@router.post("/exchange", response_model=Token)
+async def exchange_token(
+    request: TokenExchangeRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Exchange NextAuth session for backend JWT token.
+    
+    This endpoint allows the frontend to exchange a NextAuth session (identified by email)
+    for a backend JWT token. This keeps the backend independent of NextAuth while
+    allowing seamless authentication flow.
+    
+    Args:
+        request: TokenExchangeRequest containing user email from NextAuth session
+        
+    Returns:
+        JWT access token compatible with backend authentication
+        
+    Raises:
+        HTTPException: If user doesn't exist in backend database
+    """
+    # Find user by email
+    user = db.query(User).filter(User.email == request.email).first()
+    
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email {request.email} not found in backend database"
+        )
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
 
 
 @router.get("/me")
