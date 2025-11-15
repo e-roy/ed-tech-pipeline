@@ -12,6 +12,11 @@ env/
 ENV/
 .venv/
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 # Database
 *.db
 *.sqlite

@@ -109,10 +109,17 @@ async def generate_images(
         }
     )
 
+    # Check if result is an error
+    if result["status"] == "error":
+        raise HTTPException(
+            status_code=500,
+            detail=result.get("message", "Image generation failed")
+        )
+
     return {
         "session_id": session_id,
         "status": result["status"],
-        "images": result["images"]
+        "images": result.get("images", [])
     }
 
 
