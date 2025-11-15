@@ -3,7 +3,7 @@ Video Generator Agent
 Person C - Video Pipeline Implementation
 
 Purpose: Convert approved product images into animated video clips using
-Image-to-Video models (Stable Video Diffusion), with scene planning via LLM.
+Image-to-Video models (Veo 3.1 via Replicate), with scene planning via LLM.
 
 Based on PRD Section 4.4.
 """
@@ -13,7 +13,7 @@ import time
 import asyncio
 import logging
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import replicate
 
 from app.agents.base import AgentInput, AgentOutput
@@ -27,8 +27,8 @@ class VideoGeneratorAgent:
 
     Features:
     - Scene planning with Llama 3.1 LLM
-    - Parallel video generation via Stable Video Diffusion
-    - Motion intensity control
+    - Parallel video generation via Veo 3.1 (via Replicate)
+    - Audio disabled by default
     - Cost tracking per clip
     """
 
@@ -42,16 +42,20 @@ class VideoGeneratorAgent:
         self.api_key = replicate_api_key
         self.client = replicate.Client(api_token=replicate_api_key)
 
-        # Model configurations
+        # Model configurations (Replicate model IDs)
         self.models = {
-            "stable-video-diffusion": "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
-            "svd-xt": "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438"
+            "veo-3.1": "google/veo-3.1",
+            "veo-3.1-fast": "google/veo-3.1-fast",
+            "stable-video-diffusion": "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438"
         }
 
-        # Cost estimates (USD per clip)
-        self.costs = {
-            "stable-video-diffusion": 0.40,  # Conservative estimate
-            "svd-xt": 0.40
+        # Cost estimates (USD per second of video)
+        # Veo 3.1: $0.20/sec without audio, $0.40/sec with audio
+        # For 8-second clips: $1.60 without audio
+        self.costs_per_second = {
+            "veo-3.1": 0.20,  # Without audio
+            "veo-3.1-fast": 0.20,  # Without audio
+            "stable-video-diffusion": 0.40 / 2.33  # ~$0.17/sec (flat $0.40 for 2.33s clip)
         }
 
         # LLM for scene planning
@@ -118,7 +122,6 @@ class VideoGeneratorAgent:
                     model=model_name,
                     image_url=image_data["url"],
                     scene_prompt=scene["scene_prompt"],
-                    motion_intensity=scene.get("motion_intensity", 0.5),
                     duration=clip_duration,
                     source_image_id=image_data.get("id", f"img_{i}"),
                     index=i
@@ -321,20 +324,18 @@ Create scene-specific prompts for each image view."""
         model: str,
         image_url: str,
         scene_prompt: str,
-        motion_intensity: float,
         duration: float,
         source_image_id: str,
         index: int
     ) -> Dict[str, Any]:
         """
-        Generate a single video clip via Replicate API.
+        Generate a single video clip via Replicate API (Veo 3.1 or SVD).
 
         Args:
             session_id: Session ID for logging
             model: Model name to use
             image_url: Source image URL
             scene_prompt: Scene description
-            motion_intensity: Motion intensity (0.0-1.0)
             duration: Clip duration in seconds
             source_image_id: ID of source image
             index: Clip index for logging
@@ -350,70 +351,126 @@ Create scene-specific prompts for each image view."""
         try:
             model_id = self.models[model]
 
-            # Build Stable Video Diffusion input
-            # Motion bucket ID: 0-255 scale (higher = more motion)
-            motion_bucket_id = int(motion_intensity * 255)
-            motion_bucket_id = max(1, min(255, motion_bucket_id))  # Clamp to valid range
+            # Configure based on model type
+            if model.startswith("veo-"):
+                # Veo 3.1 configuration
+                # Round duration to nearest valid value (4, 6, or 8 seconds)
+                valid_durations = [4, 6, 8]
+                duration_seconds = min(valid_durations, key=lambda x: abs(x - duration))
 
-            # Choose frames based on duration
-            # 14 frames = 2.33s, 25 frames = 4.17s at 6fps
-            video_length = "14_frames_with_svd" if duration <= 3 else "25_frames_with_svd_xt"
-            num_frames = 14 if video_length == "14_frames_with_svd" else 25
-            fps = 6  # SVD default FPS
+                model_input = {
+                    "prompt": scene_prompt,
+                    "image": image_url,
+                    "duration": duration_seconds,
+                    "aspect_ratio": "16:9",
+                    "resolution": "1080p",
+                    "generate_audio": False  # AUDIO DISABLED
+                }
 
-            model_input = {
-                "input_image": image_url,  # SVD expects 'input_image' not 'image'
-                "motion_bucket_id": motion_bucket_id,
-                "cond_aug": 0.02,  # Conditioning augmentation
-                "decoding_t": 14,   # Decoding steps
-                "video_length": video_length,
-                "sizing_strategy": "maintain_aspect_ratio",
-                "frames_per_second": fps
-            }
+                logger.debug(
+                    f"[{session_id}] Generating Veo 3.1 clip {index + 1} "
+                    f"(duration: {duration_seconds}s, audio: disabled)"
+                )
 
-            logger.debug(
-                f"[{session_id}] Generating clip {index + 1} "
-                f"(motion: {motion_intensity:.2f}, duration: {duration}s)"
-            )
+                # Call Replicate API
+                output = await self.client.async_run(model_id, input=model_input)
 
-            # Call Replicate API
-            output = await self.client.async_run(model_id, input=model_input)
+                # Extract video URL
+                if isinstance(output, str):
+                    video_url = output
+                elif isinstance(output, list) and output:
+                    video_url = output[0]
+                else:
+                    raise ValueError(f"Unexpected output format: {type(output)}")
 
-            # Extract video URL (output format may vary)
-            if isinstance(output, str):
-                video_url = output
-            elif isinstance(output, list) and output:
-                video_url = output[0]
+                if not video_url:
+                    raise ValueError("No video URL returned from Replicate")
+
+                generation_time = time.time() - start
+                cost = self.costs_per_second[model] * duration_seconds
+
+                logger.debug(
+                    f"[{session_id}] Veo 3.1 clip {index + 1} generated in {generation_time:.2f}s"
+                )
+
+                return {
+                    "id": f"clip_{uuid.uuid4().hex[:8]}",
+                    "url": str(video_url),
+                    "source_image_id": source_image_id,
+                    "duration": duration_seconds,
+                    "resolution": "1920x1080",
+                    "fps": 24,
+                    "cost": cost,
+                    "generation_time": generation_time,
+                    "model": model,
+                    "scene_prompt": scene_prompt[:100] + "...",
+                    "motion_intensity": None,
+                    "audio_enabled": False
+                }
+
             else:
-                raise ValueError(f"Unexpected output format: {type(output)}")
+                # Stable Video Diffusion configuration
+                # Motion bucket ID: 0-255 scale (higher = more motion)
+                motion_bucket_id = 127  # Default medium motion
 
-            if not video_url:
-                raise ValueError("No video URL returned from Replicate")
+                # Choose frames based on duration
+                # 14 frames = 2.33s, 25 frames = 4.17s at 6fps
+                video_length = "14_frames_with_svd" if duration <= 3 else "25_frames_with_svd_xt"
+                num_frames = 14 if video_length == "14_frames_with_svd" else 25
+                fps = 6  # SVD default FPS
 
-            generation_time = time.time() - start
-            cost = self.costs[model]
+                model_input = {
+                    "input_image": image_url,
+                    "motion_bucket_id": motion_bucket_id,
+                    "cond_aug": 0.02,
+                    "decoding_t": 14,
+                    "video_length": video_length,
+                    "sizing_strategy": "maintain_aspect_ratio",
+                    "frames_per_second": fps
+                }
 
-            logger.debug(
-                f"[{session_id}] Clip {index + 1} generated in {generation_time:.2f}s"
-            )
+                logger.debug(
+                    f"[{session_id}] Generating SVD clip {index + 1} "
+                    f"(duration: ~{num_frames/fps:.1f}s)"
+                )
 
-            # Calculate actual duration: frames / fps
-            actual_duration = round(num_frames / fps, 2)
+                # Call Replicate API
+                output = await self.client.async_run(model_id, input=model_input)
 
-            return {
-                "id": f"clip_{uuid.uuid4().hex[:8]}",
-                "url": str(video_url),
-                "source_image_id": source_image_id,
-                "duration": actual_duration,  # Calculated from num_frames / fps
-                "num_frames": num_frames,
-                "resolution": "1024x576",
-                "fps": fps,
-                "cost": cost,
-                "generation_time": generation_time,
-                "model": model,
-                "scene_prompt": scene_prompt[:100] + "...",  # Truncate for storage
-                "motion_intensity": motion_intensity
-            }
+                # Extract video URL
+                if isinstance(output, str):
+                    video_url = output
+                elif isinstance(output, list) and output:
+                    video_url = output[0]
+                else:
+                    raise ValueError(f"Unexpected output format: {type(output)}")
+
+                if not video_url:
+                    raise ValueError("No video URL returned from Replicate")
+
+                generation_time = time.time() - start
+                actual_duration = round(num_frames / fps, 2)
+                cost = self.costs_per_second[model] * actual_duration
+
+                logger.debug(
+                    f"[{session_id}] SVD clip {index + 1} generated in {generation_time:.2f}s"
+                )
+
+                return {
+                    "id": f"clip_{uuid.uuid4().hex[:8]}",
+                    "url": str(video_url),
+                    "source_image_id": source_image_id,
+                    "duration": actual_duration,
+                    "num_frames": num_frames,
+                    "resolution": "1024x576",
+                    "fps": fps,
+                    "cost": cost,
+                    "generation_time": generation_time,
+                    "model": model,
+                    "scene_prompt": scene_prompt[:100] + "...",
+                    "motion_intensity": motion_bucket_id / 255.0,
+                    "audio_enabled": False
+                }
 
         except Exception as e:
             generation_time = time.time() - start

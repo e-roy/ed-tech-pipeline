@@ -12,6 +12,7 @@ from app.agents.prompt_parser import PromptParserAgent
 from app.agents.batch_image_generator import BatchImageGeneratorAgent
 from app.agents.video_generator import VideoGeneratorAgent
 from app.services.ffmpeg_compositor import FFmpegCompositor
+from app.services.storage import StorageService
 from app.config import get_settings
 from typing import Dict, Any, Optional
 import uuid
@@ -53,8 +54,12 @@ class VideoGenerationOrchestrator:
         self.image_generator = BatchImageGeneratorAgent(replicate_api_key) if replicate_api_key else None
 
         # Initialize Person C agents (Video Pipeline)
+        # VideoGeneratorAgent uses Veo 3.1 via Replicate
         self.video_generator = VideoGeneratorAgent(replicate_api_key) if replicate_api_key else None
         self.ffmpeg_compositor = FFmpegCompositor()
+
+        # Initialize storage service for S3 uploads
+        self.storage_service = StorageService()
 
     async def generate_images(
         self,
@@ -162,20 +167,42 @@ class VideoGenerationOrchestrator:
             )
 
             # Store generated images in database
+            # First upload to S3 for permanent storage
             images = image_result.data["images"]
-            for img_data in images:
+            for i, img_data in enumerate(images):
+                # Generate unique asset ID
+                asset_id = f"img_{uuid.uuid4().hex[:12]}"
+
+                # Download from Replicate and upload to S3
+                try:
+                    s3_result = await self.storage_service.download_and_upload(
+                        replicate_url=img_data["url"],
+                        asset_type="image",
+                        session_id=session_id,
+                        asset_id=asset_id,
+                        user_id=user_id
+                    )
+                    # Use S3 URL instead of temporary Replicate URL
+                    storage_url = s3_result["url"]
+                    logger.info(f"[{session_id}] Image {i+1} uploaded to S3: {storage_url}")
+                except Exception as e:
+                    # Fall back to Replicate URL if S3 upload fails
+                    logger.warning(f"[{session_id}] S3 upload failed for image {i+1}, using Replicate URL: {e}")
+                    storage_url = img_data["url"]
+
                 asset = Asset(
                     # id is auto-increment, don't specify
                     session_id=session_id,
                     type="image",  # 'type' column not 'asset_type'
-                    url=img_data["url"],  # 'url' column not 'storage_url'
+                    url=storage_url,  # S3 URL or fallback Replicate URL
                     approved=False,  # 'approved' not 'user_selected'
                     asset_metadata={  # 'asset_metadata' not 'metadata'
                         "view_type": img_data["view_type"],
                         "seed": img_data["seed"],
                         "model": img_data["model"],
                         "cost": img_data["cost"],
-                        "duration": img_data["duration"]
+                        "duration": img_data["duration"],
+                        "asset_id": asset_id
                     }
                 )
                 db.add(asset)
@@ -331,13 +358,16 @@ class VideoGenerationOrchestrator:
             logger.info(f"[{session_id}] Generating clips from {len(image_data_list)} approved images")
 
             # Call Video Generator Agent
+            # Default to Veo 3.1 via Replicate
+            default_model = "veo-3.1"
+
             video_gen_input = AgentInput(
                 session_id=session_id,
                 data={
                     "approved_images": image_data_list,
                     "video_prompt": video_prompt,
-                    "clip_duration": clip_config.get("clip_duration", 3.0) if clip_config else 3.0,
-                    "model": clip_config.get("model", "stable-video-diffusion") if clip_config else "stable-video-diffusion"
+                    "clip_duration": clip_config.get("clip_duration", 8.0) if clip_config else 8.0,  # Veo 3.1 default is 8s
+                    "model": clip_config.get("model", default_model) if clip_config else default_model
                 }
             )
 
@@ -351,18 +381,39 @@ class VideoGenerationOrchestrator:
                 db,
                 session_id,
                 agent="video_generator",
-                model=clip_config.get("model", "stable-video-diffusion") if clip_config else "stable-video-diffusion",
+                model=clip_config.get("model", default_model) if clip_config else default_model,
                 cost=video_result.cost,
                 duration=video_result.duration
             )
 
             # Store generated clips in database
+            # First upload to S3 for permanent storage
             clips = video_result.data["clips"]
-            for clip_data in clips:
+            for i, clip_data in enumerate(clips):
+                # Generate unique asset ID
+                asset_id = f"clip_{uuid.uuid4().hex[:12]}"
+
+                # Download from Replicate and upload to S3
+                try:
+                    s3_result = await self.storage_service.download_and_upload(
+                        replicate_url=clip_data["url"],
+                        asset_type="video",
+                        session_id=session_id,
+                        asset_id=asset_id,
+                        user_id=user_id
+                    )
+                    # Use S3 URL instead of temporary Replicate URL
+                    storage_url = s3_result["url"]
+                    logger.info(f"[{session_id}] Clip {i+1} uploaded to S3: {storage_url}")
+                except Exception as e:
+                    # Fall back to Replicate URL if S3 upload fails
+                    logger.warning(f"[{session_id}] S3 upload failed for clip {i+1}, using Replicate URL: {e}")
+                    storage_url = clip_data["url"]
+
                 asset = Asset(
                     session_id=session_id,
                     type="video",
-                    url=clip_data["url"],
+                    url=storage_url,  # S3 URL or fallback Replicate URL
                     approved=False,
                     asset_metadata={
                         "source_image_id": clip_data["source_image_id"],
@@ -373,7 +424,8 @@ class VideoGenerationOrchestrator:
                         "scene_prompt": clip_data["scene_prompt"],
                         "motion_intensity": clip_data["motion_intensity"],
                         "cost": clip_data["cost"],
-                        "generation_time": clip_data["generation_time"]
+                        "generation_time": clip_data["generation_time"],
+                        "asset_id": asset_id
                     }
                 )
                 db.add(asset)
