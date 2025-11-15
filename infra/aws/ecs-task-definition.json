@@ -4,8 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
-  "executionRoleArn": "arn:aws:iam::123456789012:role/pipeline-backend-exec-role",
-  "taskRoleArn": "arn:aws:iam::123456789012:role/pipeline-backend-task-role",
+  "executionRoleArn": "arn:aws:iam::971422717446:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::971422717446:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "pipeline-backend",

@@ -61,6 +61,7 @@ $dockerContextPath = Join-Path $repoRoot $DockerContext
 $dockerfilePath = Join-Path $repoRoot $Dockerfile
 $taskTemplatePath = Join-Path $repoRoot $TaskDefinitionTemplate
 $renderedTaskPath = Join-Path $repoRoot $RenderedTaskDefinition
+$utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
 
 Ensure-Command docker
 Ensure-Command aws
@@ -147,7 +148,8 @@ Invoke-Step "Rendering task definition" {
 
     $container.image = $imageUri
 
-    $templateContent | ConvertTo-Json -Depth 10 | Set-Content -Path $renderedTaskPath -Encoding UTF8
+    $jsonContent = $templateContent | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($renderedTaskPath, $jsonContent, $utf8NoBomEncoding)
     Write-Host "Rendered task definition written to $renderedTaskPath"
 }
 
