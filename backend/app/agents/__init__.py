@@ -8,6 +8,7 @@ This package contains all AI agents for the video generation pipeline.
 from app.agents.base import AgentInput, AgentOutput, Agent
 from app.agents.prompt_parser import PromptParserAgent
 from app.agents.batch_image_generator import BatchImageGeneratorAgent
+from app.agents.video_generator import VideoGeneratorAgent
 
 __all__ = [
     "AgentInput",
@@ -15,4 +16,5 @@ __all__ = [
     "Agent",
     "PromptParserAgent",
     "BatchImageGeneratorAgent",
+    "VideoGeneratorAgent",
 ]

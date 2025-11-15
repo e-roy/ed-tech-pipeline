@@ -10,6 +10,8 @@ from app.services.websocket_manager import WebSocketManager
 from app.agents.base import AgentInput
 from app.agents.prompt_parser import PromptParserAgent
 from app.agents.batch_image_generator import BatchImageGeneratorAgent
+from app.agents.video_generator import VideoGeneratorAgent
+from app.services.ffmpeg_compositor import FFmpegCompositor
 from app.config import get_settings
 from typing import Dict, Any, Optional
 import uuid
@@ -49,6 +51,10 @@ class VideoGenerationOrchestrator:
 
         self.prompt_parser = PromptParserAgent(replicate_api_key) if replicate_api_key else None
         self.image_generator = BatchImageGeneratorAgent(replicate_api_key) if replicate_api_key else None
+
+        # Initialize Person C agents (Video Pipeline)
+        self.video_generator = VideoGeneratorAgent(replicate_api_key) if replicate_api_key else None
+        self.ffmpeg_compositor = FFmpegCompositor()
 
     async def generate_images(
         self,
@@ -266,10 +272,9 @@ class VideoGenerationOrchestrator:
         clip_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Generate video clips using Luma via Replicate (STUB).
+        Generate video clips using Stable Video Diffusion via Replicate.
 
-        This method currently returns a stub response to unblock the team.
-        Person C will integrate the actual Video Generator Agent here.
+        Integrated by Person C with Video Generator Agent.
 
         Args:
             db: Database session
@@ -278,50 +283,148 @@ class VideoGenerationOrchestrator:
             clip_config: Configuration for clip generation
 
         Returns:
-            Dict containing status and stub clip URLs
+            Dict containing status, generated clips, and cost information
         """
-        # Update session status
-        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-        if session:
-            session.status = "generating_clips"
-            session.video_prompt = video_prompt
-            session.clip_config = clip_config
+        try:
+            # Validate video generator is initialized
+            if not self.video_generator:
+                raise ValueError("Video Generator not initialized - check REPLICATE_API_KEY")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "generating_clips"
+                session.video_prompt = video_prompt
+                session.clip_config = clip_config
+                db.commit()
+
+            # Get approved images from database
+            approved_images = db.query(Asset).filter(
+                Asset.session_id == session_id,
+                Asset.type == "image",
+                Asset.approved == True
+            ).all()
+
+            if not approved_images:
+                raise ValueError("No approved images found for video generation")
+
+            # Convert to format expected by Video Generator
+            image_data_list = [
+                {
+                    "id": str(img.id),
+                    "url": img.url,
+                    "view_type": img.asset_metadata.get("view_type", "unknown") if img.asset_metadata else "unknown"
+                }
+                for img in approved_images
+            ]
+
+            # Send WebSocket progress update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_clips",
+                progress=60,
+                details=f"Generating {len(image_data_list)} video clips with AI..."
+            )
+
+            logger.info(f"[{session_id}] Generating clips from {len(image_data_list)} approved images")
+
+            # Call Video Generator Agent
+            video_gen_input = AgentInput(
+                session_id=session_id,
+                data={
+                    "approved_images": image_data_list,
+                    "video_prompt": video_prompt,
+                    "clip_duration": clip_config.get("clip_duration", 3.0) if clip_config else 3.0,
+                    "model": clip_config.get("model", "stable-video-diffusion") if clip_config else "stable-video-diffusion"
+                }
+            )
+
+            video_result = await self.video_generator.process(video_gen_input)
+
+            if not video_result.success:
+                raise ValueError(f"Video generation failed: {video_result.error}")
+
+            # Track costs
+            self._record_cost(
+                db,
+                session_id,
+                agent="video_generator",
+                model=clip_config.get("model", "stable-video-diffusion") if clip_config else "stable-video-diffusion",
+                cost=video_result.cost,
+                duration=video_result.duration
+            )
+
+            # Store generated clips in database
+            clips = video_result.data["clips"]
+            for clip_data in clips:
+                asset = Asset(
+                    session_id=session_id,
+                    type="video",
+                    url=clip_data["url"],
+                    approved=False,
+                    asset_metadata={
+                        "source_image_id": clip_data["source_image_id"],
+                        "duration": clip_data["duration"],
+                        "resolution": clip_data["resolution"],
+                        "fps": clip_data["fps"],
+                        "model": clip_data["model"],
+                        "scene_prompt": clip_data["scene_prompt"],
+                        "motion_intensity": clip_data["motion_intensity"],
+                        "cost": clip_data["cost"],
+                        "generation_time": clip_data["generation_time"]
+                    }
+                )
+                db.add(asset)
+
             db.commit()
 
-        # Send WebSocket progress update
-        await self.websocket_manager.broadcast_status(
-            session_id,
-            status="generating_clips",
-            progress=60,
-            details="Starting video clip generation..."
-        )
+            # Update session status
+            if session:
+                session.status = "reviewing_clips"
+                db.commit()
 
-        # STUB: Return mock response
-        # TODO (Person C): Replace with actual Video Generator Agent integration
-        num_clips = clip_config.get("num_clips", 3) if clip_config else 3
-        stub_clips = [
-            {
-                "url": f"https://stub-clip-{i}.mp4",
-                "duration": 5.0,
-                "approved": False
+            # Update progress
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="clips_generated",
+                progress=80,
+                details=f"Generated {len(clips)} video clips! Cost: ${video_result.cost:.2f}"
+            )
+
+            logger.info(
+                f"[{session_id}] Clip generation complete: "
+                f"{len(clips)} clips, ${video_result.cost:.2f}"
+            )
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "clips": clips,
+                "total_cost": video_result.cost,
+                "scenes_planned": video_result.data.get("scenes_planned", [])
             }
-            for i in range(num_clips)
-        ]
 
-        # Update progress
-        await self.websocket_manager.broadcast_status(
-            session_id,
-            status="clips_generated",
-            progress=80,
-            details=f"Generated {len(stub_clips)} clips (stub)"
-        )
+        except Exception as e:
+            logger.error(f"[{session_id}] Clip generation failed: {e}")
 
-        return {
-            "status": "success",
-            "session_id": session_id,
-            "clips": stub_clips,
-            "message": "STUB: Clips would be generated by Luma via Replicate"
-        }
+            # Update session with error
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Clip generation failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
+                "message": str(e)
+            }
 
     async def compose_final_video(
         self,
@@ -331,10 +434,9 @@ class VideoGenerationOrchestrator:
         audio_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Compose final video with text overlays and audio (STUB).
+        Compose final video with text overlays and audio using FFmpeg.
 
-        This method currently returns a stub response to unblock the team.
-        Person C will integrate the actual Composition Agent (FFmpeg) here.
+        Integrated by Person C with FFmpeg Compositor.
 
         Args:
             db: Database session
@@ -343,49 +445,125 @@ class VideoGenerationOrchestrator:
             audio_config: Audio configuration
 
         Returns:
-            Dict containing status and stub final video URL
+            Dict containing status and final video URL
         """
-        # Update session status
-        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-        if session:
-            session.status = "composing"
-            session.text_config = text_config
-            session.audio_config = audio_config
-            db.commit()
+        try:
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "composing"
+                session.text_config = text_config
+                session.audio_config = audio_config
+                db.commit()
 
-        # Send WebSocket progress update
-        await self.websocket_manager.broadcast_status(
-            session_id,
-            status="composing",
-            progress=90,
-            details="Composing final video..."
-        )
+            # Get approved clips from database
+            approved_clips = db.query(Asset).filter(
+                Asset.session_id == session_id,
+                Asset.type == "video",
+                Asset.approved == True
+            ).all()
 
-        # STUB: Return mock response
-        # TODO (Person C): Replace with actual FFmpeg composition
-        stub_final_url = f"https://stub-final-video-{session_id}.mp4"
+            if not approved_clips:
+                raise ValueError("No approved clips found for composition")
 
-        # Update session with final result
-        if session:
-            session.status = "completed"
-            session.final_video_url = stub_final_url
-            session.completed_at = datetime.utcnow()
-            db.commit()
+            # Convert to format expected by FFmpeg Compositor
+            clip_data_list = [
+                {
+                    "url": clip.url,
+                    "duration": clip.asset_metadata.get("duration", 3.0) if clip.asset_metadata else 3.0
+                }
+                for clip in approved_clips
+            ]
 
-        # Update progress
-        await self.websocket_manager.broadcast_status(
-            session_id,
-            status="completed",
-            progress=100,
-            details="Video composition complete (stub)"
-        )
+            # Send WebSocket progress update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="composing",
+                progress=90,
+                details=f"Composing {len(clip_data_list)} clips into final video..."
+            )
 
-        return {
-            "status": "success",
-            "session_id": session_id,
-            "video_url": stub_final_url,
-            "message": "STUB: Final video would be composed with FFmpeg"
-        }
+            logger.info(f"[{session_id}] Composing final video from {len(clip_data_list)} approved clips")
+
+            # Call FFmpeg Compositor
+            composition_result = await self.ffmpeg_compositor.compose_final_video(
+                clips=clip_data_list,
+                text_config=text_config,
+                audio_config=audio_config,
+                session_id=session_id
+            )
+
+            final_video_path = composition_result["output_path"]
+            duration = composition_result.get("duration", 0.0)
+
+            logger.info(f"[{session_id}] Video composed at: {final_video_path}")
+
+            # Store final video in database
+            final_asset = Asset(
+                session_id=session_id,
+                type="final_video",
+                url=final_video_path,  # Local path for now (TODO: upload to S3)
+                approved=True,
+                asset_metadata={
+                    "duration": duration,
+                    "num_clips": len(clip_data_list),
+                    "text_config": text_config,
+                    "audio_config": audio_config,
+                    "resolution": "1920x1080",
+                    "fps": 30
+                }
+            )
+            db.add(final_asset)
+
+            # Update session with final result
+            if session:
+                session.status = "completed"
+                session.final_video_url = final_video_path
+                session.completed_at = datetime.utcnow()
+                db.commit()
+
+            # Update progress
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="completed",
+                progress=100,
+                details="Video composition complete!"
+            )
+
+            logger.info(
+                f"[{session_id}] Final video complete: "
+                f"{duration:.1f}s, {len(clip_data_list)} clips"
+            )
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "video_url": final_video_path,
+                "duration": duration,
+                "num_clips": len(clip_data_list)
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Video composition failed: {e}")
+
+            # Update session with error
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Video composition failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
+                "message": str(e)
+            }
 
     async def get_session_status(
         self,
