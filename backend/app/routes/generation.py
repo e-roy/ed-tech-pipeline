@@ -12,6 +12,7 @@ from app.models.database import Session as SessionModel, Asset, User
 from app.routes.auth import get_current_user
 from app.services.orchestrator import VideoGenerationOrchestrator
 from app.services.websocket_manager import WebSocketManager
+from app.services.storage import StorageService
 
 router = APIRouter()
 
@@ -20,6 +21,9 @@ websocket_manager = WebSocketManager()
 
 # Global orchestrator instance
 orchestrator = VideoGenerationOrchestrator(websocket_manager)
+
+# Global storage service instance
+storage_service = StorageService()
 
 
 # Request/Response models
@@ -98,10 +102,31 @@ async def generate_images(
     db.add(session)
     db.commit()
 
+    # Store prompt/config in S3 input folder
+    try:
+        config_data = {
+            "prompt": request.prompt,
+            "num_images": request.num_images,
+            "aspect_ratio": request.aspect_ratio,
+            "session_id": session_id,
+            "created_at": session.created_at.isoformat() if session.created_at else None
+        }
+        storage_service.upload_prompt_config(
+            user_id=current_user.id,
+            config_data=config_data,
+            session_id=session_id
+        )
+    except Exception as e:
+        # Log but don't fail if storage fails
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to store prompt config: {e}")
+
     # Call orchestrator to generate images
     result = await orchestrator.generate_images(
         db=db,
         session_id=session_id,
+        user_id=current_user.id,
         user_prompt=request.prompt,
         options={
             "num_images": request.num_images,
@@ -189,6 +214,7 @@ async def generate_clips(
     result = await orchestrator.generate_clips(
         db=db,
         session_id=request.session_id,
+        user_id=current_user.id,
         video_prompt=request.video_prompt,
         clip_config={
             "num_clips": request.num_clips,
@@ -270,6 +296,7 @@ async def compose_final_video(
     result = await orchestrator.compose_final_video(
         db=db,
         session_id=request.session_id,
+        user_id=current_user.id,
         text_config={"overlays": request.text_overlays} if request.text_overlays else None,
         audio_config={"url": request.audio_url} if request.audio_url else None
     )
