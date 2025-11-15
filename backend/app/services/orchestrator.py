@@ -60,6 +60,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
+        user_id: int,
         user_prompt: str,
         options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -268,6 +269,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
+        user_id: int,
         video_prompt: str,
         clip_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -430,6 +432,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
+        user_id: int,
         text_config: Optional[Dict[str, Any]] = None,
         audio_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:

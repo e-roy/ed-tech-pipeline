@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 
 # Import routes
-from app.routes import auth, generation, sessions
+from app.routes import auth, generation, sessions, storage
 
 settings = get_settings()
 
@@ -34,6 +34,7 @@ websocket_manager = generation.get_websocket_manager()
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(generation.router, prefix="/api", tags=["Generation"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Sessions"])
+app.include_router(storage.router, prefix="/api/storage", tags=["Storage"])
 
 
 @app.get("/")
