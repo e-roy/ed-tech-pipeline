@@ -1,0 +1,14 @@
+.git
+__pycache__
+.pytest_cache
+.mypy_cache
+.venv
+env/
+.env
+*.pyc
+alembic/versions/__pycache__
+tests
+test_*.py
+*.log
+.DS_Store
+
