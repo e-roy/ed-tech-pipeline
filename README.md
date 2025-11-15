@@ -118,6 +118,7 @@ docker-compose down
 ```
 
 Services:
+
 - **orchestrator**: API service on port 8000
 - **db**: PostgreSQL on port 5432
 
@@ -164,6 +165,7 @@ pipeline/
 ### Endpoints
 
 **Health Check**
+
 ```
 GET /health
 Response: 200 OK
@@ -177,6 +179,7 @@ Response: 200 OK
 ```
 
 **Generate Video Ad**
+
 ```
 POST /api/v1/generate-ad
 Request:
@@ -201,6 +204,7 @@ Response: 201 Created
 ```
 
 **Get Job Status**
+
 ```
 GET /api/v1/jobs/{job_id}
 Response: 200 OK
@@ -278,16 +282,16 @@ ruff format app/
 
 Environment variables (see `.env.example`):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://...` |
-| `PROMPT_PARSER_URL` | Prompt Parser service URL | `http://localhost:8001` |
-| `IMAGE_GEN_URL` | Image Gen service URL | `http://localhost:8002` |
-| `VIDEO_GEN_URL` | Video Gen service URL | `http://localhost:8003` |
-| `COMPOSITION_URL` | Composition service URL | `http://localhost:8004` |
-| `MAX_COST_PER_VIDEO` | Max cost before job fails | `10.00` |
-| `MAX_PARALLEL_VIDEO_GENERATIONS` | Concurrent video clips | `4` |
-| `LOG_LEVEL` | Logging level | `INFO` |
+| Variable                         | Description                  | Default                    |
+| -------------------------------- | ---------------------------- | -------------------------- |
+| `DATABASE_URL`                   | PostgreSQL connection string | `postgresql+asyncpg://...` |
+| `PROMPT_PARSER_URL`              | Prompt Parser service URL    | `http://localhost:8001`    |
+| `IMAGE_GEN_URL`                  | Image Gen service URL        | `http://localhost:8002`    |
+| `VIDEO_GEN_URL`                  | Video Gen service URL        | `http://localhost:8003`    |
+| `COMPOSITION_URL`                | Composition service URL      | `http://localhost:8004`    |
+| `MAX_COST_PER_VIDEO`             | Max cost before job fails    | `10.00`                    |
+| `MAX_PARALLEL_VIDEO_GENERATIONS` | Concurrent video clips       | `4`                        |
+| `LOG_LEVEL`                      | Logging level                | `INFO`                     |
 
 ---
 
@@ -309,15 +313,18 @@ Environment variables (see `.env.example`):
 ## Troubleshooting
 
 **Database connection errors**:
+
 - Check `DATABASE_URL` in `.env`
 - Ensure PostgreSQL is running: `docker-compose up db`
 
 **Microservice timeouts**:
+
 - Verify service URLs are correct
 - Check service health endpoints
 - Increase timeout in `app/config.py`
 
 **Migration errors**:
+
 - Drop and recreate: `alembic downgrade base && alembic upgrade head`
 - Or delete DB and restart: `docker-compose down -v && docker-compose up`
 
@@ -336,10 +343,13 @@ Environment variables (see `.env.example`):
 ### For Microservice Developers
 
 Your service must return this format:
+
 ```json
 {
   "success": true,
-  "result": { /* your data */ },
+  "result": {
+    /* your data */
+  },
   "cost": 1.25,
   "processing_time": 3.4
 }
@@ -352,6 +362,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed contracts.
 ## Roadmap
 
 ### MVP (48 hours) ✅
+
 - [x] API endpoints (health, generate-ad, get-status)
 - [x] Database models and migrations
 - [x] Microservice clients with retry logic
@@ -359,6 +370,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed contracts.
 - [ ] Integration testing
 
 ### Final (8 days)
+
 - [ ] Webhook notifications
 - [ ] Metrics endpoint
 - [ ] Caching for repeated prompts
@@ -381,4 +393,6 @@ MIT License - See LICENSE file for details
 
 ---
 
-*Built with FastAPI, PostgreSQL, and ❤️*
+_Built with FastAPI, PostgreSQL, and ❤️_
+
+---
