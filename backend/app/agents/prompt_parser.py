@@ -126,7 +126,8 @@ class PromptParserAgent:
 
     def _build_system_prompt(self, num_images: int) -> str:
         """
-        Build the LLM system prompt for generating consistent image prompts.
+        Build the LLM system prompt for generating image prompts.
+        Supports both product photography and advertising narrative modes.
 
         Args:
             num_images: Number of images to generate prompts for
@@ -134,38 +135,59 @@ class PromptParserAgent:
         Returns:
             System prompt string
         """
-        return f"""You are a professional product photography AI assistant that generates detailed, consistent image prompts for commercial product photography.
+        return f"""You are an expert prompt engineer for AI advertising video generation.
 
-Your task:
-1. Analyze the user's product description
-2. Generate {num_images} distinct prompts for different angles/views
-3. Maintain visual consistency using the same core description
-4. Optimize for professional product photography
-5. Extract relevant style keywords
+Your task: Extract subjects from the user's input and generate {num_images} varied image prompts.
 
-Rules:
-- ALL prompts must describe the SAME product (same colors, style, design, materials)
-- Use professional photography terminology
-- Include specific lighting, background, and quality descriptors
-- Vary only the ANGLE/VIEW (front, side, back, top, detail, lifestyle)
-- For {num_images} images, use these views in order: front, side, back, top, detail, lifestyle (repeat if needed)
-- Output ONLY valid JSON, no other text
+STEP 1: SUBJECT EXTRACTION
+Analyze the input and identify ALL subjects (people, objects, products, animals, etc.).
 
-Output JSON structure:
+Examples:
+- "man buys hat" → subjects: ["man", "hat"]
+- "woman drinks coffee" → subjects: ["woman", "coffee"]
+- "red sports car" → subjects: ["sports car"]
+- "dog plays with ball" → subjects: ["dog", "ball"]
+
+STEP 2: GENERATE VARIATIONS
+For each subject, generate multiple variations with different:
+- Poses/angles (front, side, 3/4 view, close-up)
+- Styles/types (if applicable)
+- Lighting/mood
+- Composition
+
+Distribute {num_images} total prompts across all subjects.
+If 2 subjects: generate ~{num_images//2} variations of each
+If 1 subject: generate {num_images} variations of it
+
+STEP 3: PROMPT STRUCTURE
+Each prompt should be detailed and specific:
+"[SHOT TYPE] professional photo of [SUBJECT with details], [POSE/ANGLE], [LIGHTING], [BACKGROUND], clean advertising photography, 8K, sharp focus"
+
+Examples:
+- "Medium shot professional photo of businessman in navy suit, front view facing camera with confident smile, soft studio lighting, white background, clean advertising photography, 8K, sharp focus"
+- "Close-up professional photo of brown fedora hat, side angle showing brim detail, dramatic side lighting, neutral gray background, clean advertising photography, 8K, sharp focus"
+
+STEP 4: OUTPUT FORMAT - Return ONLY valid JSON:
 {{
-    "product_category": "string (e.g., 'athletic footwear', 'electronics', 'apparel')",
-    "style_keywords": ["keyword1", "keyword2", "keyword3"],
+    "subjects": ["subject1", "subject2", ...],
+    "style_keywords": ["advertising", "professional", "clean"],
     "image_prompts": [
         {{
-            "prompt": "Professional product photography of [product with exact colors/materials], [specific view/angle], white background, studio lighting, commercial photography, sharp focus, 8K resolution",
-            "negative_prompt": "blurry, distorted, low quality, watermark, text, multiple products, different colors",
-            "view_type": "front|side|back|top|detail|lifestyle"
+            "prompt": "[Detailed prompt]",
+            "negative_prompt": "blurry, low quality, distorted, amateur, watermark, text, multiple subjects",
+            "subject": "which subject this variation shows",
+            "variation_type": "front|side|close-up|3-4-view|detail"
         }},
-        ... ({num_images} total prompts)
+        ... ({num_images} total)
     ]
 }}
 
-CRITICAL: Ensure ALL prompts describe the SAME product with IDENTICAL attributes."""
+CRITICAL RULES:
+- Each prompt generates ONE clear subject (not multiple subjects in same image)
+- Variations should be diverse (different angles, poses, styles)
+- Professional advertising quality
+- Clean, simple backgrounds (white, gray, or simple solid colors)
+- No text, watermarks, or clutter"""
 
     async def _call_llm(
         self,
@@ -241,22 +263,36 @@ CRITICAL: Ensure ALL prompts describe the SAME product with IDENTICAL attributes
             parsed = json.loads(json_str)
 
             # Validate required fields
-            required_fields = ["product_category", "style_keywords", "image_prompts"]
+            required_fields = ["style_keywords", "image_prompts"]
             for field in required_fields:
                 if field not in parsed:
                     raise ValueError(f"Missing required field: {field}")
+
+            # Add subjects if not present (backward compatibility)
+            if "subjects" not in parsed:
+                parsed["subjects"] = []
+
+            # Add product_category for backward compatibility
+            if "product_category" not in parsed:
+                parsed["product_category"] = parsed.get("subjects", ["unknown"])[0] if parsed.get("subjects") else "unknown"
 
             # Validate image_prompts structure
             if not isinstance(parsed["image_prompts"], list):
                 raise ValueError("image_prompts must be a list")
 
             for i, prompt_obj in enumerate(parsed["image_prompts"]):
-                required_prompt_fields = ["prompt", "negative_prompt", "view_type"]
+                required_prompt_fields = ["prompt", "negative_prompt"]
                 for field in required_prompt_fields:
                     if field not in prompt_obj:
                         raise ValueError(
                             f"Missing field '{field}' in image_prompt {i}"
                         )
+
+                # Add view_type for backward compatibility if variation_type exists
+                if "variation_type" in prompt_obj and "view_type" not in prompt_obj:
+                    prompt_obj["view_type"] = prompt_obj["variation_type"]
+                elif "view_type" not in prompt_obj and "variation_type" not in prompt_obj:
+                    prompt_obj["view_type"] = "variation"
 
             return parsed
 

@@ -44,15 +44,18 @@ class VideoGeneratorAgent:
 
         # Model configurations (Replicate model IDs)
         self.models = {
+            "gen-4-turbo": "minimax/video-01",
             "veo-3.1": "google/veo-3.1",
             "veo-3.1-fast": "google/veo-3.1-fast",
             "stable-video-diffusion": "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438"
         }
 
         # Cost estimates (USD per second of video)
+        # Gen-4-Turbo (Minimax Video-01): ~$0.015/sec (cheapest for testing!)
         # Veo 3.1: $0.20/sec without audio, $0.40/sec with audio
-        # For 8-second clips: $1.60 without audio
+        # For 8-second clips: $0.12 (gen-4-turbo) vs $1.60 (veo-3.1)
         self.costs_per_second = {
+            "gen-4-turbo": 0.015,  # Cheapest option!
             "veo-3.1": 0.20,  # Without audio
             "veo-3.1-fast": 0.20,  # Without audio
             "stable-video-diffusion": 0.40 / 2.33  # ~$0.17/sec (flat $0.40 for 2.33s clip)
