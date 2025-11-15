@@ -4,12 +4,12 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
-  "executionRoleArn": "arn:aws:iam::971422717446:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::971422717446:role/ecsTaskExecutionRole",
+  "executionRoleArn": "${ECS_EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${ECS_TASK_ROLE_ARN}",
   "containerDefinitions": [
     {
       "name": "pipeline-backend",
-      "image": "IMAGE_URI",
+      "image": "${ECR_IMAGE_URI}",
       "essential": true,
       "portMappings": [
         {
@@ -17,7 +17,32 @@
           "protocol": "tcp"
         }
       ],
-      "environment": [],
+      "environment": [
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "value": "pipeline-backend-assets"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "${DATABASE_URL}"
+        },
+        {
+          "name": "JWT_SECRET_KEY",
+          "value": "${JWT_SECRET_KEY}"
+        },
+        {
+          "name": "REPLICATE_API_KEY",
+          "value": "${REPLICATE_API_KEY}"
+        },
+        {
+          "name": "FRONTEND_URL",
+          "value": "${FRONTEND_URL}"
+        }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

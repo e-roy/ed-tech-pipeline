@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# Install system dependencies (FFmpeg for video composition)
+# Install system dependencies (FFmpeg for video composition, libpq for PostgreSQL)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set workdir

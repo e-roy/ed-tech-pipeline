@@ -93,3 +93,16 @@ dmypy.json
 outputs/
 videos/
 thumbnails/
+
+# AWS Infrastructure - sensitive files
+infra/aws/.rendered-task-definition.json
+*.rendered-task-definition.json
+
+# Sensitive configuration files
+**/.env
+**/.env.local
+**/.env.*.local
+*.secret
+*.key
+*secrets*.json
+*credentials*.json
