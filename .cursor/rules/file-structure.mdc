@@ -1,0 +1,83 @@
+---
+alwaysApply: true
+---
+
+---
+
+## File Structure
+
+```
+pipeline/
+├── backend/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── database.py      # SQLAlchemy models
+│   │   │   └── schemas.py       # Pydantic models
+│   │   ├── agents/
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
+│   │   │   ├── prompt_parser.py
+│   │   │   ├── image_generator.py
+│   │   │   ├── video_generator.py
+│   │   │   └── compositor.py
+│   │   ├── orchestrator/
+│   │   │   ├── __init__.py
+│   │   │   └── video_orchestrator.py
+│   │   ├── routers/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py
+│   │   │   ├── sessions.py
+│   │   │   ├── generation.py
+│   │   │   └── websocket.py
+│   │   └── services/
+│   │       ├── __init__.py
+│   │       ├── database_service.py
+│   │       ├── storage_service.py
+│   │       └── websocket_manager.py
+│   ├── alembic/
+│   │   ├── versions/
+│   │   └── env.py
+│   ├── tests/
+│   │   ├── test_agents.py
+│   │   ├── test_integration.py
+│   │   └── test_e2e.py
+│   ├── requirements.txt
+│   ├── alembic.ini
+│   ├── Dockerfile
+│   └── .env.example
+├── frontend/
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx
+│   │   ├── dashboard/
+│   │   ├── generate/
+│   │   └── result/
+│   ├── components/
+│   ├── lib/
+│   ├── hooks/
+│   ├── package.json
+│   ├── next.config.js
+│   ├── tailwind.config.ts
+│   └── .env.local.example
+├── Docs/
+│   ├── MVP_PRD.md
+│   ├── Phase_0_Overview_Architecture.md
+│   ├── Phase_1_Foundation_Infrastructure.md
+│   └── ...
+└── README.md
+```
+
+## Global Rules
+
+- Assume dev server is running; **do not** add scripts to start it.
+- **No `any`**; strict TS; keep files **≤ 350 LoC**.
+- **Types** in `/types`, **helpers** in `/lib`.
+- **All inputs validated with Zod**; mutations **auth-guarded**.
+- Workers/cron stay as **REST routes**; interactive UI uses **tRPC**.
+- **Append-only facts** with `provenance` + `as_of`; user-visible data must show an as-of or source.
+- Use **bun** only for frontend.
