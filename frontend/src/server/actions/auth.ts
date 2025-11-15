@@ -44,7 +44,6 @@ export async function loginAction(formData: FormData) {
   }
 
   // Verify password
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const isValidPassword = await bcrypt.compare(password, user.password);
   if (!isValidPassword) {
     redirect("/login?error=Invalid username/email or password");
@@ -100,7 +99,6 @@ export async function signupAction(formData: FormData) {
   }
 
   // Hash password - password is guaranteed to be a string at this point
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const hashedPassword: string = await bcrypt.hash(password, 10);
 
   // Create user (username is optional, use email as fallback)

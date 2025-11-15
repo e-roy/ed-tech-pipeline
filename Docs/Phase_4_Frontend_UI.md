@@ -1,6 +1,7 @@
 # Phase 4: Frontend & User Interface
 
 ## Document Purpose
+
 This phase implements the complete Next.js 14 frontend with all user-facing screens, components, and real-time progress tracking.
 
 **Estimated Time:** 8 hours (Hour 32-40 of 48-hour sprint)
@@ -11,52 +12,57 @@ This phase implements the complete Next.js 14 frontend with all user-facing scre
 
 ```
 frontend/
-├── app/
-│   ├── layout.tsx                 # Root layout
-│   ├── page.tsx                   # Landing/Login page
-│   ├── generate/
-│   │   ├── images/page.tsx        # Image generation screen
-│   │   ├── clips/page.tsx         # Clip generation screen
-│   │   └── final/page.tsx         # Final composition screen
-│   └── result/
-│       └── [sessionId]/page.tsx   # Final output screen
-├── components/
-│   ├── auth/
-│   │   └── LoginForm.tsx
-│   ├── generation/
-│   │   ├── PromptInput.tsx
-│   │   ├── ImageGrid.tsx
-│   │   ├── VideoGrid.tsx
-│   │   ├── ProgressIndicator.tsx
-│   │   └── MoodBoard.tsx
-│   ├── composition/
-│   │   ├── TextOverlayForm.tsx
-│   │   ├── AudioSelector.tsx
-│   │   └── FinalPreview.tsx
-│   └── ui/
-│       ├── button.tsx
-│       ├── input.tsx
-│       ├── card.tsx
-│       ├── checkbox.tsx
-│       └── progress.tsx
-├── lib/
-│   ├── api.ts                     # API client
-│   ├── websocket.ts               # WebSocket manager
-│   └── types.ts                   # TypeScript interfaces
-└── hooks/
-    ├── useSession.ts              # Session management hook
-    ├── useWebSocket.ts            # WebSocket hook
-    └── useGeneration.ts           # Generation state hook
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx                 # Root layout
+│   │   ├── page.tsx                   # Landing page
+│   │   ├── login/
+│   │   │   └── page.tsx               # Login page
+│   │   ├── generate/
+│   │   │   ├── images/page.tsx        # Image generation screen
+│   │   │   ├── clips/page.tsx         # Clip generation screen
+│   │   │   └── final/page.tsx         # Final composition screen
+│   │   └── result/
+│   │       └── [sessionId]/page.tsx   # Final output screen
+│   ├── components/
+│   │   ├── login/
+│   │   │   ├── auth-form.tsx          # Main auth form with login/signup tabs
+│   │   │   ├── google-signin-form.tsx # Google OAuth integration
+│   │   │   └── submit-button.tsx      # Reusable submit button with loading state
+│   │   ├── generation/
+│   │   │   ├── PromptInput.tsx
+│   │   │   ├── ImageGrid.tsx
+│   │   │   ├── VideoGrid.tsx
+│   │   │   ├── ProgressIndicator.tsx
+│   │   │   └── MoodBoard.tsx
+│   │   ├── composition/
+│   │   │   ├── TextOverlayForm.tsx
+│   │   │   ├── AudioSelector.tsx
+│   │   │   └── FinalPreview.tsx
+│   │   └── ui/
+│   │       ├── button.tsx
+│   │       ├── input.tsx
+│   │       ├── card.tsx
+│   │       ├── checkbox.tsx
+│   │       └── progress.tsx
+│   ├── lib/
+│   │   ├── api.ts                     # API client
+│   │   ├── websocket.ts               # WebSocket manager
+│   │   └── types.ts                   # TypeScript interfaces
+│   └── hooks/
+│       ├── useSession.ts              # Session management hook
+│       ├── useWebSocket.ts            # WebSocket hook
+│       └── useGeneration.ts           # Generation state hook
 ```
 
 ---
 
 ## 2. Core Types & Interfaces
 
-### 2.1 TypeScript Types (lib/types.ts)
+### 2.1 TypeScript Types (src/lib/types.ts)
 
 ```typescript
-// lib/types.ts
+// src/lib/types.ts
 
 export enum SessionStage {
   CREATED = "created",
@@ -122,7 +128,7 @@ export interface ProgressUpdate {
   message: string;
   current_cost?: number;
   timestamp: string;
-  data?: any;
+  data?: unknown;
   error?: string;
 }
 
@@ -143,10 +149,10 @@ export interface AudioConfig {
 
 ## 3. API Client & WebSocket
 
-### 3.1 API Client (lib/api.ts)
+### 3.1 API Client (src/lib/api.ts)
 
 ```typescript
-// lib/api.ts
+// src/lib/api.ts
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -188,18 +194,20 @@ export class ApiClient {
     return response.json();
   }
 
-  // Auth
-  async login(email: string, password: string) {
-    return this.request<{
-      success: boolean;
-      user_id: number;
-      email: string;
-      session_token: string;
-    }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-  }
+  // Note: Authentication is handled via Next.js server actions (loginAction, signupAction)
+  // in components/login/auth-form.tsx, not through this API client.
+  // The login method below is kept for reference but is not used in the current implementation.
+  // async login(email: string, password: string) {
+  //   return this.request<{
+  //     success: boolean;
+  //     user_id: number;
+  //     email: string;
+  //     session_token: string;
+  //   }>("/api/auth/login", {
+  //     method: "POST",
+  //     body: JSON.stringify({ email, password }),
+  //   });
+  // }
 
   // Sessions
   async createSession(userId: number = 1) {
@@ -300,10 +308,10 @@ export class ApiClient {
 export const apiClient = new ApiClient();
 ```
 
-### 3.2 WebSocket Hook (hooks/useWebSocket.ts)
+### 3.2 WebSocket Hook (src/hooks/useWebSocket.ts)
 
 ```typescript
-// hooks/useWebSocket.ts
+// src/hooks/useWebSocket.ts
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
@@ -353,11 +361,14 @@ export function useWebSocket(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  const sendMessage = useCallback((message: string) => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(message);
-    }
-  }, [isConnected]);
+  const sendMessage = useCallback(
+    (message: string) => {
+      if (wsRef.current && isConnected) {
+        wsRef.current.send(message);
+      }
+    },
+    [isConnected]
+  );
 
   return { isConnected, lastMessage, sendMessage };
 }
@@ -367,95 +378,223 @@ export function useWebSocket(sessionId: string | null) {
 
 ## 4. Key Components
 
-### 4.1 Login Form (components/auth/LoginForm.tsx)
+### 4.1 Auth Form (components/login/auth-form.tsx)
 
 ```typescript
-// components/auth/LoginForm.tsx
+// components/login/auth-form.tsx
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { apiClient } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { loginAction, signupAction } from "@/server/actions/auth";
+import { GoogleSignInForm } from "@/components/login/google-signin-form";
+import { SubmitButton } from "@/components/login/submit-button";
 
-export function LoginForm() {
-  const router = useRouter();
-  const [email, setEmail] = useState("demo@example.com");
-  const [password, setPassword] = useState("demo123");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+interface AuthFormProps {
+  error?: string;
+  success?: string;
+  defaultTab?: "login" | "signup";
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await apiClient.login(email, password);
-      apiClient.setToken(response.session_token);
-
-      // Create new session
-      const session = await apiClient.createSession(response.user_id);
-
-      // Redirect to image generation
-      router.push(`/generate/images?session=${session.session_id}`);
-    } catch (err: any) {
-      setError(err.message || "Login failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+export function AuthForm({
+  error,
+  success,
+  defaultTab = "login",
+}: AuthFormProps) {
   return (
-    <Card className="w-full max-w-md p-8">
-      <h1 className="text-3xl font-bold text-center mb-6">
-        AI Ad Video Generator
-      </h1>
+    <Card className="mt-4 sm:mx-auto sm:w-full sm:max-w-md">
+      <CardContent>
+        <div className="sm:mx-auto sm:w-full sm:max-w-sm">
+          <h2 className="text-foreground text-center text-xl font-semibold">
+            Log in or create account
+          </h2>
+          {error && (
+            <div className="bg-destructive/15 text-destructive mt-4 rounded-md p-3 text-sm">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="mt-4 rounded-md bg-green-500/15 p-3 text-sm text-green-600 dark:text-green-400">
+              {success}
+            </div>
+          )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-2">Email</label>
-          <Input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+          <Tabs defaultValue={defaultTab} className="mt-6">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="login">Sign In</TabsTrigger>
+              <TabsTrigger value="signup">Sign Up</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="login" className="mt-4 space-y-4">
+              <form action={loginAction} className="space-y-4">
+                <div>
+                  <Label
+                    htmlFor="username-login"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Username or Email
+                  </Label>
+                  <Input
+                    type="text"
+                    id="username-login"
+                    name="username"
+                    autoComplete="username"
+                    placeholder="username or email@example.com"
+                    className="mt-2"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label
+                    htmlFor="password-login"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Password
+                  </Label>
+                  <Input
+                    type="password"
+                    id="password-login"
+                    name="password"
+                    autoComplete="current-password"
+                    placeholder="**************"
+                    className="mt-2"
+                    required
+                  />
+                </div>
+                <SubmitButton className="mt-4 w-full py-2 font-medium">
+                  Sign in
+                </SubmitButton>
+              </form>
+
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <Separator className="w-full" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background text-muted-foreground px-2">
+                    or with
+                  </span>
+                </div>
+              </div>
+
+              <GoogleSignInForm />
+            </TabsContent>
+
+            <TabsContent value="signup" className="mt-4 space-y-4">
+              <form action={signupAction} className="space-y-4">
+                <div>
+                  <Label
+                    htmlFor="name-signup"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Name
+                  </Label>
+                  <Input
+                    type="text"
+                    id="name-signup"
+                    name="name"
+                    autoComplete="name"
+                    placeholder="Name"
+                    className="mt-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label
+                    htmlFor="email-signup"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Email
+                  </Label>
+                  <Input
+                    type="email"
+                    id="email-signup"
+                    name="email"
+                    autoComplete="email"
+                    placeholder="email@example.com"
+                    className="mt-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label
+                    htmlFor="password-signup"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Password
+                  </Label>
+                  <Input
+                    type="password"
+                    id="password-signup"
+                    name="password"
+                    autoComplete="new-password"
+                    placeholder="Password"
+                    className="mt-2"
+                    required
+                    minLength={8}
+                  />
+                </div>
+
+                <div>
+                  <Label
+                    htmlFor="confirm-password-signup"
+                    className="text-foreground dark:text-foreground text-sm font-medium"
+                  >
+                    Confirm password
+                  </Label>
+                  <Input
+                    type="password"
+                    id="confirm-password-signup"
+                    name="confirm-password"
+                    autoComplete="new-password"
+                    placeholder="Password"
+                    className="mt-2"
+                    required
+                    minLength={8}
+                  />
+                </div>
+
+                <SubmitButton className="mt-4 w-full py-2 font-medium">
+                  Create account
+                </SubmitButton>
+              </form>
+            </TabsContent>
+          </Tabs>
+
+          <p className="text-muted-foreground dark:text-muted-foreground mt-4 text-xs">
+            By signing in, you agree to our{" "}
+            <a href="#" className="underline underline-offset-4">
+              terms of service
+            </a>{" "}
+            and{" "}
+            <a href="#" className="underline underline-offset-4">
+              privacy policy
+            </a>
+            .
+          </p>
         </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-2">Password</label>
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-
-        {error && (
-          <div className="text-red-500 text-sm">{error}</div>
-        )}
-
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Logging in..." : "Start Creating"}
-        </Button>
-      </form>
-
-      <p className="text-sm text-gray-500 text-center mt-4">
-        Demo credentials are pre-filled
-      </p>
+      </CardContent>
     </Card>
   );
 }
 ```
 
-### 4.2 Progress Indicator (components/generation/ProgressIndicator.tsx)
+**Note:** Authentication now uses Next.js server actions (`loginAction`, `signupAction`) instead of client-side API calls. The form includes:
+
+- Tabbed interface for login and signup
+- Google OAuth integration via `GoogleSignInForm` component
+- Reusable `SubmitButton` component with loading state
+- Server-side form handling for better security
+
+### 4.2 Progress Indicator (src/components/generation/ProgressIndicator.tsx)
 
 ```typescript
-// components/generation/ProgressIndicator.tsx
+// src/components/generation/ProgressIndicator.tsx
 "use client";
 
 import { ProgressUpdate } from "@/lib/types";
@@ -490,9 +629,7 @@ export function ProgressIndicator({ update, isConnected }: Props) {
       )}
 
       {update.error && (
-        <div className="mt-2 text-sm text-red-600">
-          Error: {update.error}
-        </div>
+        <div className="mt-2 text-sm text-red-600">Error: {update.error}</div>
       )}
 
       <div className="flex items-center mt-3">
@@ -510,10 +647,10 @@ export function ProgressIndicator({ update, isConnected }: Props) {
 }
 ```
 
-### 4.3 Image Grid (components/generation/ImageGrid.tsx)
+### 4.3 Image Grid (src/components/generation/ImageGrid.tsx)
 
 ```typescript
-// components/generation/ImageGrid.tsx
+// src/components/generation/ImageGrid.tsx
 "use client";
 
 import { useState } from "react";
@@ -606,10 +743,10 @@ export function ImageGrid({ images, onApprove, minSelection = 2 }: Props) {
 }
 ```
 
-### 4.4 Video Grid (components/generation/VideoGrid.tsx)
+### 4.4 Video Grid (src/components/generation/VideoGrid.tsx)
 
 ```typescript
-// components/generation/VideoGrid.tsx
+// src/components/generation/VideoGrid.tsx
 "use client";
 
 import { useState } from "react";
@@ -676,7 +813,9 @@ export function VideoGrid({ clips, onApprove, minSelection = 2 }: Props) {
                 <span className="text-gray-600">
                   Duration: {clip.duration.toFixed(1)}s
                 </span>
-                <span className="text-gray-600">Cost: ${clip.cost.toFixed(2)}</span>
+                <span className="text-gray-600">
+                  Cost: ${clip.cost.toFixed(2)}
+                </span>
               </div>
             </div>
           </Card>
@@ -689,7 +828,8 @@ export function VideoGrid({ clips, onApprove, minSelection = 2 }: Props) {
             Selected: {selected.size} of {clips.length}
           </p>
           <p className="text-xs text-gray-500">
-            Total duration: {totalDuration.toFixed(1)}s | Cost: ${totalCost.toFixed(2)}
+            Total duration: {totalDuration.toFixed(1)}s | Cost: $
+            {totalCost.toFixed(2)}
           </p>
         </div>
 
@@ -710,10 +850,10 @@ export function VideoGrid({ clips, onApprove, minSelection = 2 }: Props) {
 
 ## 5. Page Implementation
 
-### 5.1 Image Generation Page (app/generate/images/page.tsx)
+### 5.1 Image Generation Page (src/app/generate/images/page.tsx)
 
 ```typescript
-// app/generate/images/page.tsx
+// src/app/generate/images/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -739,7 +879,11 @@ export default function ImagesPage() {
   const { isConnected, lastMessage } = useWebSocket(sessionId);
 
   useEffect(() => {
-    if (lastMessage && lastMessage.stage === "complete" && lastMessage.data?.images) {
+    if (
+      lastMessage &&
+      lastMessage.stage === "complete" &&
+      lastMessage.data?.images
+    ) {
       setImages(lastMessage.data.images);
       setGenerating(false);
     }
@@ -770,7 +914,9 @@ export default function ImagesPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Step 1: Generate Product Images</h1>
+      <h1 className="text-3xl font-bold mb-8">
+        Step 1: Generate Product Images
+      </h1>
 
       {images.length === 0 ? (
         <div className="max-w-2xl mx-auto">
@@ -824,10 +970,10 @@ export default function ImagesPage() {
 }
 ```
 
-### 5.2 Final Video Result Page (app/result/[sessionId]/page.tsx)
+### 5.2 Final Video Result Page (src/app/result/[sessionId]/page.tsx)
 
 ```typescript
-// app/result/[sessionId]/page.tsx
+// src/app/result/[sessionId]/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -947,6 +1093,7 @@ export default function ResultPage() {
 **Phase 4 Complete! ✅**
 
 You should now have:
+
 - ✅ Complete Next.js 14 frontend
 - ✅ All user-facing screens
 - ✅ Real-time WebSocket progress tracking
