@@ -355,6 +355,7 @@ class VideoGenerationOrchestrator:
         prompt_parser: PromptParserAgent,
         image_gen: BatchImageGeneratorAgent,
         video_gen: VideoGeneratorAgent,
+        video_analysis: VideoAnalysisAgent,
         compositor: CompositionLayer
     ):
         self.db = db
@@ -363,6 +364,7 @@ class VideoGenerationOrchestrator:
             "prompt_parser": prompt_parser,
             "image_gen": image_gen,
             "video_gen": video_gen,
+            "video_analysis": video_analysis,
             "compositor": compositor
         }
 
@@ -448,6 +450,18 @@ Example: Image Generation Flow
 12. Orchestrator → WebSocketManager (progress updates)
 13. WebSocketManager → Frontend (real-time updates)
 14. Frontend → User (display images)
+
+Example: Video Analysis Flow (after clips generated)
+1. Orchestrator → VideoAnalysisAgent.analyze(clips)
+2. VideoAnalysisAgent → Download clips to temp storage
+3. VideoAnalysisAgent → Extract frames at 1-second intervals (OpenCV)
+4. VideoAnalysisAgent → GPT-4 Vision API (analyze each frame)
+5. GPT-4 Vision returns JSON analysis → VideoAnalysisAgent
+6. VideoAnalysisAgent → Generate cross-clip consistency analysis
+7. VideoAnalysisAgent → Save JSON metadata files to storage
+8. VideoAnalysisAgent → Orchestrator (analysis results + metadata URLs)
+9. Orchestrator → Database (save analysis metadata)
+10. Orchestrator → Composition Layer (use analysis for smart editing)
 ```
 
 ---
@@ -1102,7 +1116,473 @@ class VideoGeneratorAgent:
 
 ---
 
-### 4.5 Composition Layer
+### 4.5 Video Analysis Agent
+
+**Purpose:** Analyze video clips second-by-second to generate detailed JSON metadata tracking what happens in each segment. This enables context-aware editing, ensures visual consistency across clips, and provides structured data for intelligent composition decisions.
+
+**Input:**
+
+```python
+{
+    "clips": [
+        {
+            "id": "clip_001",
+            "url": "https://replicate.delivery/pbxt/video1.mp4",
+            "source_image_id": "img_001",
+            "duration": 3.2,
+            "view_type": "front"
+        },
+        {
+            "id": "clip_002",
+            "url": "https://replicate.delivery/pbxt/video2.mp4",
+            "source_image_id": "img_002",
+            "duration": 3.1,
+            "view_type": "side"
+        }
+    ],
+    "session_context": {
+        "product_prompt": "pink tennis shoes with white laces",
+        "video_prompt": "girl running in sun, outdoor track, golden hour lighting",
+        "consistency_seed": 789456
+    }
+}
+```
+
+**Output:**
+
+```python
+{
+    "success": True,
+    "clip_analyses": [
+        {
+            "clip_id": "clip_001",
+            "source_image_id": "img_001",
+            "duration": 3.2,
+            "second_by_second": [
+                {
+                    "second": 0,
+                    "timestamp": "00:00:00",
+                    "description": "Pink tennis shoes in sharp focus, front view, stationary position on outdoor track surface",
+                    "product_visibility": "high",
+                    "product_position": "center",
+                    "camera_movement": "static",
+                    "lighting": "golden_hour",
+                    "motion_intensity": 0.0,
+                    "key_elements": ["shoes", "track", "sunlight"],
+                    "color_dominant": "#FF69B4",
+                    "scene_type": "establishing_shot"
+                },
+                {
+                    "second": 1,
+                    "timestamp": "00:00:01",
+                    "description": "Shoes begin forward motion, slight camera follow, product remains centered",
+                    "product_visibility": "high",
+                    "product_position": "center",
+                    "camera_movement": "slow_pan_forward",
+                    "lighting": "golden_hour",
+                    "motion_intensity": 0.3,
+                    "key_elements": ["shoes", "motion", "track"],
+                    "color_dominant": "#FF69B4",
+                    "scene_type": "action_beginning"
+                },
+                {
+                    "second": 2,
+                    "timestamp": "00:00:02",
+                    "description": "Dynamic running motion, shoes in mid-stride, camera tracking forward",
+                    "product_visibility": "high",
+                    "product_position": "center",
+                    "camera_movement": "tracking_forward",
+                    "lighting": "golden_hour",
+                    "motion_intensity": 0.8,
+                    "key_elements": ["shoes", "running", "speed"],
+                    "color_dominant": "#FF69B4",
+                    "scene_type": "peak_action"
+                },
+                {
+                    "second": 3,
+                    "timestamp": "00:00:03",
+                    "description": "Shoes continue forward motion, slight deceleration, maintaining product focus",
+                    "product_visibility": "high",
+                    "product_position": "center",
+                    "camera_movement": "tracking_forward",
+                    "lighting": "golden_hour",
+                    "motion_intensity": 0.5,
+                    "key_elements": ["shoes", "motion", "track"],
+                    "color_dominant": "#FF69B4",
+                    "scene_type": "action_continuation"
+                }
+            ],
+            "summary": {
+                "product_consistency": "high",
+                "motion_flow": "smooth",
+                "visual_quality": "excellent",
+                "best_segment": "1-2s",
+                "transition_points": [0, 1, 2, 3],
+                "recommended_edit": "trim_to_1-2.5s_for_peak_action"
+            },
+            "metadata_file_url": "https://storage.example.com/analyses/clip_001_analysis.json"
+        }
+    ],
+    "cross_clip_analysis": {
+        "visual_consistency": "high",
+        "motion_continuity": "good",
+        "color_consistency": "high",
+        "recommended_order": ["clip_001", "clip_002"],
+        "transition_suggestions": [
+            {
+                "from_clip": "clip_001",
+                "to_clip": "clip_002",
+                "transition_type": "crossfade",
+                "duration": 0.5,
+                "reason": "smooth_motion_continuity"
+            }
+        ],
+        "edit_recommendations": [
+            {
+                "clip_id": "clip_001",
+                "trim_start": 0.5,
+                "trim_end": 2.8,
+                "reason": "remove_static_beginning_and_end"
+            }
+        ]
+    },
+    "cost": 0.10,  # Vision API costs per clip
+    "duration": 15.0
+}
+```
+
+**Implementation:**
+
+```python
+import cv2
+import json
+from pathlib import Path
+import tempfile
+from typing import List, Dict, Any
+
+class VideoAnalysisAgent:
+    def __init__(self, vision_api_key: str, storage_service: StorageService):
+        self.vision_api_key = vision_api_key
+        self.storage = storage_service
+        # Use GPT-4 Vision or Claude Vision for frame analysis
+        self.vision_model = "gpt-4-vision-preview"  # or "claude-3-opus-20240229"
+
+    async def process(self, input: AgentInput) -> AgentOutput:
+        clips = input.data["clips"]
+        session_context = input.data.get("session_context", {})
+        
+        start_time = time.time()
+        
+        clip_analyses = []
+        
+        # Analyze each clip
+        for clip_data in clips:
+            analysis = await self._analyze_clip(
+                clip_data=clip_data,
+                session_context=session_context
+            )
+            clip_analyses.append(analysis)
+        
+        # Cross-clip analysis for consistency
+        cross_clip_analysis = await self._analyze_cross_clip_consistency(
+            clip_analyses=clip_analyses,
+            session_context=session_context
+        )
+        
+        # Save metadata JSON files
+        for analysis in clip_analyses:
+            metadata_url = await self._save_metadata_file(
+                clip_id=analysis["clip_id"],
+                analysis_data=analysis
+            )
+            analysis["metadata_file_url"] = metadata_url
+        
+        duration = time.time() - start_time
+        
+        return AgentOutput(
+            success=True,
+            data={
+                "clip_analyses": clip_analyses,
+                "cross_clip_analysis": cross_clip_analysis
+            },
+            cost=0.10 * len(clips),  # ~$0.10 per clip
+            duration=duration
+        )
+
+    async def _analyze_clip(
+        self,
+        clip_data: Dict[str, Any],
+        session_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze a single clip second by second"""
+        
+        clip_id = clip_data["id"]
+        clip_url = clip_data["url"]
+        duration = clip_data["duration"]
+        
+        # Download clip to temp location
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            clip_path = await self._download_clip(clip_url, temp_path / f"{clip_id}.mp4")
+            
+            # Extract frames at 1-second intervals
+            frames = await self._extract_frames_at_intervals(clip_path, interval=1.0)
+            
+            # Analyze each frame/second
+            second_by_second = []
+            for i, (frame, timestamp) in enumerate(frames):
+                analysis = await self._analyze_frame(
+                    frame=frame,
+                    second=i,
+                    timestamp=timestamp,
+                    clip_context=clip_data,
+                    session_context=session_context
+                )
+                second_by_second.append(analysis)
+            
+            # Generate summary
+            summary = await self._generate_clip_summary(
+                second_by_second=second_by_second,
+                clip_data=clip_data
+            )
+            
+            return {
+                "clip_id": clip_id,
+                "source_image_id": clip_data.get("source_image_id"),
+                "duration": duration,
+                "second_by_second": second_by_second,
+                "summary": summary
+            }
+
+    async def _extract_frames_at_intervals(
+        self,
+        video_path: Path,
+        interval: float = 1.0
+    ) -> List[tuple]:
+        """Extract frames at specified intervals using OpenCV"""
+        import cv2
+        
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frames = []
+        
+        current_time = 0.0
+        while current_time < cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps:
+            frame_number = int(current_time * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            
+            if ret:
+                frames.append((frame, current_time))
+            current_time += interval
+        
+        cap.release()
+        return frames
+
+    async def _analyze_frame(
+        self,
+        frame: np.ndarray,
+        second: int,
+        timestamp: float,
+        clip_context: Dict[str, Any],
+        session_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze a single frame using Vision API"""
+        
+        # Convert frame to base64 for API
+        import base64
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        # Build prompt for Vision API
+        system_prompt = """You are a video analysis AI that describes product advertisement clips second by second.
+
+Analyze the frame and provide structured information about:
+1. What the product looks like (visibility, position, condition)
+2. Camera movement and angle
+3. Lighting conditions
+4. Motion intensity (0.0 = static, 1.0 = maximum motion)
+5. Key visual elements
+6. Dominant colors
+7. Scene type (establishing_shot, action_beginning, peak_action, etc.)
+
+Be specific about the product appearance to ensure consistency across clips."""
+
+        user_prompt = f"""Analyze this frame from second {second} of a product advertisement clip.
+
+Context:
+- Product: {session_context.get('product_prompt', 'unknown')}
+- Video theme: {session_context.get('video_prompt', 'unknown')}
+- Clip view type: {clip_context.get('view_type', 'unknown')}
+
+Provide a JSON object with:
+{{
+    "description": "detailed description of what's visible",
+    "product_visibility": "high|medium|low",
+    "product_position": "center|left|right|top|bottom",
+    "camera_movement": "static|slow_pan|tracking_forward|zoom_in|etc",
+    "lighting": "golden_hour|studio|natural|etc",
+    "motion_intensity": 0.0-1.0,
+    "key_elements": ["element1", "element2"],
+    "color_dominant": "#HEXCODE",
+    "scene_type": "establishing_shot|action_beginning|peak_action|etc"
+}}"""
+
+        # Call Vision API (GPT-4 Vision or Claude)
+        response = await self._call_vision_api(
+            image_base64=frame_base64,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt
+        )
+        
+        # Parse JSON response
+        analysis = json.loads(response)
+        
+        # Add timestamp
+        analysis["second"] = second
+        analysis["timestamp"] = f"00:00:{second:02d}"
+        
+        return analysis
+
+    async def _call_vision_api(
+        self,
+        image_base64: str,
+        system_prompt: str,
+        user_prompt: str
+    ) -> str:
+        """Call Vision API (GPT-4 Vision or Claude)"""
+        import openai  # or anthropic for Claude
+        
+        if "gpt" in self.vision_model:
+            response = await openai.ChatCompletion.acreate(
+                model=self.vision_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.3
+            )
+            return response.choices[0].message.content
+        else:
+            # Claude Vision implementation
+            # Similar structure with anthropic SDK
+            pass
+
+    async def _generate_clip_summary(
+        self,
+        second_by_second: List[Dict[str, Any]],
+        clip_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate summary analysis for the clip"""
+        
+        # Analyze consistency
+        product_visibilities = [s["product_visibility"] for s in second_by_second]
+        motion_intensities = [s["motion_intensity"] for s in second_by_second]
+        colors = [s["color_dominant"] for s in second_by_second]
+        
+        # Find best segment (highest product visibility + good motion)
+        best_segment = None
+        best_score = 0
+        for i in range(len(second_by_second) - 1):
+            score = (
+                (1.0 if second_by_second[i]["product_visibility"] == "high" else 0.5) +
+                motion_intensities[i] * 0.5
+            )
+            if score > best_score:
+                best_score = score
+                best_segment = f"{i}-{i+1}s"
+        
+        return {
+            "product_consistency": "high" if len(set(product_visibilities)) == 1 else "medium",
+            "motion_flow": "smooth" if max(motion_intensities) - min(motion_intensities) < 0.5 else "variable",
+            "visual_quality": "excellent",
+            "best_segment": best_segment or "0-1s",
+            "transition_points": [i for i in range(len(second_by_second))],
+            "recommended_edit": f"use_full_clip"
+        }
+
+    async def _analyze_cross_clip_consistency(
+        self,
+        clip_analyses: List[Dict[str, Any]],
+        session_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze consistency across multiple clips"""
+        
+        # Extract dominant colors from all clips
+        all_colors = []
+        for analysis in clip_analyses:
+            colors = [s["color_dominant"] for s in analysis["second_by_second"]]
+            all_colors.extend(colors)
+        
+        # Check color consistency
+        unique_colors = set(all_colors)
+        color_consistency = "high" if len(unique_colors) <= 3 else "medium"
+        
+        # Generate transition suggestions
+        transitions = []
+        for i in range(len(clip_analyses) - 1):
+            transitions.append({
+                "from_clip": clip_analyses[i]["clip_id"],
+                "to_clip": clip_analyses[i+1]["clip_id"],
+                "transition_type": "crossfade",
+                "duration": 0.5,
+                "reason": "smooth_motion_continuity"
+            })
+        
+        return {
+            "visual_consistency": "high",
+            "motion_continuity": "good",
+            "color_consistency": color_consistency,
+            "recommended_order": [a["clip_id"] for a in clip_analyses],
+            "transition_suggestions": transitions,
+            "edit_recommendations": []
+        }
+
+    async def _save_metadata_file(
+        self,
+        clip_id: str,
+        analysis_data: Dict[str, Any]
+    ) -> str:
+        """Save analysis JSON to storage"""
+        json_content = json.dumps(analysis_data, indent=2)
+        
+        metadata_url = await self.storage.upload_file(
+            content=json_content.encode('utf-8'),
+            filename=f"{clip_id}_analysis.json",
+            content_type="application/json"
+        )
+        
+        return metadata_url
+```
+
+**Cost & Performance:**
+
+- **Model:** GPT-4 Vision or Claude 3 Opus Vision
+- **Cost:** ~$0.10 per clip (1 frame per second × 3 seconds = 3-4 API calls)
+- **Duration:** 10-15 seconds per clip
+- **Output:** Structured JSON metadata file per clip
+
+**Use Cases:**
+
+1. **Context Tracking:** Maintain awareness of what happens in each second
+2. **Consistency Checking:** Ensure product appearance stays consistent across clips
+3. **Smart Editing:** Provide recommendations for trimming, transitions, and ordering
+4. **Composition Guidance:** Inform the Composition Layer about best segments and transition points
+5. **Quality Assurance:** Detect visual issues or inconsistencies before final composition
+
+---
+
+### 4.6 Composition Layer
 
 **Purpose:** Stitch approved video clips with intro/outro cards, text overlays, transitions, and optional background music into final ad video.
 
@@ -2302,6 +2782,7 @@ export function useWebSocket(sessionId: string) {
 | **Video Scene Planning**        | Llama 3.1 70B   | $0.001 | Essentially free   |
 | **Video Generation** (4 clips)  | SVD             | $3.20  | MVP testing        |
 | **Video Generation** (4 clips)  | Runway Gen-2    | $6.00  | Final demo         |
+| **Video Analysis** (4 clips)    | GPT-4 Vision    | $0.40  | Context tracking   |
 | **Background Music**            | Stock library   | $0.00  | MVP (pre-existing) |
 | **Background Music**            | MusicGen        | $0.30  | Post-MVP           |
 | **Composition**                 | FFmpeg          | $0.50  | Storage/processing |
@@ -2311,17 +2792,19 @@ export function useWebSocket(sessionId: string) {
 - Flux-Pro (images): $0.30
 - Llama 3.1 (parsing + planning): $0.002
 - SVD (video): $3.20
+- Video Analysis (4 clips): $0.40
 - FFmpeg (composition): $0.50
-- **Total: $4.00 per video**
+- **Total: $4.40 per video**
 
 **Final Demo Cost:**
 
 - Flux-Pro (images): $0.30
 - Runway Gen-2 (video): $6.00
+- Video Analysis (4 clips): $0.40
 - FFmpeg (composition): $0.50
-- **Total: $6.80 per video**
+- **Total: $7.20 per video**
 
-**Budget Remaining:** $200 - $6.80 = **$193.20 per video** ✅
+**Budget Remaining:** $200 - $7.20 = **$192.80 per video** ✅
 
 ### 8.2 Optimization Strategies
 

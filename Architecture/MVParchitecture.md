@@ -42,6 +42,7 @@ graph TB
         PARSER[Prompt Parser Agent<br/>Llama 3.1 70B]
         IMG_GEN[Batch Image Generator<br/>Flux-Pro / SDXL]
         VIDEO_GEN[Video Generator Agent<br/>Stable Video Diffusion]
+        VIDEO_ANALYSIS[Video Analysis Agent<br/>GPT-4 Vision]
         COMPOSITOR[Composition Layer<br/>FFmpeg]
     end
 
@@ -64,6 +65,7 @@ graph TB
     ORCHESTRATOR --> PARSER
     ORCHESTRATOR --> IMG_GEN
     ORCHESTRATOR --> VIDEO_GEN
+    ORCHESTRATOR --> VIDEO_ANALYSIS
     ORCHESTRATOR --> COMPOSITOR
 
     PARSER --> REPLICATE
@@ -91,6 +93,7 @@ sequenceDiagram
     participant PromptParser
     participant ImageGen
     participant VideoGen
+    participant VideoAnalysis
     participant Compositor
     participant Database
     participant Replicate
@@ -148,16 +151,30 @@ sequenceDiagram
     end
 
     Orchestrator-->>Frontend: Clips complete
+
+    rect rgb(220, 200, 255)
+        Note over Orchestrator,VideoAnalysis: Stage 4: Video Analysis
+        Orchestrator->>VideoAnalysis: analyze(clips)
+        VideoAnalysis->>VideoAnalysis: Extract frames (1s intervals)
+        loop For each frame
+            VideoAnalysis->>Replicate: GPT-4 Vision API
+            Replicate-->>VideoAnalysis: Frame analysis JSON
+        end
+        VideoAnalysis->>VideoAnalysis: Cross-clip consistency check
+        VideoAnalysis->>Database: Save metadata JSON files
+        VideoAnalysis-->>Orchestrator: Analysis results + metadata URLs
+    end
+
     Frontend-->>User: Display clips
 
     User->>Frontend: Select clips + add text overlay
     Frontend->>Orchestrator: POST /api/compose-final-video
 
     rect rgb(255, 255, 200)
-        Note over Orchestrator,Compositor: Stage 4: Final Composition
-        Orchestrator->>Compositor: stitch(clips, text, audio)
+        Note over Orchestrator,Compositor: Stage 5: Final Composition
+        Orchestrator->>Compositor: stitch(clips, text, audio, analysis_metadata)
         Compositor->>Compositor: Generate intro/outro
-        Compositor->>Compositor: FFmpeg stitching
+        Compositor->>Compositor: FFmpeg stitching (use analysis for smart edits)
         Compositor->>Database: Save final video
         Compositor-->>Orchestrator: Final video URL
         Orchestrator->>Frontend: WebSocket complete
@@ -259,13 +276,20 @@ graph LR
         CLIP4[Clip 4: 3.3s<br/>Image-to-Video]
     end
 
+    subgraph "Processing Stage 5"
+        ANALYZE[Video Analysis Agent<br/>Extract frames @ 1s intervals]
+        VISION[GPT-4 Vision API<br/>Analyze each frame]
+        METADATA[JSON Metadata Files<br/>Per-second analysis]
+        CONSISTENCY[Cross-Clip Analysis<br/>Consistency check]
+    end
+
     subgraph "User Selection"
         APPROVED_CLIPS[Approved Clips<br/>User selects 3 of 4]
     end
 
-    subgraph "Processing Stage 5"
+    subgraph "Processing Stage 6"
         INTRO[Intro Card: 1s<br/>Product Name]
-        STITCH[FFmpeg Stitching<br/>Transitions + Audio]
+        STITCH[FFmpeg Stitching<br/>Transitions + Audio<br/>(Uses analysis metadata)]
         OUTRO[Outro Card: 1s<br/>CTA]
     end
 
@@ -285,7 +309,11 @@ graph LR
     SCENE_PLAN --> SCENES
 
     SCENES --> CLIP1 & CLIP2 & CLIP3 & CLIP4
-    CLIP1 & CLIP2 & CLIP3 & CLIP4 --> APPROVED_CLIPS
+    CLIP1 & CLIP2 & CLIP3 & CLIP4 --> ANALYZE
+    ANALYZE --> VISION
+    VISION --> METADATA
+    METADATA --> CONSISTENCY
+    CONSISTENCY --> APPROVED_CLIPS
 
     APPROVED_CLIPS --> STITCH
     INTRO --> STITCH
@@ -565,14 +593,25 @@ flowchart TD
     SAVE1 & SAVE2 & SAVE3 & SAVE4 --> COLLECT[Collect All Clips]
 
     COLLECT --> VALIDATE{At least 2<br/>successful?}
-    VALIDATE -->|Yes| SUCCESS([Return Clips<br/>to Frontend])
+    VALIDATE -->|Yes| ANALYZE[Video Analysis Agent<br/>Extract frames @ 1s intervals]
     VALIDATE -->|No| ERROR[Return Error:<br/>Video generation failed]
+
+    ANALYZE --> EXTRACT[Extract Frames<br/>OpenCV<br/>1 frame per second]
+    EXTRACT --> VISION_LOOP{For each frame}
+    VISION_LOOP --> VISION_API[GPT-4 Vision API<br/>Analyze frame]
+    VISION_API --> JSON[Generate JSON<br/>Per-second metadata]
+    JSON --> VISION_LOOP
+    VISION_LOOP --> CROSS_ANALYSIS[Cross-Clip Analysis<br/>Consistency check]
+    CROSS_ANALYSIS --> SAVE_METADATA[Save Metadata JSON<br/>Files to Storage]
+    SAVE_METADATA --> SUCCESS([Return Clips + Analysis<br/>to Frontend])
 
     style SCENE_PLAN fill:#9C27B0,stroke:#4A148C,stroke-width:2px
     style SVD1 fill:#FF9800,stroke:#E65100,stroke-width:2px
     style SVD2 fill:#FF9800,stroke:#E65100,stroke-width:2px
     style SVD3 fill:#FF9800,stroke:#E65100,stroke-width:2px
     style SVD4 fill:#FF9800,stroke:#E65100,stroke-width:2px
+    style ANALYZE fill:#9C27B0,stroke:#4A148C,stroke-width:2px
+    style VISION_API fill:#9C27B0,stroke:#4A148C,stroke-width:2px
     style SUCCESS fill:#4CAF50,stroke:#2E7D32,stroke-width:2px
     style ERROR fill:#F44336,stroke:#B71C1C,stroke-width:2px
 ```
