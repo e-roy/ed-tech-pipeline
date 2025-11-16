@@ -88,10 +88,13 @@ async def generate_images(
     """
     Step 1: Generate images using Flux-Schnell via Replicate.
 
-    **Authentication Required:** Include Bearer token in Authorization header.
+    **Authentication:** Requires X-User-Email header from authenticated frontend.
 
     Creates a new session and generates images based on user prompt using the Flux-Schnell model.
     Images are stored in S3 and tracked in the database.
+
+    **Required Headers:**
+    - `X-User-Email` (string): User's email from NextAuth session
 
     **Required Parameters:**
     - `prompt` (string): Text description of images to generate

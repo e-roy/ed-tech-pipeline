@@ -2,16 +2,25 @@ import type { Session, TextOverlay, AudioConfig } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+interface UserInfo {
+  id?: string;
+  email?: string;
+}
+
 export class ApiClient {
   private baseUrl: string;
-  private token?: string;
+  private userInfo?: UserInfo;
 
   constructor() {
     this.baseUrl = API_URL;
   }
 
-  setToken(token: string) {
-    this.token = token;
+  /**
+   * Set user information from NextAuth session.
+   * This replaces the previous JWT token approach.
+   */
+  setUser(user: UserInfo) {
+    this.userInfo = user;
   }
 
   private async request<T>(
@@ -23,8 +32,12 @@ export class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
-    if (this.token) {
-      headers.Authorization = `Bearer ${this.token}`;
+    // Add user information from NextAuth session to headers
+    if (this.userInfo?.email) {
+      headers["X-User-Email"] = this.userInfo.email;
+    }
+    if (this.userInfo?.id) {
+      headers["X-User-Id"] = this.userInfo.id;
     }
 
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -40,19 +53,6 @@ export class ApiClient {
     }
 
     return response.json() as Promise<T>;
-  }
-
-  // Auth
-  async login(email: string, password: string) {
-    return this.request<{
-      success: boolean;
-      user_id: number;
-      email: string;
-      session_token: string;
-    }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
   }
 
   // Sessions
