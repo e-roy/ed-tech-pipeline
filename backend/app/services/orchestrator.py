@@ -1346,3 +1346,238 @@ class VideoGenerationOrchestrator:
             "completed_at": session.completed_at.isoformat() if session.completed_at else None,
             "final_video_url": session.final_video_url
         }
+
+    async def process_story_segments(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int,
+        s3_path: str,
+        options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Process story segments from segments.md and generate images.
+
+        Args:
+            db: Database session
+            session_id: Session ID
+            user_id: User ID
+            s3_path: S3 path to segments.md (e.g., "users/user123/session456/images/segments.md")
+            options: Processing options (num_images, max_passes, max_verification_passes, fast_mode)
+
+        Returns:
+            Dict with processing results
+        """
+        from app.agents.story_image_generator import StoryImageGeneratorAgent, parse_segments_md
+        from app.services.secrets import get_secret
+        from datetime import datetime
+        import json
+        
+        # Validate S3 bucket
+        if not s3_path.startswith("users/"):
+            raise ValueError("S3 path must start with 'users/'")
+        
+        # Extract paths
+        segments_s3_key = s3_path
+        segments_dir = "/".join(segments_s3_key.split("/")[:-1])  # Directory containing segments.md
+        diagram_s3_key = f"{segments_dir}/diagram.png"
+        config_s3_key = f"{segments_dir}/config.json"
+        status_s3_key = f"{segments_dir}/status.json"
+        output_s3_prefix = f"{segments_dir}/"
+        
+        initial_status = None
+        try:
+            # Read segments.md from S3
+            logger.info(f"[{session_id}] Reading segments.md from S3: {segments_s3_key}")
+            segments_content = self.storage_service.read_file(segments_s3_key)
+            segments_text = segments_content.decode("utf-8")
+            
+            # Parse segments.md
+            template_title, segments = parse_segments_md(segments_text)
+            if not template_title or not segments:
+                raise ValueError("Failed to parse segments.md: invalid format or missing data")
+            
+            logger.info(f"[{session_id}] Parsed {len(segments)} segments for template: {template_title}")
+            
+            # Read config.json if exists
+            config = {}
+            if self.storage_service.file_exists(config_s3_key):
+                try:
+                    config_content = self.storage_service.read_file(config_s3_key)
+                    config = json.loads(config_content.decode("utf-8"))
+                    logger.info(f"[{session_id}] Loaded config.json from S3")
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Failed to read config.json: {e}, using defaults")
+            
+            # Merge config with options (options take precedence)
+            num_images = options.get("num_images", config.get("num_images", 2))
+            max_passes = options.get("max_passes", config.get("max_passes", 5))
+            max_verification_passes = options.get("max_verification_passes", config.get("max_verification_passes", 3))
+            fast_mode = options.get("fast_mode", config.get("fast_mode", False))
+            
+            # Check if diagram exists
+            diagram_s3_path = None
+            if self.storage_service.file_exists(diagram_s3_key):
+                diagram_s3_path = diagram_s3_key
+                logger.info(f"[{session_id}] Found diagram.png at: {diagram_s3_key}")
+            else:
+                logger.warning(f"[{session_id}] No diagram.png found, images will be generated without style reference")
+            
+            # Write initial status.json
+            initial_status = {
+                "status": "in_progress",
+                "started_at": datetime.utcnow().isoformat() + "Z",
+                "segments_total": len(segments),
+                "segments_completed": 0,
+                "segments_succeeded": 0,
+                "segments_failed": 0
+            }
+            self.storage_service.upload_file_direct(
+                json.dumps(initial_status, indent=2).encode("utf-8"),
+                status_s3_key,
+                content_type="application/json"
+            )
+            
+            # Send WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="processing_story_segments",
+                progress=0,
+                details=f"Starting processing: {len(segments)} segments, {num_images} images per segment"
+            )
+            
+            # Get API keys from Secrets Manager
+            try:
+                openrouter_key = get_secret("pipeline/openrouter-api-key")
+                replicate_key = get_secret("pipeline/replicate-api-key")
+            except Exception as e:
+                logger.error(f"[{session_id}] Failed to retrieve API keys from Secrets Manager: {e}")
+                raise ValueError(f"Failed to retrieve API keys: {e}")
+            
+            # Instantiate agent
+            agent = StoryImageGeneratorAgent(
+                storage_service=self.storage_service,
+                openrouter_api_key=openrouter_key,
+                replicate_api_key=replicate_key
+            )
+            
+            # Prepare agent input
+            agent_input = AgentInput(
+                session_id=session_id,
+                data={
+                    "segments": segments,
+                    "diagram_s3_path": diagram_s3_path,
+                    "output_s3_prefix": output_s3_prefix,
+                    "num_images": num_images,
+                    "max_passes": max_passes,
+                    "max_verification_passes": max_verification_passes,
+                    "fast_mode": fast_mode,
+                    "template_title": template_title
+                },
+                metadata={
+                    "user_id": user_id,
+                    "s3_path": s3_path
+                }
+            )
+            
+            # Process segments (agent handles parallel processing)
+            logger.info(f"[{session_id}] Starting image generation for {len(segments)} segments")
+            agent_output = await agent.process(agent_input)
+            
+            # Update status.json with final results
+            final_status = {
+                "status": "completed" if agent_output.success else "partial_failure",
+                "started_at": initial_status["started_at"],
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "segments_total": len(segments),
+                "segments_completed": len(segments),
+                "segments_succeeded": agent_output.data.get("segments_succeeded", 0),
+                "segments_failed": agent_output.data.get("segments_failed", 0),
+                "total_images_generated": agent_output.data.get("total_images_generated", 0),
+                "total_cost_usd": agent_output.cost,
+                "total_time_seconds": agent_output.duration,
+                "segment_results": agent_output.data.get("successful_segments", []),
+                "errors": [
+                    {
+                        "segment_number": seg.get("segment_number"),
+                        "segment_title": seg.get("segment_title"),
+                        "error": seg.get("error")
+                    }
+                    for seg in agent_output.data.get("failed_segments", [])
+                ]
+            }
+            
+            self.storage_service.upload_file_direct(
+                json.dumps(final_status, indent=2).encode("utf-8"),
+                status_s3_key,
+                content_type="application/json"
+            )
+            
+            # Send final WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="story_images_complete" if agent_output.success else "story_images_partial",
+                progress=100,
+                details=f"Completed: {agent_output.data.get('segments_succeeded', 0)}/{len(segments)} segments, "
+                       f"{agent_output.data.get('total_images_generated', 0)} images, "
+                       f"${agent_output.cost:.4f} cost"
+            )
+            
+            # Send detailed WebSocket message
+            await self.websocket_manager.send_progress(session_id, {
+                "type": "story_image_complete",
+                "status": "success" if agent_output.success else "partial",
+                "results": {
+                    "template_title": template_title,
+                    "segments_total": len(segments),
+                    "segments_succeeded": agent_output.data.get("segments_succeeded", 0),
+                    "segments_failed": agent_output.data.get("segments_failed", 0),
+                    "total_images_generated": agent_output.data.get("total_images_generated", 0),
+                    "total_cost_usd": agent_output.cost,
+                    "total_time_seconds": agent_output.duration,
+                    "status_s3_key": status_s3_key
+                }
+            })
+            
+            return {
+                "status": "success" if agent_output.success else "partial",
+                "session_id": session_id,
+                "template_title": template_title,
+                "segments_total": len(segments),
+                "segments_succeeded": agent_output.data.get("segments_succeeded", 0),
+                "segments_failed": agent_output.data.get("segments_failed", 0),
+                "total_images_generated": agent_output.data.get("total_images_generated", 0),
+                "total_cost_usd": agent_output.cost,
+                "total_time_seconds": agent_output.duration,
+                "status_s3_key": status_s3_key
+            }
+        
+        except Exception as e:
+            logger.exception(f"[{session_id}] Error processing story segments: {e}")
+            
+            # Update status.json with error
+            started_at = initial_status.get("started_at") if initial_status else datetime.utcnow().isoformat() + "Z"
+            error_status = {
+                "status": "failed",
+                "started_at": started_at,
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "error": str(e)
+            }
+            try:
+                self.storage_service.upload_file_direct(
+                    json.dumps(error_status, indent=2).encode("utf-8"),
+                    status_s3_key,
+                    content_type="application/json"
+                )
+            except:
+                pass  # Ignore errors writing status
+            
+            # Send error WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Processing failed: {str(e)}"
+            )
+            
+            raise

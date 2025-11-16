@@ -1,11 +1,14 @@
 """
 Generation routes - handles all video generation workflow steps.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
+import threading
+import logging
+import asyncio
 
 from app.database import get_db
 from app.models.database import Session as SessionModel, Asset, User
@@ -13,6 +16,8 @@ from app.routes.auth import get_current_user
 from app.services.orchestrator import VideoGenerationOrchestrator
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -755,3 +760,194 @@ async def get_script(
 def get_websocket_manager() -> WebSocketManager:
     """Get the global WebSocket manager instance."""
     return websocket_manager
+
+
+# Track processing state per session (for concurrent request handling)
+_processing_sessions: Dict[str, bool] = {}
+_processing_lock = threading.Lock()
+
+
+class ProcessStorySegmentsRequest(BaseModel):
+    session_id: str
+    s3_path: str
+    options: Optional[Dict[str, Any]] = {
+        "num_images": 2,
+        "max_passes": 5,
+        "max_verification_passes": 3,
+        "fast_mode": False
+    }
+
+
+class ProcessStorySegmentsResponse(BaseModel):
+    status: str
+    session_id: str
+    message: str
+
+
+@router.post("/process-story-segments", response_model=ProcessStorySegmentsResponse)
+async def process_story_segments(
+    request: ProcessStorySegmentsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Process story segments from segments.md and generate images.
+    
+    This endpoint:
+    1. Validates segments.md format (primary validation)
+    2. Checks for concurrent requests (reject if already processing)
+    3. Reads config.json if exists
+    4. Starts async processing via orchestrator
+    5. Returns immediately with acceptance message
+    
+    Real-time progress is available via WebSocket.
+    """
+    import threading
+    from app.agents.story_image_generator import parse_segments_md
+    
+    session_id = request.session_id
+    s3_path = request.s3_path
+    
+    # Validate S3 bucket (must be pipeline-backend-assets, hardcoded)
+    if not s3_path.startswith("users/"):
+        raise HTTPException(
+            status_code=400,
+            detail="S3 path must start with 'users/'"
+        )
+    
+    # Extract user_id from S3 path and verify session belongs to user
+    path_parts = s3_path.split("/")
+    if len(path_parts) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid S3 path format. Expected: users/{user_id}/{session_id}/..."
+        )
+    
+    try:
+        path_user_id = int(path_parts[1])
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid user ID in S3 path"
+        )
+    
+    # Verify session belongs to user
+    session = db.query(SessionModel).filter(
+        SessionModel.id == session_id,
+        SessionModel.user_id == current_user.id
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found or does not belong to user"
+        )
+    
+    # Verify user_id from path matches current user
+    if path_user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="S3 path user ID does not match authenticated user"
+        )
+    
+    # Check for concurrent requests
+    with _processing_lock:
+        if session_id in _processing_sessions and _processing_sessions[session_id]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Session {session_id} is already being processed"
+            )
+        _processing_sessions[session_id] = True
+    
+    try:
+        # Primary validation: Read and validate segments.md format
+        try:
+            segments_content = storage_service.read_file(s3_path)
+            segments_text = segments_content.decode("utf-8")
+            
+            template_title, segments = parse_segments_md(segments_text)
+            
+            if not template_title or not segments:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid segments.md format: missing template title or segments"
+                )
+            
+            # Validate all segments have required data
+            validation_errors = []
+            for segment in segments:
+                if not segment.get("narrationtext", "").strip():
+                    validation_errors.append(
+                        f"Segment {segment['number']} ({segment['title']}) is missing narration text"
+                    )
+                if not segment.get("visual_guidance_preview", "").strip():
+                    validation_errors.append(
+                        f"Segment {segment['number']} ({segment['title']}) is missing visual guidance preview"
+                    )
+            
+            if validation_errors:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Validation errors: {'; '.join(validation_errors)}"
+                )
+            
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"segments.md not found at S3 path: {s3_path}"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Error validating segments.md: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to validate segments.md: {str(e)}"
+            )
+        
+        # Start async processing in background
+        async def process_async():
+            try:
+                # Create new DB session for background task
+                from app.database import SessionLocal
+                background_db = SessionLocal()
+                try:
+                    await orchestrator.process_story_segments(
+                        db=background_db,
+                        session_id=session_id,
+                        user_id=current_user.id,
+                        s3_path=s3_path,
+                        options=request.options or {}
+                    )
+                finally:
+                    background_db.close()
+            except Exception as e:
+                logger.exception(f"Error in async processing for session {session_id}: {e}")
+            finally:
+                # Clear processing flag
+                with _processing_lock:
+                    _processing_sessions[session_id] = False
+        
+        # Start background task
+        asyncio.create_task(process_async())
+        
+        return ProcessStorySegmentsResponse(
+            status="accepted",
+            session_id=session_id,
+            message="Processing started, listen to WebSocket for updates"
+        )
+    
+    except HTTPException:
+        # Clear processing flag on validation error
+        with _processing_lock:
+            _processing_sessions[session_id] = False
+        raise
+    except Exception as e:
+        # Clear processing flag on unexpected error
+        with _processing_lock:
+            _processing_sessions[session_id] = False
+        logger.exception(f"Unexpected error in process_story_segments endpoint: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
