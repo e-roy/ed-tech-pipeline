@@ -86,10 +86,10 @@ async def generate_images(
     db: Session = Depends(get_db)
 ):
     """
-    Step 1: Generate images using Flux via Replicate.
+    Step 1: Generate images using Flux-Schnell via Replicate.
 
-    Creates a new session and generates images based on user prompt.
-    Currently returns stub responses to unblock team.
+    Creates a new session and generates images based on user prompt using the Flux-Schnell model.
+    Images are stored in S3 and tracked in the database.
     """
     # Create new session
     session_id = str(uuid.uuid4())
@@ -196,10 +196,10 @@ async def generate_clips(
     db: Session = Depends(get_db)
 ):
     """
-    Step 3: Generate video clips using Luma via Replicate.
+    Step 3: Generate video clips using Gen-4-Turbo via Replicate.
 
-    Takes approved images and generates video clips.
-    Currently returns stub responses to unblock team.
+    Takes approved images and generates video clips using the Gen-4-Turbo model.
+    Clips are stored in S3 and tracked in the database.
     """
     # Verify session
     session = db.query(SessionModel).filter(
@@ -280,8 +280,8 @@ async def compose_final_video(
     """
     Step 5: Compose final video with text overlays and audio.
 
-    Combines approved clips with text and audio to create final video.
-    Currently returns stub responses to unblock team.
+    Combines approved clips with optional text overlays and audio using FFmpeg.
+    Final video is stored in S3 and tracked in the database.
     """
     # Verify session
     session = db.query(SessionModel).filter(
