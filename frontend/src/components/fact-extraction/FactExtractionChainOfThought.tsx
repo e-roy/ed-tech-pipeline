@@ -35,21 +35,21 @@ export function FactExtractionChainOfThought({
     timers.push(
       setTimeout(() => {
         setVisibleSteps([true, false, false]);
-      }, 1000),
+      }, 2000),
     );
 
     // Show second step after delay
     timers.push(
       setTimeout(() => {
         setVisibleSteps([true, true, false]);
-      }, 3000),
+      }, 4500),
     );
 
     // Show third step after another delay
     timers.push(
       setTimeout(() => {
         setVisibleSteps([true, true, true]);
-      }, 5500),
+      }, 8000),
     );
 
     return () => {
@@ -89,4 +89,3 @@ export function FactExtractionChainOfThought({
     </ChainOfThought>
   );
 }
-
