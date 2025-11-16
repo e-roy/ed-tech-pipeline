@@ -7,70 +7,230 @@ alwaysApply: true
 ## File Structure
 
 ```
-pipeline/
-├── backend/
+frontend/
+├── src/
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   ├── database.py      # SQLAlchemy models
-│   │   │   └── schemas.py       # Pydantic models
-│   │   ├── agents/
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py
-│   │   │   ├── prompt_parser.py
-│   │   │   ├── image_generator.py
-│   │   │   ├── video_generator.py
-│   │   │   └── compositor.py
-│   │   ├── orchestrator/
-│   │   │   ├── __init__.py
-│   │   │   └── video_orchestrator.py
-│   │   ├── routers/
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py
-│   │   │   ├── sessions.py
-│   │   │   ├── generation.py
-│   │   │   └── websocket.py
-│   │   └── services/
-│   │       ├── __init__.py
-│   │       ├── database_service.py
-│   │       ├── storage_service.py
-│   │       └── websocket_manager.py
-│   ├── alembic/
-│   │   ├── versions/
-│   │   └── env.py
-│   ├── tests/
-│   │   ├── test_agents.py
-│   │   ├── test_integration.py
-│   │   └── test_e2e.py
-│   ├── requirements.txt
-│   ├── alembic.ini
-│   ├── Dockerfile
-│   └── .env.example
-├── frontend/
-│   ├── app/
-│   │   ├── layout.tsx
-│   │   ├── page.tsx
+│   │   ├── _components/
+│   │   ├── api/
+│   │   │   ├── auth/
+│   │   │   │   └── [...nextauth]/
+│   │   │   │       └── route.ts
+│   │   │   ├── chat/
+│   │   │   │   └── route.ts
+│   │   │   └── trpc/
+│   │   │       └── [trpc]/
+│   │   │           └── route.ts
 │   │   ├── dashboard/
-│   │   ├── generate/
-│   │   └── result/
+│   │   │   ├── assets/
+│   │   │   │   └── page.tsx
+│   │   │   ├── create/
+│   │   │   │   └── page.tsx
+│   │   │   ├── history/
+│   │   │   │   └── [id]/
+│   │   │   │       └── page.tsx
+│   │   │   ├── layout-client.tsx
+│   │   │   ├── layout.tsx
+│   │   │   └── page.tsx
+│   │   ├── login/
+│   │   │   └── page.tsx
+│   │   ├── layout.tsx
+│   │   ├── not-found.tsx
+│   │   └── page.tsx
 │   ├── components/
-│   ├── lib/
+│   │   ├── ai-elements/          # AI SDK components
+│   │   ├── chat/
+│   │   │   ├── chat-context.tsx
+│   │   │   ├── chat-preview.tsx
+│   │   │   ├── chatConstants.ts
+│   │   │   ├── ChatMessage.tsx
+│   │   │   └── useFactExtractionSubmit.ts
+│   │   ├── content/
+│   │   │   ├── ContentActions.tsx
+│   │   │   ├── ContentCard.tsx
+│   │   │   ├── ContentFilters.tsx
+│   │   │   ├── ContentGallery.tsx
+│   │   │   └── utils.ts
+│   │   ├── fact-extraction/
+│   │   │   ├── FactExtractionChainOfThought.tsx
+│   │   │   ├── FactExtractionContext.tsx
+│   │   │   └── FactExtractionPanel.tsx
+│   │   ├── generation/
+│   │   │   ├── ImageGrid.tsx
+│   │   │   ├── ProgressIndicator.tsx
+│   │   │   └── VideoGrid.tsx
+│   │   ├── landing/
+│   │   │   ├── header.tsx
+│   │   │   └── hero.tsx
+│   │   ├── layout/
+│   │   │   ├── app-sidebar.tsx
+│   │   │   ├── nav-user.tsx
+│   │   │   ├── theme-provider.tsx
+│   │   │   └── user-sidebar.tsx
+│   │   ├── login/
+│   │   │   ├── auth-form.tsx
+│   │   │   ├── google-signin-form.tsx
+│   │   │   └── submit-button.tsx
+│   │   └── ui/                   # shadcn/ui components
 │   ├── hooks/
-│   ├── package.json
-│   ├── next.config.js
-│   ├── tailwind.config.ts
-│   └── .env.local.example
-├── Docs/
-│   ├── MVP_PRD.md
-│   ├── Phase_0_Overview_Architecture.md
-│   ├── Phase_1_Foundation_Infrastructure.md
-│   └── ...
-└── README.md
+│   │   ├── use-mobile.ts
+│   │   ├── useVideoSession.ts
+│   │   └── useWebSocket.ts
+│   ├── lib/
+│   │   ├── api.ts
+│   │   ├── extractFacts.ts
+│   │   ├── extractPDF.ts
+│   │   ├── factParsing.ts
+│   │   ├── fetchURL.ts
+│   │   ├── pdfWorker.ts
+│   │   └── utils.ts
+│   ├── server/
+│   │   ├── actions/
+│   │   │   ├── auth.ts
+│   │   │   ├── google-auth.ts
+│   │   │   └── signout.ts
+│   │   ├── api/
+│   │   │   ├── root.ts
+│   │   │   ├── routers/
+│   │   │   │   └── storage.ts
+│   │   │   └── trpc.ts
+│   │   ├── auth/
+│   │   │   ├── config.ts
+│   │   │   └── index.ts
+│   │   ├── db/
+│   │   │   ├── auth/
+│   │   │   │   └── schema.ts
+│   │   │   ├── index.ts
+│   │   │   └── schema.ts
+│   │   └── services/
+│   │       └── storage.ts
+│   ├── styles/
+│   │   └── globals.css
+│   ├── trpc/
+│   │   ├── query-client.ts
+│   │   ├── react.tsx
+│   │   └── server.ts
+│   ├── types/
+│   │   ├── chat.ts
+│   │   ├── index.ts
+│   │   └── storage.ts
+│   ├── env.js
+│   └── middleware.ts
+├── public/
+│   ├── favicon.ico
+│   └── pdf.worker.min.mjs
+├── scripts/
+│   └── copy-pdf-worker.mjs
+├── components.json
+├── drizzle.config.ts
+├── eslint.config.js
+├── next.config.js
+├── next-env.d.ts
+├── package.json
+├── postcss.config.js
+├── prettier.config.js
+├── start-database.sh
+├── tailwind.config.ts
+├── tsconfig.json
+└── .env.local.example
 ```
+
+## Key Packages
+
+### UI Framework & Core
+
+- **next** (^15.2.3) - Next.js framework
+- **react** (^19.0.0) - React library
+- **react-dom** (^19.0.0) - React DOM renderer
+
+### Styling
+
+- **tailwindcss** (^4.0.15) - Utility-first CSS framework
+- **@tailwindcss/postcss** (^4.0.15) - PostCSS plugin for Tailwind
+- **shadcn** (^3.5.0) - UI component library
+- **class-variance-authority** (^0.7.1) - Component variant management
+- **clsx** (^2.1.1) - Conditional class names
+- **tailwind-merge** (^3.4.0) - Merge Tailwind classes
+
+### UI Components (Radix UI)
+
+- **@radix-ui/react-\*** - Comprehensive set of accessible UI primitives
+  - accordion, alert-dialog, avatar, checkbox, dialog, dropdown-menu, hover-card, label, popover, progress, radio-group, scroll-area, select, separator, slider, switch, tabs, toggle, tooltip, and more
+
+### State Management & Data Fetching
+
+- **zustand** (^5.0.8) - Lightweight state management
+- **@tanstack/react-query** (^5.69.0) - Data fetching and caching
+- **@trpc/client** (^11.0.0) - End-to-end typesafe APIs
+- **@trpc/react-query** (^11.0.0) - tRPC React Query integration
+- **@trpc/server** (^11.0.0) - tRPC server
+
+### Authentication
+
+- **next-auth** (5.0.0-beta.25) - Authentication for Next.js
+- **@auth/drizzle-adapter** (^1.7.2) - Drizzle adapter for NextAuth
+- **bcryptjs** (^3.0.3) - Password hashing
+
+### Database
+
+- **drizzle-orm** (^0.41.0) - TypeScript ORM
+- **drizzle-kit** (^0.30.5) - Drizzle toolkit
+- **postgres** (^3.4.4) - PostgreSQL client
+
+### AI & ML
+
+- **ai** (^5.0.93) - AI SDK for building AI applications
+- **@ai-sdk/openai** (^2.0.67) - OpenAI SDK integration
+- **@ai-sdk/react** (^2.0.93) - React hooks for AI SDK
+
+### Storage
+
+- **@aws-sdk/client-s3** (^3.932.0) - AWS S3 client
+- **@aws-sdk/s3-request-presigner** (^3.932.0) - S3 presigned URL generation
+
+### Form Handling & Validation
+
+- **react-hook-form** (^7.66.0) - Form state management
+- **@hookform/resolvers** (^5.2.2) - Validation resolvers
+- **zod** (^3.24.0) - Schema validation
+
+### Utilities & Helpers
+
+- **date-fns** (^4.1.0) - Date utility library
+- **nanoid** (^5.1.6) - Unique ID generation
+- **superjson** (^2.2.1) - JSON serialization
+- **@t3-oss/env-nextjs** (^0.12.0) - Environment variable validation
+
+### PDF Processing
+
+- **pdfjs-dist** (^5.4.394) - PDF.js library for PDF parsing
+
+### UI Enhancements
+
+- **lucide-react** (^0.553.0) - Icon library
+- **motion** (^12.23.24) - Animation library
+- **sonner** (^2.0.7) - Toast notifications
+- **next-themes** (^0.4.6) - Theme management
+- **recharts** (2.15.4) - Chart library
+- **embla-carousel-react** (^8.6.0) - Carousel component
+- **react-resizable-panels** (^3.0.6) - Resizable panel layouts
+- **@xyflow/react** (^12.9.3) - Node-based flow diagrams
+- **cmdk** (^1.1.1) - Command menu component
+- **vaul** (^1.1.2) - Drawer component
+- **shiki** (^3.15.0) - Syntax highlighting
+- **input-otp** (^1.4.2) - OTP input component
+- **use-stick-to-bottom** (^1.1.1) - Scroll to bottom hook
+- **streamdown** (^1.5.0) - Streaming utilities
+- **tokenlens** (^1.3.1) - Token utilities
+
+### Development Tools
+
+- **typescript** (^5.8.2) - TypeScript compiler
+- **eslint** (^9.23.0) - Linting
+- **eslint-config-next** (^15.2.3) - Next.js ESLint config
+- **prettier** (^3.5.3) - Code formatter
+- **prettier-plugin-tailwindcss** (^0.6.11) - Tailwind Prettier plugin
+- **typescript-eslint** (^8.27.0) - TypeScript ESLint rules
+- **eslint-plugin-drizzle** (^0.2.3) - Drizzle ESLint plugin
 
 ## Global Rules
 

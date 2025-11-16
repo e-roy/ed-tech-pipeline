@@ -217,9 +217,9 @@ class VideoGenerationOrchestrator:
                         session_id=session_id,
                         type="image",
                         url=img_data["image"],
-                        approved=False,
+                        approved=True,  # Auto-approve like audio
                         asset_metadata={
-                            "script_part": part_name,
+                            "part": part_name,  # Use "part" to match audio convention
                             "part_index": i,
                             "asset_id": asset_id,
                             **img_data["metadata"]
@@ -794,16 +794,24 @@ class VideoGenerationOrchestrator:
             logger.info(f"[{session_id}] Generating audio with voice {audio_config.get('voice', 'alloy')}")
 
             # Call Audio Pipeline Agent
+            # Re-initialize audio pipeline with db and storage for music generation
+            audio_pipeline_with_music = AudioPipelineAgent(
+                api_key=settings.OPENAI_API_KEY,
+                db=db,
+                storage_service=self.storage_service
+            )
+
             audio_input = AgentInput(
                 session_id=session_id,
                 data={
                     "script": script_data,
                     "voice": audio_config.get("voice") if audio_config else None,
-                    "audio_option": audio_config.get("audio_option", "tts") if audio_config else "tts"
+                    "audio_option": audio_config.get("audio_option", "tts") if audio_config else "tts",
+                    "user_id": user_id  # Add user_id for music processing
                 }
             )
 
-            audio_result = await self.audio_pipeline.process(audio_input)
+            audio_result = await audio_pipeline_with_music.process(audio_input)
 
             if not audio_result.success:
                 raise ValueError(f"Audio generation failed: {audio_result.error}")
@@ -825,25 +833,30 @@ class VideoGenerationOrchestrator:
                 # Generate unique asset ID
                 asset_id = f"audio_{audio_data['part']}_{uuid.uuid4().hex[:8]}"
 
-                # Upload to S3
-                try:
-                    s3_result = await self.storage_service.upload_local_file(
-                        file_path=audio_data["filepath"],
-                        asset_type="audio",
-                        session_id=session_id,
-                        asset_id=asset_id,
-                        user_id=user_id
-                    )
-                    # Update URL to S3 URL
-                    audio_data["url"] = s3_result["url"]
-                    logger.info(f"[{session_id}] {audio_data['part']} audio uploaded to S3")
-                except Exception as e:
-                    # Keep local filepath if S3 upload fails
-                    logger.warning(
-                        f"[{session_id}] S3 upload failed for {audio_data['part']} audio, "
-                        f"using local path: {e}"
-                    )
-                    audio_data["url"] = audio_data["filepath"]
+                # Skip S3 upload for music files (already in S3)
+                if audio_data["part"] == "music":
+                    # Music file already has S3 URL, no upload needed
+                    logger.info(f"[{session_id}] Music file already in S3: {audio_data['url']}")
+                else:
+                    # Upload narration files to S3
+                    try:
+                        s3_result = await self.storage_service.upload_local_file(
+                            file_path=audio_data["filepath"],
+                            asset_type="audio",
+                            session_id=session_id,
+                            asset_id=asset_id,
+                            user_id=user_id
+                        )
+                        # Update URL to S3 URL
+                        audio_data["url"] = s3_result["url"]
+                        logger.info(f"[{session_id}] {audio_data['part']} audio uploaded to S3")
+                    except Exception as e:
+                        # Keep local filepath if S3 upload fails
+                        logger.warning(
+                            f"[{session_id}] S3 upload failed for {audio_data['part']} audio, "
+                            f"using local path: {e}"
+                        )
+                        audio_data["url"] = audio_data["filepath"]
 
                 # Store in database
                 asset = Asset(
@@ -908,6 +921,397 @@ class VideoGenerationOrchestrator:
                 status="error",
                 progress=0,
                 details=f"Audio generation failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
+                "message": str(e)
+            }
+
+    async def finalize_script(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int,
+        script_id: str,
+        image_options: Optional[Dict[str, Any]] = None,
+        audio_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Finalize script by generating both images and audio simultaneously.
+
+        Args:
+            db: Database session
+            session_id: Session ID for tracking
+            user_id: User ID making the request
+            script_id: ID of the script in the database
+            image_options: Image generation options (model, images_per_part)
+            audio_config: Audio configuration (voice, audio_option)
+
+        Returns:
+            Dict containing status, micro_scenes, audio_files, and cost information
+        """
+        import asyncio
+
+        try:
+            logger.info(f"[{session_id}] Starting script finalization (parallel image + audio generation)")
+
+            # Fetch script from database
+            script = db.query(Script).filter(Script.id == script_id).first()
+            if not script:
+                raise ValueError(f"Script {script_id} not found")
+
+            # Verify ownership
+            if script.user_id != user_id:
+                raise ValueError("Unauthorized: Script does not belong to this user")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if not session:
+                # Create new session
+                session = SessionModel(
+                    id=session_id,
+                    user_id=user_id,
+                    status="finalizing",
+                    prompt=f"Script-based generation: {script_id}",
+                    options={"image_options": image_options, "audio_config": audio_config}
+                )
+                db.add(session)
+            else:
+                session.status = "finalizing"
+                session.options = {"image_options": image_options, "audio_config": audio_config}
+
+            db.commit()
+
+            # Send WebSocket progress update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="finalizing",
+                progress=50,
+                details="Generating images and audio in parallel..."
+            )
+
+            # Run image and audio generation in parallel using asyncio.gather
+            image_task = self.generate_images(
+                db=db,
+                session_id=session_id,
+                user_id=user_id,
+                script_id=script_id,
+                options=image_options or {}
+            )
+
+            audio_task = self.generate_audio(
+                db=db,
+                session_id=session_id,
+                user_id=user_id,
+                script_id=script_id,
+                audio_config=audio_config or {}
+            )
+
+            # Wait for both tasks to complete
+            image_result, audio_result = await asyncio.gather(image_task, audio_task)
+
+            # Check for errors
+            if image_result.get("status") == "error":
+                raise ValueError(f"Image generation failed: {image_result.get('message')}")
+
+            if audio_result.get("status") == "error":
+                raise ValueError(f"Audio generation failed: {audio_result.get('message')}")
+
+            # Calculate total cost
+            image_cost = float(image_result.get("micro_scenes", {}).get("cost", "0").replace("$", ""))
+            audio_cost = audio_result.get("total_cost", 0.0)
+            total_cost = image_cost + audio_cost
+
+            # Update session status
+            session.status = "finalized"
+            db.commit()
+
+            # Final progress update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="finalized",
+                progress=100,
+                details=f"Script finalized! Images + Audio complete. Total: ${total_cost:.3f}"
+            )
+
+            logger.info(
+                f"[{session_id}] Script finalization complete: "
+                f"Images: ${image_cost:.3f}, Audio: ${audio_cost:.3f}, Total: ${total_cost:.3f}"
+            )
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "micro_scenes": image_result.get("micro_scenes", {}),
+                "audio_files": audio_result.get("audio_files", []),
+                "total_duration": audio_result.get("total_duration", 0.0),
+                "total_cost": total_cost
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Script finalization failed: {e}")
+
+            # Update session with error
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Script finalization failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
+                "message": str(e)
+            }
+
+    async def compose_educational_video(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int
+    ) -> Dict[str, Any]:
+        """
+        Compose final educational video from generated images and audio.
+
+        Combines:
+        - Images from each script part (hook, concept, process, conclusion)
+        - TTS narration audio for each part
+        - Background music (if available)
+
+        Args:
+            db: Database session
+            session_id: Session ID containing generated assets
+            user_id: User ID for ownership verification
+
+        Returns:
+            Dict with status, video_url, duration, segments_count
+        """
+        try:
+            logger.info(f"[{session_id}] Starting educational video composition")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "composing_video"
+                db.commit()
+
+            # Broadcast WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="composing_video",
+                progress=90,
+                details="Composing final educational video with FFmpeg..."
+            )
+
+            # Get all assets for this session
+            assets = db.query(Asset).filter(Asset.session_id == session_id).all()
+
+            # Organize assets by type and part
+            images_by_part = {}
+            audio_by_part = {}
+            music_url = None
+
+            for asset in assets:
+                asset_type = asset.type
+                metadata = asset.asset_metadata or {}
+
+                if asset_type == "image":
+                    part = metadata.get("part", "")
+                    # Check approved flag from database column, not metadata
+                    if part and asset.approved:
+                        if part not in images_by_part:
+                            images_by_part[part] = []
+                        images_by_part[part].append(asset.url)
+
+                elif asset_type == "audio":
+                    part = metadata.get("part", "")
+                    if part and part != "music":
+                        audio_by_part[part] = {
+                            "url": asset.url,
+                            "duration": metadata.get("duration", 5.0)
+                        }
+                    elif part == "music":
+                        music_url = asset.url
+
+            # Build timeline for video composition
+            parts = ["hook", "concept", "process", "conclusion"]
+            timeline_segments = []
+
+            for part in parts:
+                # Get first approved image for this part (or first available)
+                image_url = images_by_part.get(part, [None])[0] if part in images_by_part else None
+
+                # Get audio for this part
+                audio_data = audio_by_part.get(part)
+
+                if image_url and audio_data:
+                    timeline_segments.append({
+                        "part": part,
+                        "image_url": image_url,
+                        "audio_url": audio_data["url"],
+                        "duration": audio_data["duration"]
+                    })
+                else:
+                    logger.warning(f"[{session_id}] Missing assets for part: {part}")
+
+            if not timeline_segments:
+                raise Exception("No valid timeline segments found. Ensure images and audio are generated.")
+
+            logger.info(f"[{session_id}] Built timeline with {len(timeline_segments)} segments")
+
+            # Step 1: Generate video clips from images using image-to-video
+            logger.info(f"[{session_id}] Generating video clips from images...")
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_videos",
+                progress=92,
+                details="Generating video clips from images with AI..."
+            )
+
+            video_clips = []
+            for i, segment in enumerate(timeline_segments):
+                logger.info(f"[{session_id}] Generating video for {segment['part']} ({i+1}/{len(timeline_segments)})")
+
+                # Generate video clip from image
+                video_input = AgentInput(
+                    session_id=session_id,
+                    data={
+                        "approved_images": [{"url": segment["image_url"]}],
+                        "video_prompt": f"Educational visualization for {segment['part']}",
+                        "clip_duration": segment["duration"],
+                        "model": "gen-4-turbo"  # Cheapest option
+                    }
+                )
+
+                video_result = await self.video_generator.process(video_input)
+
+                if not video_result.success or not video_result.data.get("clips"):
+                    logger.warning(f"[{session_id}] Video generation failed for {segment['part']}, using static image")
+                    video_clips.append({
+                        "part": segment["part"],
+                        "video_url": None,  # Will use static image fallback
+                        "image_url": segment["image_url"],
+                        "audio_url": segment["audio_url"],
+                        "duration": segment["duration"]
+                    })
+                else:
+                    clip_data = video_result.data["clips"][0]
+
+                    # Store video clip in database
+                    video_asset = Asset(
+                        session_id=session_id,
+                        type="video",
+                        url=clip_data["url"],
+                        approved=True,
+                        asset_metadata={
+                            "part": segment["part"],
+                            "duration": segment["duration"],
+                            "cost": clip_data.get("cost", 0.0),
+                            "source_image": segment["image_url"]
+                        }
+                    )
+                    db.add(video_asset)
+
+                    video_clips.append({
+                        "part": segment["part"],
+                        "video_url": clip_data["url"],
+                        "image_url": segment["image_url"],
+                        "audio_url": segment["audio_url"],
+                        "duration": segment["duration"]
+                    })
+
+            db.commit()
+            logger.info(f"[{session_id}] Generated {len(video_clips)} video clips")
+
+            # Step 2: Use FFmpeg compositor to stitch videos and add audio
+            from app.services.educational_compositor import EducationalCompositor
+
+            compositor = EducationalCompositor(work_dir="/tmp/educational_videos")
+
+            composition_result = await compositor.compose_educational_video(
+                timeline=video_clips,  # Now includes video URLs
+                music_url=music_url,
+                session_id=session_id
+            )
+
+            video_path = composition_result["output_path"]
+            duration = composition_result["duration"]
+
+            # Upload video to S3
+            logger.info(f"[{session_id}] Uploading composed video to S3")
+
+            upload_result = await self.storage_service.upload_local_file(
+                file_path=video_path,
+                asset_type="final",
+                session_id=session_id,
+                asset_id=f"final_video_{uuid.uuid4().hex[:8]}",
+                user_id=user_id
+            )
+
+            video_url = upload_result["url"]
+
+            # Store in database
+            final_video_asset = Asset(
+                session_id=session_id,
+                type="final",
+                url=video_url,
+                approved=True,
+                asset_metadata={
+                    "duration": duration,
+                    "segments_count": len(timeline_segments),
+                    "has_music": music_url is not None
+                }
+            )
+            db.add(final_video_asset)
+
+            # Update session
+            if session:
+                session.status = "completed"
+                session.final_video_url = video_url
+                session.completed_at = datetime.now()
+                db.commit()
+
+            # Broadcast completion
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="completed",
+                progress=100,
+                details=f"Educational video complete! Duration: {duration}s"
+            )
+
+            logger.info(f"[{session_id}] Educational video composition complete: {video_url}")
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "video_url": video_url,
+                "duration": duration,
+                "segments_count": len(timeline_segments)
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Educational video composition failed: {e}")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Video composition failed: {str(e)}"
             )
 
             return {

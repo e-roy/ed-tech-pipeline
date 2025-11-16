@@ -22,12 +22,15 @@ app = FastAPI(
 
 # Configure CORS for Next.js frontend
 # Restrict to known frontend domains for security
+# Allow "null" origin for local file testing (test_ui.html)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         settings.FRONTEND_URL,
         "http://localhost:3000",
         "https://localhost:3000",
+        "http://localhost:8080",  # Local HTTP server for test UI
+        "null",  # Allow local file testing
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],

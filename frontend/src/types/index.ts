@@ -77,3 +77,9 @@ export interface AudioConfig {
   enabled: boolean;
   genre: string;
 }
+
+export interface Fact {
+  concept: string;
+  details: string;
+  confidence: number;
+}

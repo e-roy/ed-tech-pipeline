@@ -170,6 +170,7 @@ export const ModelSelectorLogo = ({
   className,
   ...props
 }: ModelSelectorLogoProps) => (
+  // eslint-disable-next-line @next/next/no-img-element
   <img
     {...props}
     alt={`${provider} logo`}
@@ -188,8 +189,8 @@ export const ModelSelectorLogoGroup = ({
 }: ModelSelectorLogoGroupProps) => (
   <div
     className={cn(
-      "-space-x-1 flex shrink-0 items-center [&>img]:rounded-full [&>img]:bg-background [&>img]:p-px [&>img]:ring-1 [&>img]:ring-border",
-      className
+      "[&>img]:bg-background [&>img]:ring-border flex shrink-0 items-center -space-x-1 [&>img]:rounded-full [&>img]:p-px [&>img]:ring-1",
+      className,
     )}
     {...props}
   />

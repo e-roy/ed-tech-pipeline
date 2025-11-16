@@ -2,7 +2,7 @@
 
 **Timeline:** Day 1, Hours 4-6
 **Dependencies:** Phase 02 (Auth & Session Management)
-**Completion:** 0% (0/22 tasks complete)
+**Completion:** ~69% (18/26 tasks complete)
 
 ---
 
@@ -17,180 +17,143 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 ### 1. PDF Extraction Setup
 
 #### 1.1 Install PDF.js Library
-- [ ] Install pdf.js: `npm install pdfjs-dist`
-- [ ] Create `frontend/lib/pdfWorker.ts`:
+
+- [x] Install pdf.js: `npm install pdfjs-dist` (installed via bun)
+- [x] Create `frontend/lib/pdfWorker.ts`:
+
   ```typescript
-  import * as pdfjsLib from 'pdfjs-dist';
+  // Dynamic import for client-side only
+  export async function getPdfjsLib() {
+    if (typeof window === "undefined") {
+      throw new Error("PDF.js can only be used in the browser");
+    }
 
-  // Set worker path
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+    const pdfjsLib = await import("pdfjs-dist");
 
-  export default pdfjsLib;
+    // Use the worker from the public folder (copied during build)
+    // This is more reliable than CDN and works with Next.js
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+    return pdfjsLib;
+  }
   ```
 
+  **Note:** Uses dynamic imports to avoid SSR issues. Worker file copied to public folder via postinstall script.
+
 **Dependencies:** Phase 02 complete
-**Testing:** Import: `import pdfjsLib from '@/lib/pdfWorker'`
+**Testing:** Import: `import { getPdfjsLib } from '@/lib/pdfWorker'`
 
 #### 1.2 Create PDF Text Extraction Function
-- [ ] Create `frontend/lib/extractPDF.ts`:
+
+- [x] Create `frontend/lib/extractPDF.ts`:
+
   ```typescript
-  import pdfjsLib from './pdfWorker';
+  import { getPdfjsLib } from "./pdfWorker";
 
   export async function extractTextFromPDF(file: File): Promise<string> {
+    const pdfjsLib = await getPdfjsLib();
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-    let fullText = '';
+    let fullText = "";
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
       const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-      fullText += pageText + '\n';
+        .map((item) => {
+          // Type guard for text items
+          if ("str" in item) {
+            return item.str;
+          }
+          return "";
+        })
+        .join(" ");
+      fullText += pageText + "\n";
     }
 
     return fullText;
   }
   ```
 
+  **Note:** Uses type guards for better TypeScript safety.
+
 **Dependencies:** Task 1.1
-**Testing:** Test with sample PDF file
+**Testing:** Test with sample PDF file (tested in actual flow via chat component)
 
 #### 1.3 Test PDF Extraction
-- [ ] Create test component `frontend/components/TestPDFExtraction.tsx`:
-  ```typescript
-  'use client';
-  import { useState } from 'react';
-  import { extractTextFromPDF } from '@/lib/extractPDF';
 
-  export default function TestPDFExtraction() {
-    const [text, setText] = useState('');
-
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        const extracted = await extractTextFromPDF(file);
-        setText(extracted);
-      }
-    };
-
-    return (
-      <div className="p-4">
-        <input type="file" accept=".pdf" onChange={handleFileUpload} />
-        <pre className="mt-4 whitespace-pre-wrap">{text}</pre>
-      </div>
-    );
-  }
-  ```
-- [ ] Upload a test PDF
-- [ ] Verify text extraction works
+- [ ] Create test component `frontend/components/TestPDFExtraction.tsx` (not created - functionality tested in actual flow)
+- [x] Upload a test PDF (tested via chat component)
+- [x] Verify text extraction works (verified in production flow)
 
 **Dependencies:** Task 1.2
-**Testing:** Should display extracted text from PDF
+**Testing:** PDF extraction tested and working in chat component on `/dashboard/create` page
 
 ---
 
 ### 2. Fact Extraction Logic
 
 #### 2.1 Create Concept Detection Function
-- [ ] Create `frontend/lib/extractFacts.ts`:
+
+- [ ] Create `frontend/lib/extractFacts.ts` with keyword-based extraction
+      **Note:** This approach was replaced with AI agent-based extraction. See section 2.3.
+
+**Dependencies:** None (pure function)
+**Status:** Not implemented - replaced with AI agent approach
+
+#### 2.2 Test Fact Extraction
+
+- [ ] Test keyword-based fact extraction
+      **Note:** Not applicable - using AI agent instead
+
+**Dependencies:** Task 2.1
+**Status:** Not applicable
+
+#### 2.3 AI Agent-Based Fact Extraction
+
+- [x] Create chat API route (`frontend/src/app/api/chat/route.ts`) with system message instructing AI to extract facts
+- [x] Implement JSON parsing from AI responses in `chat-preview.tsx`
+- [x] Define Fact interface in `frontend/src/types/index.ts`:
   ```typescript
   export interface Fact {
     concept: string;
     details: string;
     confidence: number;
   }
-
-  export function extractFacts(text: string): Fact[] {
-    const facts: Fact[] = [];
-
-    // Simple keyword-based extraction (can be enhanced with NLP)
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
-
-    // Keywords that indicate important concepts
-    const keywordPatterns = [
-      /photosynthesis/i,
-      /chlorophyll/i,
-      /carbon dioxide|CO2/i,
-      /oxygen|O2/i,
-      /glucose/i,
-      /solar system/i,
-      /planet/i,
-      /gravity/i,
-      /cell/i,
-      /nucleus/i,
-      /mitochondria/i,
-      /DNA/i,
-      /water cycle/i,
-      /evaporation/i,
-      /condensation/i,
-      /precipitation/i,
-    ];
-
-    sentences.forEach(sentence => {
-      keywordPatterns.forEach(pattern => {
-        if (pattern.test(sentence)) {
-          const concept = sentence.match(pattern)?.[0] || '';
-          facts.push({
-            concept: concept,
-            details: sentence.trim(),
-            confidence: 0.8
-          });
-        }
-      });
-    });
-
-    // Deduplicate
-    const uniqueFacts = facts.filter((fact, index, self) =>
-      index === self.findIndex(f => f.concept.toLowerCase() === fact.concept.toLowerCase())
-    );
-
-    return uniqueFacts.slice(0, 10); // Limit to 10 facts
-  }
   ```
+- [x] Parse JSON facts from AI response using regex pattern matching
+- [x] Update FactExtractionContext when facts are extracted
 
-**Dependencies:** None (pure function)
-**Testing:** Test with sample text: `extractFacts("Photosynthesis is the process...")`
-
-#### 2.2 Test Fact Extraction
-- [ ] Create test function:
-  ```typescript
-  const sampleText = `
-    Photosynthesis is the process by which plants use sunlight to convert
-    carbon dioxide and water into glucose and oxygen. Chlorophyll is the
-    green pigment in plants that captures light energy.
-  `;
-  const facts = extractFacts(sampleText);
-  console.log(facts);
-  ```
-- [ ] Should extract concepts: photosynthesis, chlorophyll, carbon dioxide, oxygen, glucose
-
-**Dependencies:** Task 2.1
-**Testing:** Verify at least 3-5 facts extracted
+**Dependencies:** Phase 02 (Auth & Session Management)
+**Implementation:** AI agent extracts 5-15 educational facts from materials and returns them in structured JSON format. Facts are parsed from AI responses and displayed in FactExtractionPanel.
 
 ---
 
 ### 3. Topic Input Page
 
 #### 3.1 Create Topic Input Component
+
 - [ ] Create `frontend/app/session/[id]/topic-input/page.tsx`:
+      **Note:** This separate page was not created. Instead, fact extraction was integrated into the existing `/dashboard/create` page using the `chat-preview.tsx` component. See sections 3.3-3.5 for actual implementation.
+
   ```typescript
-  'use client';
-  import { useState } from 'react';
-  import { useParams, useRouter } from 'next/navigation';
-  import { extractTextFromPDF } from '@/lib/extractPDF';
-  import { extractFacts, Fact } from '@/lib/extractFacts';
+  "use client";
+  import { useState } from "react";
+  import { useParams, useRouter } from "next/navigation";
+  import { extractTextFromPDF } from "@/lib/extractPDF";
+  import { extractFacts, Fact } from "@/lib/extractFacts";
 
   export default function TopicInputPage() {
     const params = useParams();
     const router = useRouter();
     const sessionId = params.id;
 
-    const [inputMethod, setInputMethod] = useState<'text' | 'pdf' | 'url'>('text');
-    const [textInput, setTextInput] = useState('');
-    const [urlInput, setUrlInput] = useState('');
+    const [inputMethod, setInputMethod] = useState<"text" | "pdf" | "url">(
+      "text"
+    );
+    const [textInput, setTextInput] = useState("");
+    const [urlInput, setUrlInput] = useState("");
     const [extractedFacts, setExtractedFacts] = useState<Fact[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -204,8 +167,8 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
         const facts = extractFacts(text);
         setExtractedFacts(facts);
       } catch (error) {
-        console.error('PDF extraction error:', error);
-        alert('Failed to extract text from PDF');
+        console.error("PDF extraction error:", error);
+        alert("Failed to extract text from PDF");
       } finally {
         setLoading(false);
       }
@@ -220,7 +183,10 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 
     const handleContinue = () => {
       // Store facts in localStorage for now (will use API later)
-      localStorage.setItem(`facts_${sessionId}`, JSON.stringify(extractedFacts));
+      localStorage.setItem(
+        `facts_${sessionId}`,
+        JSON.stringify(extractedFacts)
+      );
       router.push(`/session/${sessionId}/script-review`);
     };
 
@@ -232,20 +198,26 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
         {/* Input method selector */}
         <div className="flex gap-4 mb-6">
           <button
-            onClick={() => setInputMethod('text')}
-            className={`px-4 py-2 rounded ${inputMethod === 'text' ? 'bg-blue-600 text-white' : 'bg-white'}`}
+            onClick={() => setInputMethod("text")}
+            className={`px-4 py-2 rounded ${
+              inputMethod === "text" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
           >
             Text Input
           </button>
           <button
-            onClick={() => setInputMethod('pdf')}
-            className={`px-4 py-2 rounded ${inputMethod === 'pdf' ? 'bg-blue-600 text-white' : 'bg-white'}`}
+            onClick={() => setInputMethod("pdf")}
+            className={`px-4 py-2 rounded ${
+              inputMethod === "pdf" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
           >
             Upload PDF
           </button>
           <button
-            onClick={() => setInputMethod('url')}
-            className={`px-4 py-2 rounded ${inputMethod === 'url' ? 'bg-blue-600 text-white' : 'bg-white'}`}
+            onClick={() => setInputMethod("url")}
+            className={`px-4 py-2 rounded ${
+              inputMethod === "url" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
           >
             URL
           </button>
@@ -253,7 +225,7 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 
         {/* Input forms */}
         <div className="bg-white p-6 rounded-lg shadow mb-6">
-          {inputMethod === 'text' && (
+          {inputMethod === "text" && (
             <div>
               <label className="block text-sm font-medium mb-2">
                 Paste your text here:
@@ -273,7 +245,7 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
             </div>
           )}
 
-          {inputMethod === 'pdf' && (
+          {inputMethod === "pdf" && (
             <div>
               <label className="block text-sm font-medium mb-2">
                 Upload PDF file:
@@ -287,7 +259,7 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
             </div>
           )}
 
-          {inputMethod === 'url' && (
+          {inputMethod === "url" && (
             <div>
               <label className="block text-sm font-medium mb-2">
                 Enter URL:
@@ -311,7 +283,9 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 
         {extractedFacts.length > 0 && (
           <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-xl font-bold mb-4">Extracted Facts ({extractedFacts.length})</h2>
+            <h2 className="text-xl font-bold mb-4">
+              Extracted Facts ({extractedFacts.length})
+            </h2>
             <div className="space-y-3">
               {extractedFacts.map((fact, index) => (
                 <div key={index} className="border-l-4 border-blue-500 pl-4">
@@ -338,6 +312,7 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 **Testing:** Navigate to page, test all 3 input methods
 
 #### 3.2 Update Dashboard to Navigate to Topic Input
+
 - [ ] Update `frontend/app/dashboard/page.tsx`:
   ```typescript
   const handleSessionCreated = (sessionId: number) => {
@@ -353,148 +328,147 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 ### 4. URL Fetching (Optional Enhancement)
 
 #### 4.1 Create URL Fetch Function
-- [ ] Create `frontend/lib/fetchURL.ts`:
+
+- [x] Create `frontend/lib/fetchURL.ts`:
+
   ```typescript
   export async function fetchURLContent(url: string): Promise<string> {
-    try {
-      // Use a CORS proxy for client-side fetching
-      const proxyUrl = 'https://api.allorigins.win/get?url=';
-      const response = await fetch(proxyUrl + encodeURIComponent(url));
-      const data = await response.json();
+    // Try multiple CORS proxies for better reliability
+    const proxies = [
+      "https://api.allorigins.win/get?url=",
+      "https://corsproxy.io/?",
+      "https://api.codetabs.com/v1/proxy?quest=",
+    ];
 
-      // Strip HTML tags (basic)
-      const text = data.contents.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-      return text;
-    } catch (error) {
-      console.error('URL fetch error:', error);
-      throw new Error('Failed to fetch URL content');
-    }
+    // Attempts each proxy with timeout and error handling
+    // Strips HTML tags and returns text content
   }
   ```
 
+  **Note:** Enhanced with multiple proxy fallbacks, 10-second timeout, and better error handling for QUIC protocol errors.
+
 **Dependencies:** None
-**Testing:** Test with public URL
+**Testing:** Tested with public URLs via chat component
 
 #### 4.2 Add URL Fetching to Topic Input
-- [ ] Update Topic Input page to handle URL submission:
-  ```typescript
-  const handleURLSubmit = async () => {
-    setLoading(true);
-    try {
-      const text = await fetchURLContent(urlInput);
-      const facts = extractFacts(text);
-      setExtractedFacts(facts);
-    } catch (error) {
-      alert('Failed to fetch URL content');
-    } finally {
-      setLoading(false);
-    }
-  };
-  ```
-- [ ] Add submit button for URL input method
 
-**Dependencies:** Tasks 3.1, 4.1
-**Testing:** Enter URL, extract facts from webpage
+- [x] URL fetching integrated into `chat-preview.tsx`:
+  - Automatically detects URLs in user messages
+  - Fetches content using CORS proxy before sending to AI
+  - Content is included in AI prompt but hidden from chat display
+
+**Dependencies:** Tasks 3.5, 4.1
+**Testing:** URL content successfully fetched and processed via chat component
 
 ---
 
 ### 5. Fact Review & Editing
 
 #### 5.1 Make Facts Editable
-- [ ] Update fact display to allow editing:
-  ```typescript
-  {extractedFacts.map((fact, index) => (
-    <div key={index} className="border-l-4 border-blue-500 pl-4">
-      <input
-        type="text"
-        value={fact.concept}
-        onChange={(e) => {
-          const updated = [...extractedFacts];
-          updated[index].concept = e.target.value;
-          setExtractedFacts(updated);
-        }}
-        className="font-semibold border-b border-transparent hover:border-gray-300 focus:border-blue-500"
-      />
-      <textarea
-        value={fact.details}
-        onChange={(e) => {
-          const updated = [...extractedFacts];
-          updated[index].details = e.target.value;
-          setExtractedFacts(updated);
-        }}
-        className="w-full text-sm text-gray-600 border-b border-transparent hover:border-gray-300 focus:border-blue-500"
-        rows={2}
-      />
-    </div>
-  ))}
-  ```
 
-**Dependencies:** Task 3.1
-**Testing:** Click on fact, edit text, verify updates
+- [x] Facts are editable in `FactExtractionPanel.tsx`:
+  - Uses `Input` component for concept editing
+  - Uses `Textarea` component for details editing
+  - Updates are reflected immediately in the panel
+  - Facts are stored in FactExtractionContext
+
+**Dependencies:** Task 3.4
+**Testing:** Facts can be edited inline in the FactExtractionPanel
 
 #### 5.2 Add Fact Management Actions
-- [ ] Add delete button for each fact:
-  ```typescript
-  <button
-    onClick={() => {
-      setExtractedFacts(extractedFacts.filter((_, i) => i !== index));
-    }}
-    className="text-red-600 text-sm hover:underline"
-  >
-    Remove
-  </button>
-  ```
-- [ ] Add "Add Fact" button:
-  ```typescript
-  <button
-    onClick={() => {
-      setExtractedFacts([...extractedFacts, { concept: '', details: '', confidence: 1.0 }]);
-    }}
-    className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
-  >
-    + Add Fact
-  </button>
-  ```
+
+- [x] Delete button implemented in `FactExtractionPanel.tsx`:
+  - Each fact has a delete button (Trash2 icon)
+  - Removes fact from the list immediately
+- [x] Add Fact button implemented:
+  - "Add Fact" button with Plus icon
+  - Adds new empty fact to the list
+  - User can then edit the new fact
 
 **Dependencies:** Task 5.1
-**Testing:** Delete fact, add new fact manually
+**Testing:** Delete and add functionality working in FactExtractionPanel
 
 ---
 
 ### 6. Testing & Integration
 
 #### 6.1 End-to-End Test: Text Input
-- [ ] Navigate to topic input page
-- [ ] Select "Text Input"
-- [ ] Paste sample text about photosynthesis
-- [ ] Click "Extract Facts"
-- [ ] Verify facts are extracted and displayed
-- [ ] Edit a fact
-- [ ] Click "Continue to Script Generation"
 
-**Dependencies:** Tasks 3.1, 5.1
-**Testing:** Should successfully extract and display facts
+- [x] Navigate to `/dashboard/create` page
+- [x] Paste text directly into chat component
+- [x] AI extracts facts from text
+- [x] Facts displayed in FactExtractionPanel
+- [x] Edit a fact in the panel
+- [x] Click "Continue to Script Generation" (confirms facts)
+
+**Dependencies:** Tasks 3.5, 5.1
+**Status:** Working via chat component integration
 
 #### 6.2 End-to-End Test: PDF Upload
-- [ ] Navigate to topic input page
-- [ ] Select "Upload PDF"
-- [ ] Upload a sample educational PDF
-- [ ] Verify text extraction and fact display
-- [ ] Remove a fact
-- [ ] Add a new fact manually
-- [ ] Continue to next step
 
-**Dependencies:** Tasks 1.2, 3.1, 5.2
-**Testing:** Should handle PDF upload and extraction
+- [x] Navigate to `/dashboard/create` page
+- [x] Upload PDF via chat component
+- [x] PDF text extracted client-side
+- [x] AI extracts facts from PDF content
+- [x] Facts displayed in FactExtractionPanel
+- [x] Remove a fact
+- [x] Add a new fact manually
+- [x] Confirm facts (ready for next step)
+
+**Dependencies:** Tasks 1.2, 3.5, 5.2
+**Status:** Working via chat component integration
 
 #### 6.3 Test Fact Persistence
-- [ ] Extract facts
-- [ ] Continue to next page
-- [ ] Check localStorage: `localStorage.getItem('facts_1')`
-- [ ] Verify facts are stored as JSON
 
-**Dependencies:** Task 3.1
-**Testing:** Should see facts JSON in localStorage
+- [x] Extract facts via chat
+- [x] Confirm facts
+- [x] Check localStorage: `localStorage.getItem('facts_current')`
+- [x] Verify facts are stored as JSON
+
+**Dependencies:** Task 3.3
+**Status:** Facts stored in localStorage with key `facts_current`
+
+---
+
+### 7. UI/UX Enhancements
+
+#### 7.1 Chat Display Improvements
+
+- [x] Hide PDF/URL extracted content from chat display:
+
+  - User's original message shown in chat
+  - Extracted PDF/URL content sent to AI but not displayed
+  - PDF icon indicator shown when materials are processed
+
+- [x] Streaming message handling:
+
+  - Shows "Processing your materials and extracting facts..." during streaming
+  - Hides raw JSON code blocks from assistant messages
+  - Only shows cleaned conversational text after streaming completes
+
+- [x] JSON code block removal:
+  - Removes ```json code blocks from assistant messages
+  - Removes standalone JSON objects containing facts
+  - Cleans up extra whitespace
+
+**Dependencies:** Task 3.5
+**Implementation:** Enhanced `chat-preview.tsx` to filter and format messages appropriately
+
+#### 7.2 Loading States
+
+- [x] Loading spinner in main content area:
+
+  - Shows animated spinner with "Analyzing your materials and extracting facts..." message
+  - Appears in `/dashboard/create` page main content area
+  - Managed via FactExtractionContext `isExtracting` state
+
+- [x] Loading state management:
+  - `setIsExtracting(true)` called when message sent for fact extraction
+  - `setIsExtracting(false)` called when facts are extracted or if extraction fails
+  - Loading state synchronized between chat and main content
+
+**Dependencies:** Task 3.3
+**Implementation:** Loading state shown in main content area, not in chat, for better UX
 
 ---
 
@@ -502,33 +476,59 @@ Implement client-side fact extraction from PDF files, URLs, and text input. This
 
 **Before moving to Phase 04, verify:**
 
-- [ ] PDF.js library installed and working
-- [ ] PDF text extraction works
-- [ ] Fact extraction logic identifies key concepts
-- [ ] Topic input page renders all 3 input methods
-- [ ] Text input extracts facts
-- [ ] PDF upload extracts facts
-- [ ] Facts are editable
-- [ ] Facts can be added/removed
-- [ ] Facts are stored in localStorage
-- [ ] Navigation to next page works
+- [x] PDF.js library installed and working
+- [x] PDF text extraction works
+- [x] Fact extraction logic identifies key concepts (via AI agent)
+- [x] All 3 input methods work (text, PDF, URL via chat component)
+- [x] Text input extracts facts
+- [x] PDF upload extracts facts
+- [x] Facts are editable
+- [x] Facts can be added/removed
+- [x] Facts are stored in localStorage
+- [x] Facts can be confirmed and ready for next step
 
 ---
 
 ## Completion Status
 
-**Total Tasks:** 22
-**Completed:** 0
-**Percentage:** 0%
+**Total Tasks:** 22 (original) + 4 (new sections) = 26 total
+**Completed:** 18
+**Incomplete/Not Applicable:** 8
+**Percentage:** ~69% (18/26)
 
-**Status:** ⏳ Not Started
+**Status:** ✅ Mostly Complete - Core functionality implemented with AI agent approach
 
 ---
 
 ## Notes
 
-- Fact extraction is basic keyword matching - can be enhanced with NLP libraries
-- URL fetching uses CORS proxy - may have rate limits
-- Consider adding progress indicator for PDF processing
+### Implementation Approach
+
+- **Fact Extraction:** Uses AI agent (GPT-4o-mini) instead of keyword matching for more accurate and flexible fact extraction
+- **Integration:** Fact extraction integrated into existing chat component (`chat-preview.tsx`) rather than separate topic input page
+- **State Management:** Uses React Context (`FactExtractionContext`) for managing fact extraction state across components
+
+### Technical Details
+
+- **PDF.js Worker:** Worker file copied to `public/` folder via postinstall script for reliable loading (avoids CDN issues)
+- **URL Fetching:** Uses multiple CORS proxy fallbacks (allorigins.win, corsproxy.io, codetabs.com) with 10-second timeout for better reliability
+- **Chat Display:** Enhanced to hide extracted content and JSON code blocks, showing only user-friendly messages
+- **Loading States:** Loading indicator shown in main content area with spinner, synchronized with extraction process
+
+### Completed Features
+
+- PDF text extraction with type-safe implementation
+- URL content fetching with multiple proxy fallbacks
+- AI agent-based fact extraction via chat API
+- Fact review and editing in FactExtractionPanel
+- Add/delete facts functionality
+- Facts stored in localStorage
+- Clean chat UI with processing indicators
+- Loading states in main content area
+
+### Future Enhancements
+
+- Consider adding progress indicator for large PDF processing
 - Fact confidence scores can be displayed to users
 - Add validation to prevent empty facts from being submitted
+- Consider adding fact export/import functionality
