@@ -313,6 +313,26 @@ class GenerateAudioResponse(BaseModel):
     total_cost: float
 
 
+class FinalizeScriptRequest(BaseModel):
+    session_id: str
+    script_id: str
+    # Image generation options
+    model: Optional[str] = "flux-schnell"
+    images_per_part: Optional[int] = 2
+    # Audio generation options
+    voice: Optional[str] = "alloy"
+    audio_option: Optional[str] = "tts"
+
+
+class FinalizeScriptResponse(BaseModel):
+    session_id: str
+    status: str
+    micro_scenes: MicroSceneResponse
+    audio_files: List[Dict[str, Any]]
+    total_duration: float
+    total_cost: float
+
+
 @router.post("/generate-audio", response_model=GenerateAudioResponse)
 async def generate_audio(
     request: GenerateAudioRequest,
@@ -363,6 +383,73 @@ async def generate_audio(
     return {
         "session_id": request.session_id,
         "status": result["status"],
+        "audio_files": result.get("audio_files", []),
+        "total_duration": result.get("total_duration", 0.0),
+        "total_cost": result.get("total_cost", 0.0)
+    }
+
+
+@router.post("/finalize-script", response_model=FinalizeScriptResponse)
+async def finalize_script(
+    request: FinalizeScriptRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Finalize script by generating both images and audio simultaneously.
+
+    **Authentication Required:** Include X-User-Email header.
+
+    Takes a script ID and generates:
+    - Images for each part (hook, concept, process, conclusion) using template + DALL-E
+    - Audio narration for each part using OpenAI TTS
+
+    Both processes run in parallel for maximum efficiency.
+
+    **Required Headers:**
+    - `X-User-Email` (string): User's email from NextAuth session
+
+    **Required Parameters:**
+    - `session_id` (string): Session ID for tracking
+    - `script_id` (string): ID of the script in the database
+
+    **Optional Parameters:**
+    - `model` (string): Image model - "flux-schnell", "flux-dev", "flux-pro", "sdxl" (default: "flux-schnell")
+    - `images_per_part` (int): Number of images per script part (default: 2)
+    - `voice` (string): OpenAI TTS voice - "alloy", "echo", "fable", "onyx", "nova", "shimmer" (default: "alloy")
+    - `audio_option` (string): Audio option - "tts", "upload", "none", "instrumental" (default: "tts")
+
+    **Returns:**
+    - `session_id`: Session ID for tracking
+    - `status`: Generation status
+    - `micro_scenes`: Object with hook, concept, process, conclusion images and cost
+    - `audio_files`: List of generated audio files with URLs and metadata
+    - `total_duration`: Total audio duration in seconds
+    - `total_cost`: Combined cost of image and audio generation
+    """
+    # Call orchestrator to generate images and audio simultaneously
+    result = await orchestrator.finalize_script(
+        db=db,
+        session_id=request.session_id,
+        user_id=current_user.id,
+        script_id=request.script_id,
+        image_options={
+            "model": request.model,
+            "images_per_part": request.images_per_part
+        },
+        audio_config={
+            "voice": request.voice,
+            "audio_option": request.audio_option
+        }
+    )
+
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result.get("message", "Script finalization failed"))
+
+    return {
+        "session_id": request.session_id,
+        "status": result["status"],
+        "micro_scenes": result.get("micro_scenes", {}),
         "audio_files": result.get("audio_files", []),
         "total_duration": result.get("total_duration", 0.0),
         "total_cost": result.get("total_cost", 0.0)
@@ -511,6 +598,85 @@ async def build_narrative(
         "script": result["script"],
         "cost": result["cost"],
         "duration": result["duration"]
+    }
+
+
+# Test endpoint - Save pre-written script
+class SaveTestScriptRequest(BaseModel):
+    script_id: str
+    hook: Dict[str, Any]
+    concept: Dict[str, Any]
+    process: Dict[str, Any]
+    conclusion: Dict[str, Any]
+
+
+class SaveTestScriptResponse(BaseModel):
+    status: str
+    script_id: str
+    message: str
+
+
+@router.post("/test/save-script", response_model=SaveTestScriptResponse)
+async def save_test_script(
+    request: SaveTestScriptRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Test endpoint to save a pre-written script to the database.
+    For testing purposes only - allows test UI to create scripts without AI.
+    """
+    from app.models.database import Script
+
+    # Create script in database
+    script = Script(
+        id=request.script_id,
+        user_id=current_user.id,
+        hook=request.hook,
+        concept=request.concept,
+        process=request.process,
+        conclusion=request.conclusion
+    )
+
+    db.merge(script)
+    db.commit()
+
+    return {
+        "status": "success",
+        "script_id": request.script_id,
+        "message": "Test script saved successfully"
+    }
+
+
+@router.get("/scripts/{script_id}")
+async def get_script(
+    script_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a script by ID.
+    Returns the full script data including hook, concept, process, and conclusion.
+    """
+    from app.models.database import Script
+
+    # Query script from database
+    script = db.query(Script).filter(
+        Script.id == script_id,
+        Script.user_id == current_user.id
+    ).first()
+
+    if not script:
+        raise HTTPException(status_code=404, detail=f"Script with ID {script_id} not found")
+
+    return {
+        "script_id": script.id,
+        "user_id": script.user_id,
+        "hook": script.hook,
+        "concept": script.concept,
+        "process": script.process,
+        "conclusion": script.conclusion,
+        "created_at": script.created_at.isoformat() if script.created_at else None
     }
 
 
