@@ -124,6 +124,7 @@ class StorageService:
                 Key=s3_key,
                 Body=file_content,
                 ContentType=content_type
+                # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
             s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
@@ -271,7 +272,8 @@ class StorageService:
                 Bucket=self.bucket_name,
                 Key=s3_key,
                 Body=file_content,
-                ContentType=content_type,
+                ContentType=content_type
+                # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
             # Generate S3 URL
@@ -435,6 +437,7 @@ class StorageService:
                 Key=s3_key,
                 Body=file_content,
                 ContentType=content_type
+                # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
             # Generate S3 URL
@@ -494,6 +497,7 @@ class StorageService:
                 Key=s3_key,
                 Body=json_content,
                 ContentType='application/json'
+                # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
             logger.info(f"Prompt config upload successful: {s3_key}")
@@ -581,7 +585,8 @@ class StorageService:
                 Bucket=self.bucket_name,
                 Key=s3_key,
                 Body=file_content,
-                ContentType=content_type,
+                ContentType=content_type
+                # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
             # Generate S3 URL
