@@ -2,19 +2,21 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { ChatProvider } from "@/components/layout/chat-context";
 import { UserSidebar } from "@/components/layout/user-sidebar";
 import { ThemeProvider } from "@/components/layout/theme-provider";
-import { BackendTokenProvider } from "@/components/auth/backend-token-provider";
+import { UserProvider } from "@/components/auth/user-provider";
 import { DashboardLayoutClient } from "./layout-client";
-import { getBackendToken } from "@/lib/auth-token";
+import { auth } from "@/server/auth";
 
 export default async function DashboardLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  // Exchange NextAuth session for backend JWT token
-  const backendToken = await getBackendToken();
+  // Get user info from NextAuth session
+  const session = await auth();
+  const userId = session?.user?.id;
+  const userEmail = session?.user?.email;
 
   return (
     <ThemeProvider>
-      <BackendTokenProvider token={backendToken}>
+      <UserProvider userId={userId} userEmail={userEmail}>
         <SidebarProvider>
           <ChatProvider>
             <div className="flex h-screen w-full">
@@ -23,7 +25,7 @@ export default async function DashboardLayout({
             </div>
           </ChatProvider>
         </SidebarProvider>
-      </BackendTokenProvider>
+      </UserProvider>
     </ThemeProvider>
   );
 }
