@@ -1,57 +1,49 @@
 """
 Batch Image Generator Agent
 
-Purpose: Generate multiple images for video scripts in parallel.
-Each script part (hook, concept, process, conclusion) gets 2-3 images
-with visual guidance from the script.
+Purpose: Generate multiple images for video scripts using:
+- 60% Educational Templates (customized with text overlays)
+- 40% DALL-E 3 AI Generation
 
-Based on PRD Section 4.3 - Updated for script-based generation.
+Each script part (hook, concept, process, conclusion) gets 2-3 images.
 """
 
 import time
 import asyncio
 import logging
 from typing import Optional, Dict, List, Any
-import replicate
+from io import BytesIO
 
 from app.agents.base import AgentInput, AgentOutput
+from app.agents.template_matcher import TemplateMatcher
+from app.agents.psd_customizer import PSDCustomizer
+from app.agents.dalle_generator import DALLEGenerator
+from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
 
 class BatchImageGeneratorAgent:
     """
-    Generates multiple images in parallel for video script parts.
+    Generates images for video scripts using templates (60%) and DALL-E 3 (40%).
 
-    Uses Flux or SDXL via Replicate to generate 2-3 images per script part
-    (hook, concept, process, conclusion) based on visual guidance.
+    Strategy:
+    - Tries to match templates first based on key concepts
+    - Falls back to DALL-E 3 for images without template matches
+    - Targets 60% template usage to minimize costs
     """
 
-    def __init__(self, replicate_api_key: str):
+    def __init__(self, openai_api_key: str = None):
         """
         Initialize the Batch Image Generator Agent.
 
         Args:
-            replicate_api_key: Replicate API key for image generation
+            openai_api_key: OpenAI API key for DALL-E 3
         """
-        self.api_key = replicate_api_key
-        self.client = replicate.Client(api_token=replicate_api_key)
-
-        # Model configurations
-        self.models = {
-            "flux-pro": "black-forest-labs/flux-pro",
-            "flux-dev": "black-forest-labs/flux-dev",
-            "flux-schnell": "black-forest-labs/flux-schnell",
-            "sdxl": "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
-        }
-
-        # Cost estimates (USD per image)
-        self.costs = {
-            "flux-pro": 0.05,
-            "flux-dev": 0.025,
-            "flux-schnell": 0.003,
-            "sdxl": 0.01
-        }
+        self.template_matcher = TemplateMatcher()
+        self.psd_customizer = PSDCustomizer()
+        self.dalle_generator = DALLEGenerator(api_key=openai_api_key)
+        self.storage_service = StorageService()
 
     async def process(self, input: AgentInput) -> AgentOutput:
         """
@@ -60,8 +52,8 @@ class BatchImageGeneratorAgent:
         Args:
             input: AgentInput containing:
                 - data["script"]: Script object with {hook, concept, process, conclusion}
-                - data["model"]: Model to use ("flux-pro", "flux-dev", "flux-schnell", "sdxl")
                 - data["images_per_part"]: Number of images per script part (default: 2)
+                - data["prefer_templates"]: Prefer templates over AI (default: True)
 
         Returns:
             AgentOutput containing:
@@ -72,6 +64,7 @@ class BatchImageGeneratorAgent:
                     conclusion: {images: [{image: url, metadata: {...}}]},
                   }
                 - data["cost"]: Total cost for all images
+                - data["stats"]: {templates_used: int, dalle_used: int}
                 - cost: Total cost (same as data["cost"])
                 - duration: Total time taken
         """
@@ -80,18 +73,12 @@ class BatchImageGeneratorAgent:
 
             # Extract input parameters
             script = input.data["script"]
-            model_name = input.data.get("model", "flux-schnell")  # Default to schnell
             images_per_part = input.data.get("images_per_part", 2)
-
-            if model_name not in self.models:
-                raise ValueError(
-                    f"Invalid model '{model_name}'. "
-                    f"Choose from: {list(self.models.keys())}"
-                )
+            prefer_templates = input.data.get("prefer_templates", True)
 
             logger.info(
                 f"[{input.session_id}] Generating {images_per_part} images per script part "
-                f"with {model_name}"
+                f"(prefer_templates={prefer_templates})"
             )
 
             # Generate images for each script part in parallel
@@ -103,12 +90,17 @@ class BatchImageGeneratorAgent:
                 script_part = script[part_name]
 
                 for i in range(images_per_part):
+                    # For 60% templates: use template for first 60% of images
+                    # Strategy: template for image 0, DALL-E for image 1 (if 2 images/part)
+                    # Or: template, template, DALL-E for 3 images
+                    use_template = prefer_templates and (i < int(images_per_part * 0.6) or i == 0)
+
                     task = self._generate_image_for_script_part(
                         session_id=input.session_id,
-                        model=model_name,
                         script_part=script_part,
                         part_name=part_name,
-                        image_index=i
+                        image_index=i,
+                        prefer_template=use_template
                     )
                     all_tasks.append(task)
                     task_metadata.append({"part_name": part_name, "index": i})
@@ -126,6 +118,8 @@ class BatchImageGeneratorAgent:
 
             total_cost = 0.0
             errors = []
+            templates_used = 0
+            dalle_used = 0
 
             for i, result in enumerate(results):
                 part_name = task_metadata[i]["part_name"]
@@ -143,6 +137,12 @@ class BatchImageGeneratorAgent:
                 })
                 total_cost += result["cost"]
 
+                # Track stats
+                if result["metadata"]["source"] == "template":
+                    templates_used += 1
+                else:
+                    dalle_used += 1
+
             duration = time.time() - start_time
 
             # Check if we have at least some images generated
@@ -150,10 +150,13 @@ class BatchImageGeneratorAgent:
             success = total_images > 0
 
             if success:
+                template_pct = (templates_used / total_images * 100) if total_images > 0 else 0
                 logger.info(
                     f"[{input.session_id}] Generated {total_images} total images "
+                    f"({templates_used} templates, {dalle_used} DALL-E) "
                     f"in {duration:.2f}s (${total_cost:.2f})"
                 )
+                logger.info(f"[{input.session_id}] Template usage: {template_pct:.1f}%")
             else:
                 logger.error(
                     f"[{input.session_id}] All image generations failed"
@@ -164,6 +167,11 @@ class BatchImageGeneratorAgent:
                 data={
                     "micro_scenes": micro_scenes,
                     "cost": total_cost,
+                    "stats": {
+                        "templates_used": templates_used,
+                        "dalle_used": dalle_used,
+                        "total_images": total_images
+                    },
                     "failed_count": len(errors),
                     "errors": errors if errors else None
                 },
@@ -187,80 +195,114 @@ class BatchImageGeneratorAgent:
     async def _generate_image_for_script_part(
         self,
         session_id: str,
-        model: str,
         script_part: Dict[str, Any],
         part_name: str,
-        image_index: int
+        image_index: int,
+        prefer_template: bool = True
     ) -> dict:
         """
-        Generate a single image for a script part via Replicate API.
+        Generate a single image for a script part.
+        Tries template first (if prefer_template), then DALL-E 3 as fallback.
 
         Args:
             session_id: Session ID for logging
-            model: Model name to use
             script_part: Script part object with {text, duration, key_concepts, visual_guidance}
             part_name: Name of script part (hook, concept, process, conclusion)
             image_index: Image index for this part (0-2)
+            prefer_template: Try template before DALL-E
 
         Returns:
             Dict with URL and metadata
 
         Raises:
-            Exception: If image generation fails
+            Exception: If both template and DALL-E generation fail
         """
         start = time.time()
 
         try:
-            model_id = self.models[model]
-
-            # Create prompt from visual guidance and key concepts
             visual_guidance = script_part.get("visual_guidance", "")
             key_concepts = script_part.get("key_concepts", [])
 
-            # Build comprehensive prompt
-            prompt = self._build_prompt_from_script(visual_guidance, key_concepts, image_index)
+            # Try template first if preferred
+            if prefer_template:
+                template_match = self.template_matcher.match_template(
+                    visual_guidance,
+                    key_concepts
+                )
 
-            # Build model input based on model type
-            if model.startswith("flux"):
-                model_input = self._build_flux_input_from_prompt(prompt)
-            else:  # SDXL
-                model_input = self._build_sdxl_input_from_prompt(prompt)
+                if template_match:
+                    logger.info(
+                        f"[{session_id}] Using template '{template_match['name']}' "
+                        f"for {part_name} image {image_index + 1}"
+                    )
 
-            logger.debug(
-                f"[{session_id}] Generating {part_name} image {image_index + 1}"
+                    # Customize template with text overlays
+                    customizations = {
+                        "title": key_concepts[0] if key_concepts else "",
+                        "labels": key_concepts[:3]
+                    }
+
+                    try:
+                        customized_image_bytes = self.psd_customizer.customize_template(
+                            template_match['preview_url'],
+                            customizations
+                        )
+
+                        # Upload customized template to S3
+                        # (For now, return a placeholder - storage integration needed)
+                        url = template_match['preview_url']  # TODO: Upload customized version
+
+                        duration = time.time() - start
+
+                        return {
+                            "url": url,
+                            "cost": 0.0,  # Templates are free
+                            "metadata": {
+                                "part_name": part_name,
+                                "image_index": image_index,
+                                "duration": duration,
+                                "source": "template",
+                                "template_id": template_match['template_id'],
+                                "template_name": template_match['name'],
+                                "key_concepts": key_concepts,
+                                "visual_guidance": visual_guidance[:200]
+                            }
+                        }
+                    except Exception as e:
+                        logger.warning(
+                            f"[{session_id}] Template customization failed: {e}, "
+                            f"falling back to DALL-E"
+                        )
+                        # Fall through to DALL-E
+
+            # Generate with DALL-E 3
+            logger.info(
+                f"[{session_id}] Generating {part_name} image {image_index + 1} "
+                f"with DALL-E 3"
             )
 
-            # Call Replicate API
-            output = await self.client.async_run(model_id, input=model_input)
+            result = await self.dalle_generator.generate_image(
+                visual_guidance,
+                style="educational"
+            )
 
-            # Extract image URL (output format varies by model)
-            if isinstance(output, list):
-                image_url = output[0] if output else None
-            else:
-                image_url = output
-
-            if not image_url:
-                raise ValueError("No image URL returned from Replicate")
+            if not result['success']:
+                raise Exception(result.get('error', 'DALL-E generation failed'))
 
             duration = time.time() - start
-            cost = self.costs[model]
-
-            logger.debug(
-                f"[{session_id}] {part_name} image {image_index + 1} generated in {duration:.2f}s"
-            )
 
             return {
-                "url": str(image_url),
-                "cost": cost,
+                "url": result['url'],
+                "cost": result['cost'],
                 "metadata": {
                     "part_name": part_name,
                     "image_index": image_index,
                     "duration": duration,
-                    "model": model,
-                    "resolution": "1024x1024",
+                    "source": "dalle3",
+                    "quality": result.get('quality', 'standard'),
                     "key_concepts": key_concepts,
-                    "visual_guidance": visual_guidance[:200],  # Truncate for storage
-                    "prompt_used": prompt[:200]  # Truncate for storage
+                    "visual_guidance": visual_guidance[:200],
+                    "prompt_used": result.get('prompt_used', '')[:200]
                 }
             }
 
@@ -272,79 +314,11 @@ class BatchImageGeneratorAgent:
             )
             raise
 
-    def _build_prompt_from_script(
-        self,
-        visual_guidance: str,
-        key_concepts: List[str],
-        image_index: int
-    ) -> str:
-        """
-        Build an image generation prompt from script visual guidance and key concepts.
+    def close(self):
+        """Cleanup resources."""
+        if hasattr(self, 'template_matcher'):
+            self.template_matcher.close()
 
-        Args:
-            visual_guidance: Visual guidance from script part
-            key_concepts: List of key concepts to visualize
-            image_index: Index of this image (to add variation)
-
-        Returns:
-            Complete prompt string for image generation
-        """
-        # Base prompt from visual guidance
-        prompt = visual_guidance
-
-        # Add key concepts if provided
-        if key_concepts:
-            concepts_str = ", ".join(key_concepts)
-            prompt += f", featuring: {concepts_str}"
-
-        # Add variation based on image index
-        variations = [
-            ", cinematic lighting, high quality",
-            ", professional photography, detailed",
-            ", studio lighting, sharp focus"
-        ]
-        if image_index < len(variations):
-            prompt += variations[image_index]
-
-        return prompt
-
-    def _build_flux_input_from_prompt(self, prompt: str) -> dict:
-        """
-        Build input parameters for Flux models from a prompt string.
-
-        Args:
-            prompt: Complete prompt string
-
-        Returns:
-            Flux model input dict
-        """
-        return {
-            "prompt": prompt,
-            "guidance": 7.5,
-            "num_outputs": 1,
-            "aspect_ratio": "16:9",  # Video format
-            "output_format": "png",
-            "output_quality": 100,
-            "safety_tolerance": 2,
-            "seed": 42  # Fixed seed for consistency
-        }
-
-    def _build_sdxl_input_from_prompt(self, prompt: str) -> dict:
-        """
-        Build input parameters for SDXL model from a prompt string.
-
-        Args:
-            prompt: Complete prompt string
-
-        Returns:
-            SDXL model input dict
-        """
-        return {
-            "prompt": prompt,
-            "negative_prompt": "blurry, distorted, low quality, watermark, text, labels",
-            "width": 1920,  # 16:9 aspect ratio
-            "height": 1080,
-            "guidance_scale": 7.5,
-            "num_inference_steps": 50,
-            "seed": 42  # Fixed seed for consistency
-        }
+    def __del__(self):
+        """Cleanup on deletion."""
+        self.close()

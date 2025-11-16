@@ -43,16 +43,24 @@ class VideoGenerationOrchestrator:
         """
         self.websocket_manager = websocket_manager
 
-        # Initialize AI agents (Person B integration)
+        # Initialize AI agents
+        openai_api_key = settings.OPENAI_API_KEY
         replicate_api_key = settings.REPLICATE_API_KEY
+
+        if not openai_api_key:
+            logger.warning(
+                "OPENAI_API_KEY not set - image generation will fail. "
+                "Add it to .env file."
+            )
+
         if not replicate_api_key:
             logger.warning(
-                "REPLICATE_API_KEY not set - agents will fail at runtime. "
+                "REPLICATE_API_KEY not set - some agents will fail at runtime. "
                 "Add it to .env file."
             )
 
         self.prompt_parser = PromptParserAgent(replicate_api_key) if replicate_api_key else None
-        self.image_generator = BatchImageGeneratorAgent(replicate_api_key) if replicate_api_key else None
+        self.image_generator = BatchImageGeneratorAgent(openai_api_key) if openai_api_key else None
         self.narrative_builder = NarrativeBuilderAgent(replicate_api_key) if replicate_api_key else None
 
         # Initialize Person C agents (Video Pipeline)

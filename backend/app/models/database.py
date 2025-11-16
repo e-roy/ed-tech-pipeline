@@ -137,6 +137,28 @@ class Script(Base):
         return f"<Script(id={self.id}, user_id={self.user_id})>"
 
 
+class Template(Base):
+    """Educational template for visual generation."""
+
+    __tablename__ = "templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False)  # e.g., 'biology', 'astronomy', 'earth_science'
+    keywords = Column(JSON, nullable=False)  # Array of keywords for matching
+    psd_url = Column(String(500), nullable=True)  # URL to PSD file (if available)
+    preview_url = Column(String(500), nullable=False)  # URL to preview PNG
+    editable_layers = Column(JSON, nullable=True)  # Info about editable text layers
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<Template(id={self.template_id}, name={self.name}, category={self.category})>"
+
+
 class WebSocketConnection(Base):
     """Track active WebSocket connections for real-time updates."""
 
