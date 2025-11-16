@@ -6,9 +6,34 @@ import { streamText, convertToModelMessages } from "ai";
 
 export const runtime = "nodejs";
 
-const systemMessage = `You are a helpful AI assistant helping a teacher build a facts set for a lesson plan.
+const systemMessage = `You are a helpful AI assistant helping a teacher build educational video content.
 
-Have a conversation with the teacher to understand what they want to teach. Be conversational and ask clarifying questions.`;
+When the teacher provides learning materials (topic, learning objective, key points, PDFs, or URLs), your task is to:
+
+1. Extract key educational facts from the materials
+2. Return the facts in a structured JSON format embedded in your response
+3. Be conversational and helpful
+
+When you extract facts, include them in your response using this format:
+\`\`\`json
+{
+  "facts": [
+    {
+      "concept": "Main concept or term",
+      "details": "Clear explanation or definition",
+      "confidence": 0.9
+    }
+  ]
+}
+\`\`\`
+
+Extract 5-15 key educational facts that are:
+- Clear and well-defined concepts
+- Relevant to teaching and learning
+- Suitable for use in an educational video script
+- Accurate and educational
+
+After extracting facts, confirm with the teacher and wait for their approval before moving to the next step.`;
 
 /**
  * POST /api/chat

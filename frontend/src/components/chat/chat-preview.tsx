@@ -1,8 +1,11 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+import { useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, FileUIPart } from "ai";
+import { useFactExtraction } from "@/components/fact-extraction/FactExtractionContext";
 import {
   Conversation,
   ConversationContent,
@@ -12,8 +15,6 @@ import {
   Message,
   MessageContent,
   MessageResponse,
-  MessageAttachments,
-  MessageAttachment,
 } from "@/components/ai-elements/message";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import {
@@ -30,29 +31,38 @@ import {
   PromptInputActionAddAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
-import { BookOpen, GraduationCap, Sparkles } from "lucide-react";
-
-const PROMPTS = [
-  {
-    icon: BookOpen,
-    text: "Create a lesson plan",
-    prompt:
-      "Create a lesson plan for [subject] covering [topic] for [grade level] students.",
-  },
-  {
-    icon: GraduationCap,
-    text: "Best activities for grade level",
-    prompt:
-      "What activities work best for [grade level] students learning [subject]?",
-  },
-  {
-    icon: Sparkles,
-    text: "Make topic engaging",
-    prompt: "How can I make [topic] more engaging for my students?",
-  },
-];
+import { parseFactsFromMessage } from "@/lib/factParsing";
+import { PROMPTS } from "@/components/chat/chatConstants";
+import { ChatMessage } from "@/components/chat/ChatMessage";
+import { useFactExtractionSubmit } from "@/components/chat/useFactExtractionSubmit";
 
 export function ChatPreview() {
+  const pathname = usePathname();
+  const isCreatePage = pathname === "/dashboard/create";
+  const factExtraction = useFactExtraction();
+
+  // Handle when AI finishes responding
+  const handleMessageFinish = useCallback(
+    (message: UIMessage) => {
+      if (!isCreatePage || factExtraction.confirmedFacts) return;
+
+      const textPart = message.parts?.find(
+        (part): part is { type: "text"; text: string } => part.type === "text",
+      );
+
+      if (textPart?.text && message.role === "assistant") {
+        const facts = parseFactsFromMessage(textPart.text);
+        if (facts !== null && facts.length > 0) {
+          factExtraction.setExtractedFacts(facts);
+        } else {
+          // If no facts found, stop loading state
+          factExtraction.setIsExtracting?.(false);
+        }
+      }
+    },
+    [isCreatePage, factExtraction],
+  );
+
   // Use AI SDK's useChat hook for chat state management
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({
@@ -60,8 +70,12 @@ export function ChatPreview() {
     }),
     onFinish: (event) => {
       console.log(event.message);
+      handleMessageFinish(event.message);
     },
   });
+
+  // Use fact extraction submit hook
+  const { handleFactExtractionSubmit } = useFactExtractionSubmit();
 
   // Handle PromptInput submit with text and file attachments
   const handleSubmit = async (
@@ -70,19 +84,23 @@ export function ChatPreview() {
   ) => {
     if (!message.text.trim() && message.files.length === 0) return;
 
-    // Build message parts array
+    // On create page, prepare message for AI fact extraction
+    if (isCreatePage && !factExtraction.confirmedFacts) {
+      await handleFactExtractionSubmit(message, sendMessage);
+      return;
+    }
+
+    // Normal chat behavior for other pages or after facts are confirmed
     const parts: Array<{ type: "text"; text: string } | FileUIPart> = [];
 
     if (message.text.trim()) {
       parts.push({ type: "text", text: message.text.trim() });
     }
 
-    // Add file parts
     message.files.forEach((file) => {
       parts.push(file);
     });
 
-    // Use sendMessage to add the user message and trigger the API call
     await sendMessage({
       role: "user",
       parts,
@@ -106,69 +124,60 @@ export function ChatPreview() {
               <Message from="assistant">
                 <MessageContent>
                   <MessageResponse>
-                    Hello, I&apos;m your creative assistant. I can help you
-                    create lesson plans, suggest activities, and make topics
-                    more engaging for your students. What would you like to
-                    create?
+                    {isCreatePage
+                      ? "I'll help you extract educational facts from your learning materials. Please provide:\n\n- Topic\n- Learning objective\n- Key points\n- PDF files or URLs (optional)\n\nI'll analyze the content and extract key facts for your review."
+                      : "Hello, I'm your creative assistant. I can help you create lesson plans, suggest activities, and make topics more engaging for your students. What would you like to create?"}
                   </MessageResponse>
                 </MessageContent>
               </Message>
-              <div className="flex w-full flex-col gap-2">
-                {PROMPTS.map((prompt) => {
-                  const IconComponent = prompt.icon;
-                  return (
-                    <Suggestion
-                      key={prompt.text}
-                      suggestion={prompt.prompt}
-                      onClick={handleSuggestionClick}
-                      className="justify-start"
-                      size="sm"
-                    >
-                      <IconComponent className="mr-2 size-4" />
-                      {prompt.text}
-                    </Suggestion>
-                  );
-                })}
-              </div>
+              {!isCreatePage && (
+                <div className="flex w-full flex-col gap-2">
+                  {PROMPTS.map((prompt) => {
+                    const IconComponent = prompt.icon;
+                    return (
+                      <Suggestion
+                        key={prompt.text}
+                        suggestion={prompt.prompt}
+                        onClick={handleSuggestionClick}
+                        className="justify-start"
+                        size="sm"
+                      >
+                        <IconComponent className="mr-2 size-4" />
+                        {prompt.text}
+                      </Suggestion>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
           {messages.map((message: UIMessage, index: number) => {
-            // Extract text and file parts from message
-            const textPart = message.parts?.find(
-              (part): part is { type: "text"; text: string } =>
-                part.type === "text",
-            );
-            const fileParts =
-              message.parts?.filter(
-                (part): part is FileUIPart => part.type === "file",
-              ) ?? [];
-
-            const content = textPart?.text ?? "";
+            const isStreaming =
+              status === "streaming" && index === messages.length - 1;
+            const isStreamingAssistant =
+              isStreaming && message.role === "assistant";
 
             return (
-              <Message key={message.id ?? index} from={message.role}>
-                {fileParts.length > 0 && (
-                  <MessageAttachments>
-                    {fileParts.map((file, fileIndex) => (
-                      <MessageAttachment key={fileIndex} data={file} />
-                    ))}
-                  </MessageAttachments>
-                )}
-                {content && (
-                  <MessageContent>
-                    <MessageResponse>{content}</MessageResponse>
-                  </MessageContent>
-                )}
-              </Message>
+              <ChatMessage
+                key={message.id ?? index}
+                message={message}
+                index={index}
+                isStreaming={isStreaming}
+                isStreamingAssistant={isStreamingAssistant}
+                isCreatePage={isCreatePage}
+                factExtraction={factExtraction}
+              />
             );
           })}
-          {status === "streaming" && (
-            <Message from="assistant">
-              <MessageContent>
-                <MessageResponse>Generating response...</MessageResponse>
-              </MessageContent>
-            </Message>
-          )}
+          {/* Hide streaming message on create page during fact extraction - loading state shown in main content */}
+          {status === "streaming" &&
+            !(isCreatePage && !factExtraction.confirmedFacts) && (
+              <Message from="assistant">
+                <MessageContent>
+                  <MessageResponse>Generating response...</MessageResponse>
+                </MessageContent>
+              </Message>
+            )}
           {error && (
             <Message from="assistant">
               <MessageContent>
@@ -180,12 +189,21 @@ export function ChatPreview() {
         <ConversationScrollButton />
       </Conversation>
 
-      <PromptInput onSubmit={handleSubmit}>
+      <PromptInput
+        onSubmit={handleSubmit}
+        accept={isCreatePage ? ".pdf,application/pdf" : undefined}
+      >
         <PromptInputBody>
           <PromptInputAttachments>
             {(attachment) => <PromptInputAttachment data={attachment} />}
           </PromptInputAttachments>
-          <PromptInputTextarea placeholder="Ask anything about creating lesson plans..." />
+          <PromptInputTextarea
+            placeholder={
+              isCreatePage
+                ? "Paste text, upload a PDF, or enter a URL..."
+                : "Ask anything about creating lesson plans..."
+            }
+          />
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputActionMenu>
