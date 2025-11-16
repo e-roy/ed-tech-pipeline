@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from typing import Optional
-import hashlib
+import bcrypt
 
 from app.database import get_db
 from app.config import get_settings
@@ -16,9 +16,6 @@ from app.models.database import User
 
 router = APIRouter()
 settings = get_settings()
-
-# Password hashing - using SHA256 for MVP simplicity
-# In production, use bcrypt or argon2
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -39,17 +36,25 @@ class TokenExchangeRequest(BaseModel):
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return get_password_hash(plain_password) == hashed_password
+    """
+    Verify a password against its bcrypt hash.
+
+    Compatible with frontend's bcrypt hashing (bcryptjs).
+    """
+    try:
+        return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
     """
-    Hash a password using SHA256.
+    Hash a password using bcrypt.
 
-    NOTE: This is simplified for MVP. In production, use bcrypt/argon2.
+    Compatible with frontend's bcrypt hashing (bcryptjs).
     """
-    return hashlib.sha256(password.encode()).hexdigest()
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode(), salt).decode()
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -168,36 +173,41 @@ async def exchange_token(
 ):
     """
     Exchange NextAuth session for backend JWT token.
-    
+
     This endpoint allows the frontend to exchange a NextAuth session (identified by email)
     for a backend JWT token. This keeps the backend independent of NextAuth while
     allowing seamless authentication flow.
-    
+
+    **Auto-creates users:** If a user doesn't exist in the backend database, they will be
+    automatically created. This allows Google OAuth users to seamlessly use the backend API.
+
     Args:
         request: TokenExchangeRequest containing user email from NextAuth session
-        
+
     Returns:
         JWT access token compatible with backend authentication
-        
-    Raises:
-        HTTPException: If user doesn't exist in backend database
     """
-    # Find user by email
+    # Find or create user by email
     user = db.query(User).filter(User.email == request.email).first()
-    
+
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with email {request.email} not found in backend database"
+        # Auto-create user for OAuth users (Google, etc.)
+        # Use a placeholder password hash since OAuth users don't have passwords
+        user = User(
+            email=request.email,
+            hashed_password=get_password_hash(f"oauth_{request.email}_placeholder")
         )
-    
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email},
         expires_delta=access_token_expires
     )
-    
+
     return {
         "access_token": access_token,
         "token_type": "bearer"

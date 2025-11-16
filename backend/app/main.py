@@ -3,6 +3,7 @@ Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from app.config import get_settings
 
 # Import routes
@@ -17,6 +18,42 @@ app = FastAPI(
     version="1.0.0",
     debug=settings.DEBUG
 )
+
+
+def custom_openapi():
+    """
+    Customize OpenAPI schema to explicitly show authentication requirements.
+
+    This adds a security scheme that displays:
+    - Lock icons on protected endpoints in Swagger UI
+    - "Authorize" button to enter Bearer token
+    - Clear indication of which endpoints require auth
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    # Define Bearer token security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your JWT token from /api/auth/login or /api/auth/exchange"
+        }
+    }
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # Configure CORS for Next.js frontend
 app.add_middleware(

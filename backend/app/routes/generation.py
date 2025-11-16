@@ -88,8 +88,22 @@ async def generate_images(
     """
     Step 1: Generate images using Flux-Schnell via Replicate.
 
+    **Authentication Required:** Include Bearer token in Authorization header.
+
     Creates a new session and generates images based on user prompt using the Flux-Schnell model.
     Images are stored in S3 and tracked in the database.
+
+    **Required Parameters:**
+    - `prompt` (string): Text description of images to generate
+
+    **Optional Parameters:**
+    - `num_images` (int): Number of images to generate (default: 4)
+    - `aspect_ratio` (string): Image aspect ratio (default: "16:9")
+
+    **Returns:**
+    - `session_id`: Unique identifier for this generation session
+    - `status`: Generation status
+    - `images`: List of generated image URLs
     """
     # Create new session
     session_id = str(uuid.uuid4())
@@ -157,7 +171,13 @@ async def save_approved_images(
     """
     Step 2: Save user-approved images to database.
 
+    **Authentication Required:** Include Bearer token in Authorization header.
+
     User selects which generated images to use for video generation.
+
+    **Required Parameters:**
+    - `session_id` (string): Session ID from generate-images
+    - `approved_image_urls` (list): URLs of approved images
     """
     # Verify session exists and belongs to user
     session = db.query(SessionModel).filter(
@@ -198,8 +218,18 @@ async def generate_clips(
     """
     Step 3: Generate video clips using Gen-4-Turbo via Replicate.
 
+    **Authentication Required:** Include Bearer token in Authorization header.
+
     Takes approved images and generates video clips using the Gen-4-Turbo model.
     Clips are stored in S3 and tracked in the database.
+
+    **Required Parameters:**
+    - `session_id` (string): Session ID with approved images
+    - `video_prompt` (string): Description for video generation
+
+    **Optional Parameters:**
+    - `num_clips` (int): Number of clips to generate (default: 3)
+    - `duration` (float): Duration per clip in seconds (default: 5.0)
     """
     # Verify session
     session = db.query(SessionModel).filter(
@@ -280,8 +310,17 @@ async def compose_final_video(
     """
     Step 5: Compose final video with text overlays and audio.
 
+    **Authentication Required:** Include Bearer token in Authorization header.
+
     Combines approved clips with optional text overlays and audio using FFmpeg.
     Final video is stored in S3 and tracked in the database.
+
+    **Required Parameters:**
+    - `session_id` (string): Session ID with approved clips
+
+    **Optional Parameters:**
+    - `text_overlays` (list): Text overlay configurations
+    - `audio_url` (string): URL of audio to add
     """
     # Verify session
     session = db.query(SessionModel).filter(
