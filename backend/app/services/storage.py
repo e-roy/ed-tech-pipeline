@@ -647,3 +647,67 @@ class StorageService:
         except ClientError as e:
             logger.error(f"File deletion failed: {e}")
             return False
+
+    def read_file(self, s3_key: str) -> bytes:
+        """
+        Read a file from S3.
+
+        Args:
+            s3_key: S3 object key
+
+        Returns:
+            File content as bytes
+
+        Raises:
+            ValueError: If storage service not configured
+            Exception: If file read fails
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        try:
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+            file_content = response['Body'].read()
+            logger.debug(f"Read {len(file_content)} bytes from S3: {s3_key}")
+            return file_content
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'NoSuchKey':
+                logger.error(f"File not found in S3: {s3_key}")
+                raise FileNotFoundError(f"File not found in S3: {s3_key}")
+            logger.error(f"Failed to read file from S3: {e}")
+            raise Exception(f"Failed to read file from S3: {e}")
+
+    def file_exists(self, s3_key: str) -> bool:
+        """
+        Check if a file exists in S3.
+
+        Args:
+            s3_key: S3 object key
+
+        Returns:
+            True if file exists, False otherwise
+
+        Raises:
+            ValueError: If storage service not configured
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        try:
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == '404' or error_code == 'NoSuchKey':
+                return False
+            # Re-raise other errors
+            logger.error(f"Error checking file existence: {e}")
+            raise Exception(f"Error checking file existence: {e}")
