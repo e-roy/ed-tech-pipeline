@@ -1,18 +1,25 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import type { UIMessage } from "ai";
 import ChatInput from "../chat/chat-input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
-
 export function ChatPreview() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Use AI SDK's useChat hook for chat state management
+  const { messages, sendMessage, status, error } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+    }),
+    onFinish: (event) => {
+      console.log(event.message);
+    },
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -22,11 +29,15 @@ export function ChatPreview() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (message: string) => {
+  // Custom submit handler that works with ChatInput component
+  const onChatInputSubmit = async (message: string) => {
     if (!message.trim()) return;
 
-    setMessages((prev) => [...prev, { role: "user", content: message }]);
-    // TODO: Add assistant response handling here
+    // Use sendMessage to add the user message and trigger the API call
+    await sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: message }],
+    });
   };
 
   return (
@@ -35,34 +46,60 @@ export function ChatPreview() {
         <div className="flex flex-col gap-4 pr-4">
           {messages.length === 0 ? (
             <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-              Start a conversation to create your lesson plan
+              Start a conversation to generate images
             </div>
           ) : (
-            messages.map((message, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "flex w-full",
-                  message.role === "user" ? "justify-end" : "justify-start",
-                )}
-              >
+            messages.map((message: UIMessage, index: number) => {
+              const isUser = message.role === "user";
+              // Extract text from message parts
+              const textPart = message.parts?.find(
+                (part): part is { type: "text"; text: string } =>
+                  part.type === "text",
+              );
+              const content = textPart?.text ?? "";
+
+              return (
                 <div
+                  key={message.id ?? index}
                   className={cn(
-                    "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground",
+                    "flex w-full flex-col gap-2",
+                    isUser ? "items-end" : "items-start",
                   )}
                 >
-                  {message.content}
+                  {content && (
+                    <div
+                      className={cn(
+                        "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
+                        isUser
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground",
+                      )}
+                    >
+                      {content}
+                    </div>
+                  )}
                 </div>
+              );
+            })
+          )}
+          {status === "streaming" && (
+            <div className="flex w-full justify-start">
+              <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-3 text-sm">
+                Generating images...
               </div>
-            ))
+            </div>
+          )}
+          {error && (
+            <div className="flex w-full justify-start">
+              <div className="bg-destructive/10 text-destructive max-w-[80%] rounded-2xl px-4 py-3 text-sm">
+                Error: {error.message}
+              </div>
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
-      <ChatInput onSubmit={handleSubmit} />
+      <ChatInput onSubmit={onChatInputSubmit} />
     </div>
   );
 }
