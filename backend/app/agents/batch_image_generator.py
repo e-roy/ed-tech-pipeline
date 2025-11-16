@@ -15,9 +15,9 @@ from typing import Optional, Dict, List, Any
 from io import BytesIO
 
 from app.agents.base import AgentInput, AgentOutput
-from app.agents.template_matcher import TemplateMatcher
-from app.agents.psd_customizer import PSDCustomizer
-from app.agents.dalle_generator import DALLEGenerator
+from app.agents.helpers.template_matcher import TemplateMatcher
+from app.agents.helpers.psd_customizer import PSDCustomizer
+from app.agents.helpers.dalle_generator import DALLEGenerator
 from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)

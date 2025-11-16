@@ -504,6 +504,110 @@ class StorageService:
             logger.error(f"Prompt config upload failed: {e}")
             raise Exception(f"Upload failed: {e}")
 
+    async def upload_local_file(
+        self,
+        file_path: str,
+        asset_type: str,
+        session_id: str,
+        asset_id: str,
+        user_id: int
+    ) -> Dict[str, Any]:
+        """
+        Upload a local file to S3/R2.
+
+        Args:
+            file_path: Local path to file
+            asset_type: Type of asset ('image', 'video', 'clip', 'final', 'audio')
+            session_id: Session ID for organizing files
+            asset_id: Unique asset identifier
+            user_id: User ID for organizing files in user folders
+
+        Returns:
+            Dict containing:
+                - url: S3 URL of uploaded file
+                - key: S3 object key
+                - size: File size in bytes
+
+        Raises:
+            ValueError: If storage service not configured
+            Exception: If upload fails
+        """
+        if not self.s3_client:
+            raise ValueError(
+                "Storage service not configured. "
+                "Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and S3_BUCKET_NAME in .env"
+            )
+
+        try:
+            # Read file from local disk
+            logger.info(f"Reading local file: {file_path}")
+
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+
+            file_size = len(file_content)
+            logger.info(f"Read {file_size} bytes")
+
+            # Determine file extension and content type
+            if asset_type == 'image':
+                extension = '.png'
+                content_type = 'image/png'
+                output_type = 'images'
+            elif asset_type in ['video', 'clip']:
+                extension = '.mp4'
+                content_type = 'video/mp4'
+                output_type = 'videos'
+            elif asset_type == 'final':
+                extension = '.mp4'
+                content_type = 'video/mp4'
+                output_type = 'final'
+            elif asset_type == 'audio':
+                extension = '.mp3'
+                content_type = 'audio/mpeg'
+                output_type = 'audio'
+            else:
+                extension = os.path.splitext(file_path)[1] or '.bin'
+                content_type = 'application/octet-stream'
+                output_type = 'other'
+
+            # Create S3 key using new user-based structure
+            filename = f"{asset_id}{extension}"
+            s3_key = self.get_user_output_path(user_id, output_type, filename)
+
+            # Upload to S3
+            logger.info(f"Uploading to S3: {s3_key}")
+
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=file_content,
+                ContentType=content_type,
+            )
+
+            # Generate S3 URL
+            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+
+            logger.info(f"Upload successful: {s3_url}")
+
+            return {
+                "url": s3_url,
+                "key": s3_key,
+                "size": file_size,
+                "content_type": content_type
+            }
+
+        except FileNotFoundError as e:
+            logger.error(f"Local file not found: {e}")
+            raise Exception(f"File not found: {e}")
+
+        except ClientError as e:
+            logger.error(f"S3 upload failed: {e}")
+            raise Exception(f"Upload failed: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error in upload_local_file: {e}")
+            raise
+
     def delete_user_file(self, user_id: int, s3_key: str) -> bool:
         """
         Delete a file from user folders with ownership verification.

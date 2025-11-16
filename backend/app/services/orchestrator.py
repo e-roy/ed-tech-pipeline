@@ -12,6 +12,7 @@ from app.agents.prompt_parser import PromptParserAgent
 from app.agents.batch_image_generator import BatchImageGeneratorAgent
 from app.agents.video_generator import VideoGeneratorAgent
 from app.agents.narrative_builder import NarrativeBuilderAgent
+from app.agents.audio_pipeline import AudioPipelineAgent
 from app.services.ffmpeg_compositor import FFmpegCompositor
 from app.services.storage import StorageService
 from app.config import get_settings
@@ -49,7 +50,7 @@ class VideoGenerationOrchestrator:
 
         if not openai_api_key:
             logger.warning(
-                "OPENAI_API_KEY not set - image generation will fail. "
+                "OPENAI_API_KEY not set - image and audio generation will fail. "
                 "Add it to .env file."
             )
 
@@ -62,6 +63,7 @@ class VideoGenerationOrchestrator:
         self.prompt_parser = PromptParserAgent(replicate_api_key) if replicate_api_key else None
         self.image_generator = BatchImageGeneratorAgent(openai_api_key) if openai_api_key else None
         self.narrative_builder = NarrativeBuilderAgent(replicate_api_key) if replicate_api_key else None
+        self.audio_pipeline = AudioPipelineAgent(openai_api_key) if openai_api_key else None
 
         # Initialize Person C agents (Video Pipeline)
         # VideoGeneratorAgent uses Veo 3.1 via Replicate
@@ -728,6 +730,189 @@ class VideoGenerationOrchestrator:
 
             return {
                 "status": "error",
+                "message": str(e)
+            }
+
+    async def generate_audio(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int,
+        script_id: str,
+        audio_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate audio narration from script using ElevenLabs TTS.
+
+        Args:
+            db: Database session
+            session_id: Session ID for tracking
+            user_id: User ID making the request
+            script_id: ID of the script in the database
+            audio_config: Audio configuration (voice_id, audio_option, etc.)
+
+        Returns:
+            Dict containing status, audio files, and cost information
+        """
+        try:
+            # Validate audio pipeline is initialized
+            if not self.audio_pipeline:
+                raise ValueError("Audio pipeline not initialized - check ELEVENLABS_API_KEY")
+
+            # Fetch script from database
+            script = db.query(Script).filter(Script.id == script_id).first()
+            if not script:
+                raise ValueError(f"Script {script_id} not found")
+
+            # Verify ownership
+            if script.user_id != user_id:
+                raise ValueError("Unauthorized: Script does not belong to this user")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "generating_audio"
+                session.audio_config = audio_config
+                db.commit()
+
+            # Build script object for audio pipeline
+            script_data = {
+                "hook": script.hook,
+                "concept": script.concept,
+                "process": script.process,
+                "conclusion": script.conclusion
+            }
+
+            # Send WebSocket progress update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="audio_generation",
+                progress=70,
+                details="Generating audio narration with AI..."
+            )
+
+            logger.info(f"[{session_id}] Generating audio with voice {audio_config.get('voice', 'alloy')}")
+
+            # Call Audio Pipeline Agent
+            audio_input = AgentInput(
+                session_id=session_id,
+                data={
+                    "script": script_data,
+                    "voice": audio_config.get("voice") if audio_config else None,
+                    "audio_option": audio_config.get("audio_option", "tts") if audio_config else "tts"
+                }
+            )
+
+            audio_result = await self.audio_pipeline.process(audio_input)
+
+            if not audio_result.success:
+                raise ValueError(f"Audio generation failed: {audio_result.error}")
+
+            # Track costs
+            self._record_cost(
+                db,
+                session_id,
+                agent="audio_pipeline",
+                model="openai-tts-1",
+                cost=audio_result.cost,
+                duration=audio_result.duration
+            )
+
+            # Upload audio files to S3 and store in database
+            audio_files = audio_result.data.get("audio_files", [])
+
+            for audio_data in audio_files:
+                # Generate unique asset ID
+                asset_id = f"audio_{audio_data['part']}_{uuid.uuid4().hex[:8]}"
+
+                # Upload to S3
+                try:
+                    s3_result = await self.storage_service.upload_local_file(
+                        file_path=audio_data["filepath"],
+                        asset_type="audio",
+                        session_id=session_id,
+                        asset_id=asset_id,
+                        user_id=user_id
+                    )
+                    # Update URL to S3 URL
+                    audio_data["url"] = s3_result["url"]
+                    logger.info(f"[{session_id}] {audio_data['part']} audio uploaded to S3")
+                except Exception as e:
+                    # Keep local filepath if S3 upload fails
+                    logger.warning(
+                        f"[{session_id}] S3 upload failed for {audio_data['part']} audio, "
+                        f"using local path: {e}"
+                    )
+                    audio_data["url"] = audio_data["filepath"]
+
+                # Store in database
+                asset = Asset(
+                    session_id=session_id,
+                    type="audio",
+                    url=audio_data["url"],
+                    approved=True,  # Auto-approve audio
+                    asset_metadata={
+                        "part": audio_data["part"],
+                        "duration": audio_data["duration"],
+                        "cost": audio_data["cost"],
+                        "character_count": audio_data.get("character_count", 0),
+                        "file_size": audio_data.get("file_size", 0),
+                        "voice": audio_data.get("voice", "alloy"),
+                        "asset_id": asset_id
+                    }
+                )
+                db.add(asset)
+
+            db.commit()
+
+            # Update session status
+            if session:
+                session.status = "audio_complete"
+                db.commit()
+
+            # Final progress update
+            total_cost = audio_result.cost
+            total_duration = audio_result.data.get("total_duration", 0)
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="audio_complete",
+                progress=85,
+                details=f"Generated audio narration! Duration: {total_duration}s, Cost: ${total_cost:.3f}"
+            )
+
+            logger.info(
+                f"[{session_id}] Audio generation complete: "
+                f"{len(audio_files)} files, {total_duration}s, ${total_cost:.3f}"
+            )
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "audio_files": audio_files,
+                "total_duration": total_duration,
+                "total_cost": total_cost
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Audio generation failed: {e}")
+
+            # Update session with error
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Audio generation failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
                 "message": str(e)
             }
 
