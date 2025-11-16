@@ -285,9 +285,9 @@ This phase implements the complete Next.js 14 frontend with all user-facing scre
 - [ ] **5.1 Root Layout**
 
   - ✅ 5.1.1 Update `app/layout.tsx`
-  - [ ] 5.1.2 Add proper metadata
-  - [ ] 5.1.3 Set title: "AI Ad Video Generator"
-  - [ ] 5.1.4 Add description
+  - ✅ 5.1.2 Add proper metadata
+  - ✅ 5.1.3 Set title: "AI Ad Video Generator"
+  - ✅ 5.1.4 Add description
   - ✅ 5.1.5 Configure fonts (optional)
   - ✅ 5.1.6 Apply global styles
   - [ ] 5.1.7 Test layout renders correctly
@@ -329,7 +329,7 @@ This phase implements the complete Next.js 14 frontend with all user-facing scre
 
 - [ ] **6.2 End-to-End Frontend Test**
 
-  - [ ] 6.2.1 Start frontend: `npm run dev`
+  - [ ] 6.2.1 Start frontend: `bun run dev`
   - [ ] 6.2.2 Start backend server
   - [ ] 6.2.3 Open http://localhost:3000
   - [ ] 6.2.4 Test login flow
@@ -358,7 +358,7 @@ This phase implements the complete Next.js 14 frontend with all user-facing scre
 
   - [ ] 6.4.1 Check page load times
   - [ ] 6.4.2 Test with slow network (DevTools)
-  - [ ] 6.4.3 Check bundle size: `npm run build`
+  - [ ] 6.4.3 Check bundle size: `bun run build`
   - [ ] 6.4.4 Verify images load efficiently
   - [ ] 6.4.5 Check for console errors
   - [ ] 6.4.6 Test memory usage
@@ -373,7 +373,7 @@ This phase implements the complete Next.js 14 frontend with all user-facing scre
   - [ ] 6.5.5 Fix any browser-specific issues
 
 - [ ] **6.6 Code Quality**
-  - [ ] 6.6.1 Run ESLint: `npm run lint`
+  - [ ] 6.6.1 Run ESLint: `bun run lint`
   - [ ] 6.6.2 Fix linting issues
   - [ ] 6.6.3 Format code with Prettier (if configured)
   - [ ] 6.6.4 Review TypeScript errors
