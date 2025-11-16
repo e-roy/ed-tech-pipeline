@@ -3,35 +3,41 @@ Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from app.config import get_settings
 
 # Import routes
-from app.routes import auth, generation, sessions, storage
+from app.routes import generation, sessions, storage
 
 settings = get_settings()
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Gauntlet Pipeline Orchestrator",
-    description="Backend orchestrator for AI video generation pipeline",
+    description="Backend orchestrator for AI video generation pipeline. "
+                "Authentication is handled by frontend (NextAuth) via request headers.",
     version="1.0.0",
     debug=settings.DEBUG
 )
 
 # Configure CORS for Next.js frontend
+# Restrict to known frontend domains for security
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000"],
+    allow_origins=[
+        settings.FRONTEND_URL,
+        "http://localhost:3000",
+        "https://localhost:3000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-User-Id", "X-User-Email"],
 )
 
 # Get shared WebSocket manager from generation module
 websocket_manager = generation.get_websocket_manager()
 
-# Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+# Include routers (auth removed - using header-based auth)
 app.include_router(generation.router, prefix="/api", tags=["Generation"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Sessions"])
 app.include_router(storage.router, prefix="/api/storage", tags=["Storage"])
