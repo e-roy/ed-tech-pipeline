@@ -1,6 +1,7 @@
 """
 Audio Pipeline Agent - OpenAI TTS Integration
 Generates narration audio from script text using OpenAI's TTS API.
+Also generates/processes background music for videos.
 
 Based on Phase 07 Tasks (Audio Pipeline).
 """
@@ -8,10 +9,12 @@ Based on Phase 07 Tasks (Audio Pipeline).
 import os
 import time
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 from pathlib import Path
 from openai import OpenAI
+from sqlalchemy.orm import Session
 from .base import AgentInput, AgentOutput
+from .music_agent import MusicSelectionAgent, MusicProcessingService
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +68,23 @@ class AudioPipelineAgent:
         "shimmer": "Warm, friendly"
     }
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        db: Optional[Session] = None,
+        storage_service: Optional[Any] = None
+    ):
         """
         Initialize the Audio Pipeline Agent.
 
         Args:
             api_key: OpenAI API key (defaults to env var)
+            db: Database session for music selection
+            storage_service: Storage service for music processing
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.db = db
+        self.storage_service = storage_service
 
         if not self.api_key:
             logger.warning(
@@ -81,6 +93,12 @@ class AudioPipelineAgent:
             )
         else:
             self.client = OpenAI(api_key=self.api_key)
+
+        # Initialize music agents if db and storage are provided
+        if self.db:
+            self.music_selector = MusicSelectionAgent(db=self.db)
+        if self.storage_service:
+            self.music_processor = MusicProcessingService(storage_service=self.storage_service)
 
     async def process(self, input: AgentInput) -> AgentOutput:
         """
@@ -191,13 +209,36 @@ class AudioPipelineAgent:
                     f"{estimated_duration:.1f}s, {file_size} bytes, ${cost:.4f}"
                 )
 
+            # Generate background music if music agents are available
+            music_file = None
+            if self.db and self.storage_service and hasattr(self, 'music_selector'):
+                try:
+                    logger.info(f"[{input.session_id}] Generating background music...")
+                    music_file = await self._generate_background_music(
+                        script=script,
+                        total_duration=sum(af["duration"] for af in audio_files),
+                        session_id=input.session_id,
+                        user_id=input.data.get("user_id")
+                    )
+                    if music_file:
+                        audio_files.append(music_file)
+                        logger.info(
+                            f"[{input.session_id}] Background music added: "
+                            f"{music_file['name']}, {music_file['duration']:.1f}s"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[{input.session_id}] Background music generation failed: {e}. "
+                        "Continuing without music."
+                    )
+
             duration = time.time() - start_time
-            total_duration = sum(af["duration"] for af in audio_files)
+            total_duration = sum(af["duration"] for af in audio_files if af["part"] != "music")
 
             logger.info(
                 f"[{input.session_id}] Audio generation complete: "
-                f"{len(audio_files)} files, {total_duration:.1f}s total, "
-                f"${total_cost:.4f}"
+                f"{len(audio_files)} files (4 narration + {'1 music' if music_file else '0 music'}), "
+                f"{total_duration:.1f}s total narration, ${total_cost:.4f}"
             )
 
             return AgentOutput(
@@ -206,7 +247,8 @@ class AudioPipelineAgent:
                     "audio_files": audio_files,
                     "total_duration": round(total_duration, 1),
                     "total_cost": round(total_cost, 4),
-                    "voice_used": voice
+                    "voice_used": voice,
+                    "has_background_music": music_file is not None
                 },
                 cost=total_cost,
                 duration=duration
@@ -249,6 +291,54 @@ class AudioPipelineAgent:
             cost=0.0,
             duration=time.time() - start_time
         )
+
+    async def _generate_background_music(
+        self,
+        script: Dict[str, Any],
+        total_duration: float,
+        session_id: str,
+        user_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Select background music for the video.
+
+        NOTE: We don't trim the music here - that will happen during video composition
+        when we know the exact final video length. For now, we just select an appropriate
+        track and return the full original file.
+
+        Args:
+            script: Full script with all parts
+            total_duration: Total narration duration in seconds (used for selection, not trimming)
+            session_id: Session ID for file naming
+            user_id: User ID for storage
+
+        Returns:
+            Music file metadata dict or None if generation fails
+        """
+        # Select appropriate music track based on script mood
+        # We use a generous duration requirement (120s+) to ensure we have enough music
+        selected_music = await self.music_selector.select_music(
+            script=script,
+            video_duration=120  # Select tracks that are at least 2 minutes long
+        )
+
+        if not selected_music:
+            logger.warning(f"[{session_id}] No music tracks available in library")
+            return None
+
+        # Return the ORIGINAL music track URL (not processed)
+        # The video compositor will trim, fade, and mix this later
+        return {
+            "part": "music",
+            "filepath": "",  # No local filepath - direct S3 URL
+            "url": selected_music["s3_url"],  # Original S3 URL
+            "duration": selected_music["duration"],  # Original full duration
+            "cost": 0.0,  # Music is pre-licensed, no per-use cost
+            "track_id": selected_music["track_id"],
+            "name": selected_music["name"],
+            "category": selected_music["category"],
+            "volume": 0.15  # Volume will be applied during video composition
+        }
 
     async def get_available_voices(self) -> list[dict]:
         """
