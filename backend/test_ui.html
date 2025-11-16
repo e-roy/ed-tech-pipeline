@@ -456,6 +456,42 @@
             <div id="audio-result" class="result" style="display:none;"></div>
             <div id="audio-player" class="audio-player" style="display:none;"></div>
         </div>
+
+        <!-- Step 4: Compose Final Video -->
+        <div class="card">
+            <h2>
+                🎬 Step 4: Compose Final Video
+                <span id="video-status" class="status pending">Pending</span>
+            </h2>
+
+            <div class="info-box" style="background: #fef3c7; border-left-color: #f59e0b;">
+                <h3>⚡ Final Composition</h3>
+                <p>This step combines all generated assets (images, audio, music) into a complete educational video using FFmpeg.</p>
+            </div>
+
+            <div class="form-group">
+                <label>Session ID</label>
+                <input type="text" id="compose-session-id" placeholder="Will be filled automatically" readonly>
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <button onclick="composeVideo()" id="compose-video-btn" disabled>🎬 Compose Final Video</button>
+            </div>
+            <div id="video-progress" class="progress" style="background: #fef3c7; color: #92400e;">Composing video with FFmpeg...</div>
+            <div id="video-result" class="result" style="display:none;"></div>
+
+            <!-- Video Player -->
+            <div id="video-player" class="audio-player" style="display:none;">
+                <h3>🎉 Final Video</h3>
+                <video controls style="width: 100%; border-radius: 8px; margin-top: 10px;">
+                    <source id="video-source" type="video/mp4">
+                    Your browser does not support the video element.
+                </video>
+                <div style="margin-top: 15px; padding: 12px; background: #d1fae5; border-radius: 8px;">
+                    <p id="video-info" style="margin: 0; color: #065f46; font-weight: 600;"></p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -571,6 +607,9 @@
                 // Auto-fill audio form
                 document.getElementById('script-id').value = scriptId;
 
+                // Auto-fill compose form
+                document.getElementById('compose-session-id').value = currentSessionId;
+
                 // Fetch and display the created script
                 await displayCreatedScript(scriptId, email);
 
@@ -618,6 +657,9 @@
 
                     // Show audio player
                     displayAudioPlayer(data.audio_files, data.total_cost, data.total_duration);
+
+                    // Enable compose button if images are also ready
+                    checkAndEnableCompose();
 
                 } else {
                     throw new Error(data.detail || data.message || 'Audio generation failed');
@@ -670,6 +712,9 @@
 
                     // Show image gallery
                     displayImageGallery(data.micro_scenes);
+
+                    // Enable compose button if audio is also ready
+                    checkAndEnableCompose();
 
                 } else {
                     throw new Error(data.detail || data.message || 'Image generation failed');
@@ -800,6 +845,10 @@
                 if (response.ok) {
                     console.log(`✅ Parallel generation complete in ${totalTime}s`);
 
+                    // Update status badges
+                    updateStatus('image-status', 'success', 'Generated');
+                    updateStatus('audio-status', 'success', 'Generated');
+
                     // Show success result
                     showResult('finalize-result', {
                         ...data,
@@ -817,12 +866,17 @@
                         displayAudioPlayer(data.audio_files, data.total_cost, data.total_duration);
                     }
 
+                    // Enable compose button since both are done
+                    document.getElementById('compose-video-btn').disabled = false;
+                    console.log('✅ Finalize complete - Compose button enabled');
+
                     // Show summary
                     alert(`✅ Script Finalized!\n\n` +
                           `Images: Generated ${data.micro_scenes.hook.images.length * 4} images\n` +
                           `Audio: ${data.audio_files.length} files (${data.total_duration}s)\n` +
                           `Total Cost: $${data.total_cost.toFixed(4)}\n` +
-                          `Time: ${totalTime}s (parallel execution)`);
+                          `Time: ${totalTime}s (parallel execution)\n\n` +
+                          `You can now compose the final video!`);
 
                 } else {
                     throw new Error(data.detail || data.message || 'Finalization failed');
@@ -911,6 +965,89 @@
 
             } catch (error) {
                 console.error('Error displaying script:', error);
+            }
+        }
+
+        // Check if both audio and images are ready, then enable compose button
+        function checkAndEnableCompose() {
+            const audioSuccess = document.getElementById('audio-status').textContent === 'Generated';
+            const imageSuccess = document.getElementById('image-status').textContent === 'Generated';
+
+            if (audioSuccess && imageSuccess) {
+                document.getElementById('compose-video-btn').disabled = false;
+                console.log('✅ Both audio and images ready - Compose button enabled');
+            }
+        }
+
+        // Compose Final Video
+        async function composeVideo() {
+            if (!currentSessionId) {
+                alert('Please create a script and generate images and audio first!');
+                return;
+            }
+
+            const email = document.getElementById('user-email').value;
+
+            updateStatus('video-status', 'running', 'Composing...');
+            document.getElementById('video-progress').classList.add('show');
+            document.getElementById('compose-video-btn').disabled = true;
+
+            console.log('🎬 Starting video composition...');
+            const startTime = Date.now();
+
+            try {
+                const response = await fetch(`${API_BASE}/compose-video`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Email': email
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId
+                    })
+                });
+
+                const data = await response.json();
+                const endTime = Date.now();
+                const totalTime = ((endTime - startTime) / 1000).toFixed(1);
+
+                if (response.ok) {
+                    console.log(`✅ Video composition complete in ${totalTime}s`);
+
+                    updateStatus('video-status', 'success', 'Complete');
+                    showResult('video-result', {
+                        ...data,
+                        composition_time: `${totalTime}s`
+                    });
+
+                    // Display video player
+                    const player = document.getElementById('video-player');
+                    const videoSource = document.getElementById('video-source');
+                    const videoInfo = document.getElementById('video-info');
+
+                    videoSource.src = data.video_url;
+                    videoInfo.textContent = `Duration: ${data.duration}s | Segments: ${data.segments_count || 4}`;
+
+                    player.style.display = 'block';
+
+                    // Load the video
+                    const video = player.querySelector('video');
+                    video.load();
+
+                    alert(`✅ Video Composition Complete!\n\nDuration: ${data.duration}s\nTime: ${totalTime}s\n\nThe video is ready to play below.`);
+
+                } else {
+                    throw new Error(data.detail || data.message || 'Video composition failed');
+                }
+
+            } catch (error) {
+                console.error('❌ Video composition failed:', error);
+                updateStatus('video-status', 'error', 'Failed');
+                showResult('video-result', { error: error.message }, true);
+                alert(`Failed to compose video: ${error.message}`);
+            } finally {
+                document.getElementById('video-progress').classList.remove('show');
+                document.getElementById('compose-video-btn').disabled = false;
             }
         }
 

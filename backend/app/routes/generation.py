@@ -333,6 +333,18 @@ class FinalizeScriptResponse(BaseModel):
     total_cost: float
 
 
+class ComposeVideoRequest(BaseModel):
+    session_id: str
+
+
+class ComposeVideoResponse(BaseModel):
+    session_id: str
+    status: str
+    video_url: str
+    duration: float
+    segments_count: int
+
+
 @router.post("/generate-audio", response_model=GenerateAudioResponse)
 async def generate_audio(
     request: GenerateAudioRequest,
@@ -453,6 +465,65 @@ async def finalize_script(
         "audio_files": result.get("audio_files", []),
         "total_duration": result.get("total_duration", 0.0),
         "total_cost": result.get("total_cost", 0.0)
+    }
+
+
+@router.post("/compose-video", response_model=ComposeVideoResponse)
+async def compose_video(
+    request: ComposeVideoRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Compose final educational video from generated images and audio.
+
+    **Authentication Required:** Include X-User-Email header.
+
+    This endpoint combines all generated assets (images, audio, background music)
+    into a complete educational video using FFmpeg. It creates a video with:
+    - Images from each script part (hook, concept, process, conclusion)
+    - TTS narration audio synchronized with each part
+    - Optional background music
+    - Transitions and timing based on audio duration
+
+    **Required Headers:**
+    - `X-User-Email` (string): User's email from NextAuth session
+
+    **Required Parameters:**
+    - `session_id` (string): Session ID containing generated images and audio
+
+    **Returns:**
+    - `session_id`: Session ID for tracking
+    - `status`: Composition status
+    - `video_url`: URL of the composed video
+    - `duration`: Total video duration in seconds
+    - `segments_count`: Number of segments in the video
+    """
+    # Verify session exists and belongs to user
+    session = db.query(SessionModel).filter(
+        SessionModel.id == request.session_id,
+        SessionModel.user_id == current_user.id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Call orchestrator to compose video from educational assets
+    result = await orchestrator.compose_educational_video(
+        db=db,
+        session_id=request.session_id,
+        user_id=current_user.id
+    )
+
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result.get("message", "Video composition failed"))
+
+    return {
+        "session_id": request.session_id,
+        "status": result["status"],
+        "video_url": result.get("video_url", ""),
+        "duration": result.get("duration", 0.0),
+        "segments_count": result.get("segments_count", 4)
     }
 
 

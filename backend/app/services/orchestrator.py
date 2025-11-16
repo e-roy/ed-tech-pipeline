@@ -217,9 +217,9 @@ class VideoGenerationOrchestrator:
                         session_id=session_id,
                         type="image",
                         url=img_data["image"],
-                        approved=False,
+                        approved=True,  # Auto-approve like audio
                         asset_metadata={
-                            "script_part": part_name,
+                            "part": part_name,  # Use "part" to match audio convention
                             "part_index": i,
                             "asset_id": asset_id,
                             **img_data["metadata"]
@@ -1064,6 +1064,254 @@ class VideoGenerationOrchestrator:
                 status="error",
                 progress=0,
                 details=f"Script finalization failed: {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "session_id": session_id,
+                "message": str(e)
+            }
+
+    async def compose_educational_video(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int
+    ) -> Dict[str, Any]:
+        """
+        Compose final educational video from generated images and audio.
+
+        Combines:
+        - Images from each script part (hook, concept, process, conclusion)
+        - TTS narration audio for each part
+        - Background music (if available)
+
+        Args:
+            db: Database session
+            session_id: Session ID containing generated assets
+            user_id: User ID for ownership verification
+
+        Returns:
+            Dict with status, video_url, duration, segments_count
+        """
+        try:
+            logger.info(f"[{session_id}] Starting educational video composition")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "composing_video"
+                db.commit()
+
+            # Broadcast WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="composing_video",
+                progress=90,
+                details="Composing final educational video with FFmpeg..."
+            )
+
+            # Get all assets for this session
+            assets = db.query(Asset).filter(Asset.session_id == session_id).all()
+
+            # Organize assets by type and part
+            images_by_part = {}
+            audio_by_part = {}
+            music_url = None
+
+            for asset in assets:
+                asset_type = asset.type
+                metadata = asset.asset_metadata or {}
+
+                if asset_type == "image":
+                    part = metadata.get("part", "")
+                    # Check approved flag from database column, not metadata
+                    if part and asset.approved:
+                        if part not in images_by_part:
+                            images_by_part[part] = []
+                        images_by_part[part].append(asset.url)
+
+                elif asset_type == "audio":
+                    part = metadata.get("part", "")
+                    if part and part != "music":
+                        audio_by_part[part] = {
+                            "url": asset.url,
+                            "duration": metadata.get("duration", 5.0)
+                        }
+                    elif part == "music":
+                        music_url = asset.url
+
+            # Build timeline for video composition
+            parts = ["hook", "concept", "process", "conclusion"]
+            timeline_segments = []
+
+            for part in parts:
+                # Get first approved image for this part (or first available)
+                image_url = images_by_part.get(part, [None])[0] if part in images_by_part else None
+
+                # Get audio for this part
+                audio_data = audio_by_part.get(part)
+
+                if image_url and audio_data:
+                    timeline_segments.append({
+                        "part": part,
+                        "image_url": image_url,
+                        "audio_url": audio_data["url"],
+                        "duration": audio_data["duration"]
+                    })
+                else:
+                    logger.warning(f"[{session_id}] Missing assets for part: {part}")
+
+            if not timeline_segments:
+                raise Exception("No valid timeline segments found. Ensure images and audio are generated.")
+
+            logger.info(f"[{session_id}] Built timeline with {len(timeline_segments)} segments")
+
+            # Step 1: Generate video clips from images using image-to-video
+            logger.info(f"[{session_id}] Generating video clips from images...")
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_videos",
+                progress=92,
+                details="Generating video clips from images with AI..."
+            )
+
+            video_clips = []
+            for i, segment in enumerate(timeline_segments):
+                logger.info(f"[{session_id}] Generating video for {segment['part']} ({i+1}/{len(timeline_segments)})")
+
+                # Generate video clip from image
+                video_input = AgentInput(
+                    session_id=session_id,
+                    data={
+                        "approved_images": [{"url": segment["image_url"]}],
+                        "video_prompt": f"Educational visualization for {segment['part']}",
+                        "clip_duration": segment["duration"],
+                        "model": "gen-4-turbo"  # Cheapest option
+                    }
+                )
+
+                video_result = await self.video_generator.process(video_input)
+
+                if not video_result.success or not video_result.data.get("clips"):
+                    logger.warning(f"[{session_id}] Video generation failed for {segment['part']}, using static image")
+                    video_clips.append({
+                        "part": segment["part"],
+                        "video_url": None,  # Will use static image fallback
+                        "image_url": segment["image_url"],
+                        "audio_url": segment["audio_url"],
+                        "duration": segment["duration"]
+                    })
+                else:
+                    clip_data = video_result.data["clips"][0]
+
+                    # Store video clip in database
+                    video_asset = Asset(
+                        session_id=session_id,
+                        type="video",
+                        url=clip_data["url"],
+                        approved=True,
+                        asset_metadata={
+                            "part": segment["part"],
+                            "duration": segment["duration"],
+                            "cost": clip_data.get("cost", 0.0),
+                            "source_image": segment["image_url"]
+                        }
+                    )
+                    db.add(video_asset)
+
+                    video_clips.append({
+                        "part": segment["part"],
+                        "video_url": clip_data["url"],
+                        "image_url": segment["image_url"],
+                        "audio_url": segment["audio_url"],
+                        "duration": segment["duration"]
+                    })
+
+            db.commit()
+            logger.info(f"[{session_id}] Generated {len(video_clips)} video clips")
+
+            # Step 2: Use FFmpeg compositor to stitch videos and add audio
+            from app.services.educational_compositor import EducationalCompositor
+
+            compositor = EducationalCompositor(work_dir="/tmp/educational_videos")
+
+            composition_result = await compositor.compose_educational_video(
+                timeline=video_clips,  # Now includes video URLs
+                music_url=music_url,
+                session_id=session_id
+            )
+
+            video_path = composition_result["output_path"]
+            duration = composition_result["duration"]
+
+            # Upload video to S3
+            logger.info(f"[{session_id}] Uploading composed video to S3")
+
+            upload_result = await self.storage_service.upload_local_file(
+                file_path=video_path,
+                asset_type="final",
+                session_id=session_id,
+                asset_id=f"final_video_{uuid.uuid4().hex[:8]}",
+                user_id=user_id
+            )
+
+            video_url = upload_result["url"]
+
+            # Store in database
+            final_video_asset = Asset(
+                session_id=session_id,
+                type="final",
+                url=video_url,
+                approved=True,
+                asset_metadata={
+                    "duration": duration,
+                    "segments_count": len(timeline_segments),
+                    "has_music": music_url is not None
+                }
+            )
+            db.add(final_video_asset)
+
+            # Update session
+            if session:
+                session.status = "completed"
+                session.final_video_url = video_url
+                session.completed_at = datetime.now()
+                db.commit()
+
+            # Broadcast completion
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="completed",
+                progress=100,
+                details=f"Educational video complete! Duration: {duration}s"
+            )
+
+            logger.info(f"[{session_id}] Educational video composition complete: {video_url}")
+
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "video_url": video_url,
+                "duration": duration,
+                "segments_count": len(timeline_segments)
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Educational video composition failed: {e}")
+
+            # Update session status
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                db.commit()
+
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Video composition failed: {str(e)}"
             )
 
             return {
