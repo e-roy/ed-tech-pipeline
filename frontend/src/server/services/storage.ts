@@ -92,7 +92,7 @@ export async function listUserFiles(
           Key: obj.Key,
           Size: obj.Size ?? 0,
           LastModified: obj.LastModified,
-          ContentType: undefined,
+          ContentType: undefined, // ListObjectsV2 doesn't return ContentType
         }));
         allObjects.push(...validObjects);
       }
@@ -157,9 +157,9 @@ export async function listUserFiles(
 
         const response = await client.send(command);
         if (response.Contents) {
-          const validObjects = response.Contents.filter(
-            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-          )
+        const validObjects = response.Contents.filter(
+          (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+        )
             .filter((obj) => {
               // Only include image files, exclude segments.md, status.json, and diagram.png
               const key = obj.Key;
@@ -170,7 +170,7 @@ export async function listUserFiles(
               Key: obj.Key,
               Size: obj.Size ?? 0,
               LastModified: obj.LastModified,
-              ContentType: undefined,
+              ContentType: undefined, // ListObjectsV2 doesn't return ContentType
             }));
           allObjects.push(...validObjects);
         }
@@ -191,14 +191,14 @@ export async function listUserFiles(
 
         const response = await client.send(command);
         if (response.Contents) {
-          const validObjects = response.Contents.filter(
-            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-          ).map((obj) => ({
-            Key: obj.Key,
-            Size: obj.Size ?? 0,
-            LastModified: obj.LastModified,
-            ContentType: undefined,
-          }));
+        const validObjects = response.Contents.filter(
+          (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+        ).map((obj) => ({
+          Key: obj.Key,
+          Size: obj.Size ?? 0,
+          LastModified: obj.LastModified,
+          ContentType: undefined, // ListObjectsV2 doesn't return ContentType
+        }));
           allObjects.push(...validObjects);
         }
         continuationToken = response.NextContinuationToken;

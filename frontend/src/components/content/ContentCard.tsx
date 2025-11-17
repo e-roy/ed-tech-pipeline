@@ -4,8 +4,11 @@ import { Card } from "@/components/ui/card";
 import { ContentActions } from "./ContentActions";
 import type { FileInfo } from "@/types/storage";
 import { AssetType } from "@/types/storage";
-import Image from "next/image";
-import { formatBytes, getAssetTypeFromKey } from "./utils";
+import {
+  formatBytes,
+  getAssetTypeFromKey,
+  inferContentTypeFromKey,
+} from "./utils";
 
 interface ContentCardProps {
   file: FileInfo;
@@ -19,23 +22,26 @@ export function ContentCard({
   isDeleting = false,
 }: ContentCardProps) {
   const assetType = getAssetTypeFromKey(file.key);
-  const isImage = file.content_type.startsWith("image/");
-  const isVideo = file.content_type.startsWith("video/");
-  const isAudio = file.content_type.startsWith("audio/");
+  // Use content_type if available, otherwise infer from file extension
+  const contentType =
+    file.content_type !== "application/octet-stream"
+      ? file.content_type
+      : inferContentTypeFromKey(file.key);
+  const isImage = contentType.startsWith("image/");
+  const isVideo = contentType.startsWith("video/");
+  const isAudio = contentType.startsWith("audio/");
   const isFinal = assetType === AssetType.FINAL;
 
   const fileName = file.key.split("/").pop() ?? "unknown";
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="mt-0 overflow-hidden pt-0">
       <div className="bg-muted relative aspect-video">
         {isImage && (
-          <Image
+          <img
             src={file.presigned_url}
             alt={fileName}
-            fill
-            className="object-cover"
-            unoptimized
+            className="h-full w-full object-cover"
           />
         )}
         {isVideo && (
