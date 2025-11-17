@@ -73,7 +73,9 @@ export function HardcodeAssetsView({ userEmail }: HardcodeAssetsViewProps) {
         const folderPaths = new Set(data.folders.map((f) => f.path));
         setExpandedFolders(folderPaths);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load directory");
+        setError(
+          err instanceof Error ? err.message : "Failed to load directory",
+        );
       } finally {
         setIsLoading(false);
       }
@@ -85,7 +87,7 @@ export function HardcodeAssetsView({ userEmail }: HardcodeAssetsViewProps) {
   const loadFolderContents = async (folderPath: string) => {
     // Extract prefix from folder path (remove users/{userid}/)
     const prefixMatch = folderPath.match(/^users\/\d+\/(.+)$/);
-    if (!prefixMatch) return;
+    if (!prefixMatch?.[1]) return;
 
     const prefix = prefixMatch[1];
     if (folderContents.has(folderPath)) {
@@ -155,8 +157,8 @@ export function HardcodeAssetsView({ userEmail }: HardcodeAssetsViewProps) {
       <div className="space-y-4">
         <Skeleton className="h-10 w-64" />
         <Card className="p-4">
-          <Skeleton className="h-6 w-full mb-2" />
-          <Skeleton className="h-6 w-full mb-2" />
+          <Skeleton className="mb-2 h-6 w-full" />
+          <Skeleton className="mb-2 h-6 w-full" />
           <Skeleton className="h-6 w-full" />
         </Card>
       </div>
@@ -183,7 +185,7 @@ export function HardcodeAssetsView({ userEmail }: HardcodeAssetsViewProps) {
     <div className="flex h-full gap-6">
       <div className="flex-1 overflow-auto">
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2">
             <Folder className="h-5 w-5" />
             <h2 className="text-lg font-semibold">Directory Structure</h2>
           </div>
@@ -208,4 +210,3 @@ export function HardcodeAssetsView({ userEmail }: HardcodeAssetsViewProps) {
     </div>
   );
 }
-
