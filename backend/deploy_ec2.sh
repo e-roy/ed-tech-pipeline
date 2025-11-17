@@ -95,7 +95,7 @@ if [ ! -f "$APP_DIR/.env" ]; then
     cat <<EOF
 
 # Database
-DATABASE_URL=postgresql+psycopg://...
+DATABASE_URL=postgresql://neondb_owner:npg_kZnmUstlWA26@ep-falling-meadow-adnv9yz9-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 
 # JWT
 JWT_SECRET_KEY=<generate-with-openssl-rand-hex-32>
