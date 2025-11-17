@@ -8,6 +8,7 @@ Based on Phase 07 Tasks (Audio Pipeline).
 
 import os
 import time
+import tempfile
 import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -40,7 +41,7 @@ class AudioPipelineAgent:
             "audio_files": [
                 {
                     "part": "hook",
-                    "filepath": "/tmp/audio_hook.mp3",
+                    "filepath": "{temp_dir}/audio_hook_{session_id}.mp3",
                     "url": "",  # Empty until S3 upload by orchestrator
                     "duration": 9.8,
                     "cost": 0.015
@@ -172,13 +173,19 @@ class AudioPipelineAgent:
                     response_format="mp3"
                 )
 
-                # Save to temporary file
+                # Save to temporary file (cross-platform)
+                temp_dir = tempfile.gettempdir()
+                # Ensure temp directory exists
+                os.makedirs(temp_dir, exist_ok=True)
+                
                 filename = f"audio_{part_name}_{input.session_id}.mp3"
-                filepath = f"/tmp/{filename}"
+                filepath = os.path.join(temp_dir, filename)
 
                 # Write audio bytes to file
                 with open(filepath, "wb") as f:
                     f.write(response.content)
+                
+                logger.debug(f"[{input.session_id}] Saved audio file to: {filepath}")
 
                 # Get file size for verification
                 file_size = os.path.getsize(filepath)

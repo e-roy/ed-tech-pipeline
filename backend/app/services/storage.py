@@ -762,3 +762,90 @@ class StorageService:
         except ClientError as e:
             logger.error(f"Failed to list files by prefix: {e}")
             raise Exception(f"File listing failed: {e}")
+
+    def list_directory_structure(
+        self,
+        user_id: int,
+        prefix: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        List directory structure under users/{user_id}/ with folders and files.
+        Uses S3 delimiter to get folder structure.
+
+        Args:
+            user_id: User ID
+            prefix: Optional subdirectory prefix (e.g., "input" or "session_id/images")
+
+        Returns:
+            Dict with 'folders' and 'files' lists. Each folder has 'name' and 'path'.
+            Each file has 'key', 'size', 'last_modified', 'content_type', 'presigned_url'.
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        base_prefix = f"users/{user_id}/"
+        if prefix:
+            full_prefix = f"{base_prefix}{prefix}"
+            if not full_prefix.endswith('/'):
+                full_prefix += '/'
+        else:
+            full_prefix = base_prefix
+
+        try:
+            # List objects with delimiter to separate folders and files
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(
+                Bucket=self.bucket_name,
+                Prefix=full_prefix,
+                Delimiter='/'
+            )
+
+            folders = []
+            files = []
+
+            for page in page_iterator:
+                # Get folders (CommonPrefixes)
+                if 'CommonPrefixes' in page:
+                    for common_prefix in page['CommonPrefixes']:
+                        folder_path = common_prefix['Prefix']
+                        # Extract folder name (relative to base_prefix)
+                        folder_name = folder_path[len(full_prefix):].rstrip('/')
+                        folders.append({
+                            "name": folder_name,
+                            "path": folder_path
+                        })
+
+                # Get files (Contents)
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        s3_key = obj['Key']
+                        # Skip directory markers
+                        if s3_key.endswith('/'):
+                            continue
+
+                        # Generate presigned URL
+                        presigned_url = self.generate_presigned_url(s3_key, expires_in=3600)
+
+                        # Extract file name
+                        file_name = s3_key[len(full_prefix):]
+
+                        files.append({
+                            "key": s3_key,
+                            "name": file_name,
+                            "size": obj['Size'],
+                            "last_modified": obj['LastModified'].isoformat() if obj.get('LastModified') else None,
+                            "content_type": obj.get('ContentType', 'application/octet-stream'),
+                            "presigned_url": presigned_url
+                        })
+
+            logger.info(f"Listed directory structure for user {user_id} at prefix '{prefix}': {len(folders)} folders, {len(files)} files")
+            
+            return {
+                "folders": folders,
+                "files": files,
+                "prefix": full_prefix
+            }
+
+        except ClientError as e:
+            logger.error(f"Failed to list directory structure: {e}")
+            raise Exception(f"Directory listing failed: {e}")

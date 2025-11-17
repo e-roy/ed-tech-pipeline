@@ -444,11 +444,15 @@ class StoryImageGeneratorAgent:
                             content_type="image/png"
                         )
                         
+                        # Remove image_bytes from metadata before serialization (it's already uploaded to S3)
+                        gen_metadata_serializable = {k: v for k, v in gen_metadata.items() if k != "image_bytes"}
+                        verify_metadata_serializable = {k: v for k, v in verify_metadata.items() if k != "image_bytes"}
+                        
                         generated_images.append({
                             "image_number": image_num,
                             "s3_key": s3_key,
-                            "generation_metadata": gen_metadata,
-                            "verification_metadata": verify_metadata
+                            "generation_metadata": gen_metadata_serializable,
+                            "verification_metadata": verify_metadata_serializable
                         })
                         
                         success = True
@@ -647,13 +651,27 @@ class StoryImageGeneratorAgent:
             for poll in range(max_polls):
                 await asyncio.sleep(poll_interval)
                 
-                get_response = requests.get(
-                    prediction_url or f"{REPLICATE_API_URL}/{prediction_id}",
-                    headers=headers,
-                    timeout=30
-                )
+                try:
+                    get_response = requests.get(
+                        prediction_url or f"{REPLICATE_API_URL}/{prediction_id}",
+                        headers=headers,
+                        timeout=30
+                    )
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Request error while polling (attempt {poll + 1}/{max_polls}): {e}")
+                    if poll < max_polls - 1:
+                        continue
+                    logger.error("Failed to get prediction status after retries")
+                    return (False, {
+                        "model_used": current_model,
+                        "cost": 0.0,
+                        "time_seconds": time.time() - start_time,
+                        "error": True,
+                        "error_message": f"Network error: {str(e)}"
+                    })
                 
                 if get_response.status_code != 200:
+                    logger.warning(f"Non-200 status code {get_response.status_code} while polling (attempt {poll + 1}/{max_polls})")
                     if poll < max_polls - 1:
                         continue
                     logger.error("Failed to get prediction status")
@@ -661,10 +679,25 @@ class StoryImageGeneratorAgent:
                         "model_used": current_model,
                         "cost": 0.0,
                         "time_seconds": time.time() - start_time,
-                        "error": True
+                        "error": True,
+                        "error_message": f"HTTP {get_response.status_code}: {get_response.text[:200]}"
                     })
                 
-                prediction = get_response.json()
+                try:
+                    prediction = get_response.json()
+                except ValueError as e:
+                    logger.warning(f"Invalid JSON response while polling (attempt {poll + 1}/{max_polls}): {e}")
+                    if poll < max_polls - 1:
+                        continue
+                    logger.error("Failed to parse prediction response")
+                    return (False, {
+                        "model_used": current_model,
+                        "cost": 0.0,
+                        "time_seconds": time.time() - start_time,
+                        "error": True,
+                        "error_message": "Invalid JSON response from Replicate API"
+                    })
+                
                 status = prediction.get("status")
                 
                 if status == "succeeded":
@@ -706,14 +739,26 @@ class StoryImageGeneratorAgent:
                     })
                 
                 elif status in ["starting", "processing"]:
+                    logger.debug(f"Prediction status: {status} (poll {poll + 1}/{max_polls})")
                     continue
-                else:
-                    logger.error(f"Unknown prediction status: {status}")
+                elif status == "canceled":
+                    logger.error("Prediction was canceled")
                     return (False, {
                         "model_used": current_model,
                         "cost": 0.0,
                         "time_seconds": time.time() - start_time,
-                        "error": True
+                        "error": True,
+                        "error_message": "Prediction was canceled"
+                    })
+                else:
+                    logger.error(f"Unknown prediction status: {status} (full response: {prediction})")
+                    # Don't continue polling on unknown status - return error immediately
+                    return (False, {
+                        "model_used": current_model,
+                        "cost": 0.0,
+                        "time_seconds": time.time() - start_time,
+                        "error": True,
+                        "error_message": f"Unknown status: {status}"
                     })
             
             # Timeout
