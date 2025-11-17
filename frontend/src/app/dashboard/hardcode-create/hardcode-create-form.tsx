@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,8 +18,9 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface HardcodeCreateFormProps {
   userEmail: string;
@@ -69,7 +70,131 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [results, setResults] = useState<any>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number | null>(null);
+  const [totalCost, setTotalCost] = useState<number | null>(null);
+  const [statusItems, setStatusItems] = useState<any[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<any[]>([]);
+  const [generatedAudio, setGeneratedAudio] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // WebSocket connection for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(activeSessionId);
+
+  // Function to fetch final results from API
+  const fetchResults = async (sessionIdToFetch: string) => {
+    try {
+      console.log("[HardcodeCreate] Fetching final results for session:", sessionIdToFetch);
+      const statusResponse = await fetch(
+        `${API_URL}/api/story-images/${sessionIdToFetch}`,
+        {
+          headers: {
+            "X-User-Email": userEmail,
+          },
+        }
+      );
+
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        console.log("[HardcodeCreate] Final results fetched:", statusData);
+        setResults(statusData);
+        setIsLoading(false);
+        setSuccess(true);
+        setProgress(null);
+
+        // Clear polling interval if active
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+      } else {
+        console.error("[HardcodeCreate] Failed to fetch results:", statusResponse.status);
+      }
+    } catch (err) {
+      console.error("[HardcodeCreate] Error fetching results:", err);
+    }
+  };
+
+  // Listen for WebSocket messages
+  useEffect(() => {
+    if (lastMessage) {
+      console.log("[HardcodeCreate] WebSocket message received:", lastMessage);
+
+      // Handle different message formats
+      // Backend sends: { status, details, progress, elapsed_time, total_cost, items }
+      // Or: { type: "assets_ready", images: [...], audio: [...] }
+      const messageType = (lastMessage as any).type;
+      const status = (lastMessage as any).status || lastMessage.stage;
+      const message = (lastMessage as any).details || lastMessage.message;
+      const progress = (lastMessage as any).progress;
+      const elapsed = (lastMessage as any).elapsed_time;
+      const cost = (lastMessage as any).total_cost;
+      const items = (lastMessage as any).items;
+
+      // Handle assets_ready message
+      if (messageType === "assets_ready") {
+        const images = (lastMessage as any).images || [];
+        const audio = (lastMessage as any).audio || [];
+        console.log("[HardcodeCreate] Assets ready:", { images, audio });
+        setGeneratedImages(images);
+        setGeneratedAudio(audio);
+        return;
+      }
+
+      // Update elapsed time and cost if provided
+      if (elapsed !== undefined) {
+        setElapsedTime(elapsed);
+      }
+      if (cost !== undefined) {
+        setTotalCost(cost);
+      }
+
+      // Update cumulative status items if provided
+      if (items && Array.isArray(items)) {
+        setStatusItems(items);
+        console.log("[HardcodeCreate] Status items updated:", items);
+      } else if (items === null) {
+        // Clear status items when null (on completion)
+        setStatusItems([]);
+      }
+
+      // Update progress display
+      if (message) {
+        setProgress(message);
+        console.log("[HardcodeCreate] Progress update:", message);
+      }
+
+      // Check if images and audio generation is complete
+      if (status === "images_audio_complete" || status === "images_and_audio_generated") {
+        console.log("[HardcodeCreate] Images and audio complete! Status:", status);
+        setIsLoading(false);
+        setSuccess(true);
+        setProgress(null);
+        // Optionally fetch full results from API
+        fetchResults(lastMessage.session_id);
+      }
+
+      // Check if video composition is complete
+      if (
+        status === "hardcode_story_complete" ||
+        status === "complete" ||
+        status === "completed"
+      ) {
+        console.log("[HardcodeCreate] Video composition complete!");
+        fetchResults(lastMessage.session_id);
+      }
+
+      // Handle errors
+      if (status === "error" || status === "failed") {
+        console.error("[HardcodeCreate] Error status received:", message);
+        setIsLoading(false);
+        setError(message || "Processing failed");
+        setProgress(null);
+      }
+    }
+  }, [lastMessage]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -133,12 +258,21 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
     setError(null);
     setSuccess(false);
     setProgress("Generating segments.md...");
+    setGeneratedImages([]);
+    setGeneratedAudio([]);
+    setStatusItems([]);
+
+    console.log("[HardcodeCreate] Form submission started");
+    console.log("[HardcodeCreate] API_URL:", API_URL);
+    console.log("[HardcodeCreate] Session ID:", sessionId);
+    console.log("[HardcodeCreate] User Email:", userEmail);
 
     try {
       // User email is passed as prop from server component
 
       // Generate segments.md content
       const segmentsMdContent = generateSegmentsMd();
+      console.log("[HardcodeCreate] Generated segments.md content");
 
       // Create FormData for file upload
       const formData = new FormData();
@@ -155,16 +289,23 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       formData.append("segments_md", new Blob([segmentsMdContent], { type: "text/markdown" }), "segments.md");
       if (diagramFile) {
         formData.append("diagram", diagramFile);
+        console.log("[HardcodeCreate] Diagram file attached:", diagramFile.name);
       }
       formData.append("num_images", numImages.toString());
       formData.append("max_passes", maxPasses.toString());
       formData.append("max_verification_passes", maxVerificationPasses.toString());
       formData.append("fast_mode", fastMode.toString());
 
+      console.log("[HardcodeCreate] FormData prepared");
+
       setProgress("Uploading files to S3...");
 
       // Upload files and trigger processing
-      const response = await fetch(`${API_URL}/api/hardcode-upload`, {
+      const uploadUrl = `${API_URL}/api/hardcode-upload`;
+      console.log("[HardcodeCreate] POST request to:", uploadUrl);
+      console.log("[HardcodeCreate] Request headers:", { "X-User-Email": userEmail });
+
+      const response = await fetch(uploadUrl, {
         method: "POST",
         headers: {
           "X-User-Email": userEmail,
@@ -172,74 +313,66 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
         body: formData,
       });
 
+      console.log("[HardcodeCreate] Response status:", response.status);
+      console.log("[HardcodeCreate] Response statusText:", response.statusText);
+      console.log("[HardcodeCreate] Response ok:", response.ok);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error("[HardcodeCreate] Upload failed with error:", errorData);
         throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
       }
 
       const result = await response.json();
-      setProgress("Processing started! Generating images...");
+      console.log("[HardcodeCreate] Upload successful:", result);
+      setProgress("Processing started! Generating images and audio...");
 
-      // Poll for completion
-      let pollAttempts = 0;
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusResponse = await fetch(
-            `${API_URL}/api/story-images/${sessionId}`,
-            {
-              headers: {
-                "X-User-Email": userEmail,
-              },
-            }
-          );
-
-          if (statusResponse.ok) {
-            const statusData = await statusResponse.json();
-            if (statusData.status === "completed" || statusData.status === "partial_failure") {
-              clearInterval(pollInterval);
-              setIsLoading(false);
-              setSuccess(true);
-              setProgress(null);
-            } else if (statusData.status === "failed") {
-              clearInterval(pollInterval);
-              setIsLoading(false);
-              setError("Image generation failed");
-              setProgress(null);
-            } else {
-              setProgress(`Processing... ${statusData.segments_succeeded || 0}/${statusData.segments_total || 4} segments completed`);
-            }
-          } else if (statusResponse.status === 404) {
-            // Status file not created yet - this is normal in the first few seconds
-            pollAttempts++;
-            if (pollAttempts <= 5) {
-              // First 5 attempts (15 seconds) - status file might not exist yet
-              setProgress("Initializing processing...");
-            } else {
-              // After 15 seconds, if still 404, there might be an issue
-              // But continue polling in case it's just slow
-            }
-          }
-        } catch (err) {
-          // Continue polling on error (network errors, etc.)
-          pollAttempts++;
-          if (pollAttempts > 10) {
-            // After 30 seconds of errors, log but continue
-            console.warn("Polling error (continuing):", err);
-          }
-        }
-      }, 3000); // Poll every 3 seconds
-
-      // Stop polling after 5 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (isLoading) {
-          setIsLoading(false);
-          setProgress("Processing is taking longer than expected. Check the Assets page for results.");
-        }
-      }, 300000);
+      // Activate WebSocket connection for real-time updates
+      setActiveSessionId(sessionId);
+      console.log("[HardcodeCreate] Activated WebSocket for session:", sessionId);
+      console.log("[HardcodeCreate] Waiting for WebSocket updates...");
     } catch (err) {
+      console.error("[HardcodeCreate] Fatal error during form submission:", err);
       setIsLoading(false);
       setError(err instanceof Error ? err.message : "An error occurred");
+      setProgress(null);
+    }
+  };
+
+  const handleComposeVideo = async () => {
+    if (!sessionId) {
+      setError("No session ID available");
+      return;
+    }
+
+    try {
+      console.log("[HardcodeCreate] Starting video composition for session:", sessionId);
+      setIsLoading(true);
+      setProgress("Starting video composition...");
+      setError(null);
+
+      const response = await fetch(
+        `${API_URL}/api/compose-hardcode-video/${sessionId}`,
+        {
+          method: "POST",
+          headers: {
+            "X-User-Email": userEmail,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Video composition failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log("[HardcodeCreate] Video composition started:", result);
+      setProgress("Composing video from images and audio...");
+    } catch (err) {
+      console.error("[HardcodeCreate] Error starting video composition:", err);
+      setIsLoading(false);
+      setError(err instanceof Error ? err.message : "Failed to start video composition");
       setProgress(null);
     }
   };
@@ -249,8 +382,18 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       <Card>
         <CardHeader>
           <CardTitle>Session Information</CardTitle>
-          <CardDescription>
-            Session ID: <code className="text-xs bg-muted px-2 py-1 rounded">{sessionId}</code>
+          <CardDescription className="space-y-2">
+            <div>
+              Session ID: <code className="text-xs bg-muted px-2 py-1 rounded">{sessionId}</code>
+            </div>
+            {activeSessionId && (
+              <div className="flex items-center gap-2 text-xs">
+                <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <span>
+                  WebSocket: {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
+            )}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -489,19 +632,248 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       {success && (
         <Card className="border-green-500">
           <CardContent className="pt-6">
-            <p className="text-green-600">
-              Success! Images are being generated. Check the Assets page to view results.
-            </p>
+            <div className="flex items-center justify-between mb-6">
+              <p className="text-green-600 font-medium">
+                Success! Images and audio have been generated.
+              </p>
+              <Button
+                onClick={handleComposeVideo}
+                disabled={isLoading}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {isLoading ? "Composing..." : "Compose Video"}
+              </Button>
+            </div>
+
+            {/* Display generated assets from WebSocket */}
+            {(generatedImages.length > 0 || generatedAudio.length > 0) && (
+              <div className="mt-6 space-y-6">
+                <div className="flex items-center justify-between text-sm text-muted-foreground border-b pb-3">
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Total Images:</span> {generatedImages.length}
+                  </span>
+                  {totalCost !== null && (
+                    <span className="flex items-center gap-1">
+                      <span className="font-medium">Cost:</span> ${totalCost.toFixed(4)}
+                    </span>
+                  )}
+                  {elapsedTime !== null && (
+                    <span className="flex items-center gap-1">
+                      <span className="font-medium">Time:</span> {elapsedTime.toFixed(1)}s
+                    </span>
+                  )}
+                </div>
+
+                {/* Display audio files */}
+                {generatedAudio.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Generated Audio</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {generatedAudio.map((audio: any, idx: number) => (
+                        <div key={idx} className="border rounded p-3">
+                          <Label className="text-sm font-medium mb-2 block capitalize">
+                            {audio.part} {audio.duration && `(${audio.duration.toFixed(1)}s)`}
+                          </Label>
+                          <audio controls className="w-full">
+                            <source src={audio.url} type="audio/mpeg" />
+                            Your browser does not support the audio element.
+                          </audio>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Display images */}
+                {generatedImages.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Generated Images</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {generatedImages.map((image: any, idx: number) => (
+                          <div key={idx} className="relative">
+                            <img
+                              src={image.url}
+                              alt={`${image.segment_title}`}
+                              className="w-full h-auto rounded border"
+                            />
+                            <span className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
+                              {image.segment_title}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {results && (
+              <div className="mt-6 space-y-6">
+                <div className="flex items-center justify-between text-sm text-muted-foreground border-b pb-3">
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Total Images:</span> {results.total_images_generated}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Cost:</span> ${results.total_cost_usd?.toFixed(4)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Time:</span> {results.total_time_seconds?.toFixed(1)}s
+                  </span>
+                </div>
+
+                {/* Display segments with images and audio */}
+                {results.segments && results.segments.map((segment: any) => (
+                  <Card key={segment.segment_number}>
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        Segment {segment.segment_number}: {segment.segment_title}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Audio player if available */}
+                      {segment.audio_url && (
+                        <div>
+                          <Label className="text-sm font-medium mb-2 block">Audio</Label>
+                          <audio controls className="w-full">
+                            <source src={segment.audio_url} type="audio/mpeg" />
+                            Your browser does not support the audio element.
+                          </audio>
+                        </div>
+                      )}
+
+                      {/* Images */}
+                      {segment.images && segment.images.length > 0 && (
+                        <div>
+                          <Label className="text-sm font-medium mb-2 block">
+                            Images ({segment.images.length})
+                          </Label>
+                          <div className="grid grid-cols-2 gap-4">
+                            {segment.images.map((image: any) => (
+                              <div key={image.s3_key} className="relative">
+                                <img
+                                  src={image.presigned_url}
+                                  alt={`Image ${image.image_number}`}
+                                  className="w-full h-auto rounded border"
+                                />
+                                <span className="absolute top-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
+                                  #{image.image_number}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
 
       {progress && (
-        <Card>
+        <Card className="border-blue-200 bg-blue-50/50">
           <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <p className="text-muted-foreground">{progress}</p>
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <p className="text-sm font-medium">{progress}</p>
+              </div>
+
+              {/* Show generated assets WHILE processing */}
+              {(generatedImages.length > 0 || generatedAudio.length > 0) && (
+                <div className="mt-4 pt-4 border-t space-y-4">
+                  {/* Display audio files as they become available */}
+                  {generatedAudio.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Generated Audio ({generatedAudio.length})</Label>
+                      <div className="space-y-2">
+                        {generatedAudio.map((audio: any, idx: number) => (
+                          <div key={`${audio.part}-${idx}`} className="border rounded p-2 bg-white">
+                            <Label className="text-xs font-medium capitalize block mb-1">
+                              {audio.part} {audio.duration && `(${audio.duration.toFixed(1)}s)`}
+                            </Label>
+                            <audio controls className="w-full h-8">
+                              <source src={audio.url} type="audio/mpeg" />
+                            </audio>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Display images as they become available */}
+                  {generatedImages.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Generated Images ({generatedImages.length})</Label>
+                      <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                        {generatedImages.map((image: any, idx: number) => (
+                          <div key={`${image.url}-${idx}`} className="relative">
+                            <img
+                              src={image.url}
+                              alt={image.segment_title}
+                              className="w-full h-auto rounded border bg-white"
+                            />
+                            <span className="absolute bottom-1 left-1 bg-black/70 text-white px-1 py-0.5 rounded text-xs">
+                              {image.segment_title}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cumulative status items */}
+              {statusItems && statusItems.length > 0 && (
+                <div className="space-y-2 border-t pt-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Progress Details:</p>
+                  <div className="max-h-48 overflow-y-auto space-y-1">
+                    {statusItems.map((item: any) => (
+                      <div key={item.id} className="flex items-center gap-2 text-xs">
+                        {item.status === "completed" && (
+                          <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                        {item.status === "processing" && (
+                          <Loader2 className="h-4 w-4 text-blue-600 animate-spin flex-shrink-0" />
+                        )}
+                        {item.status === "pending" && (
+                          <svg className="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <circle cx="12" cy="12" r="10" strokeWidth={2} />
+                          </svg>
+                        )}
+                        <span className={item.status === "completed" ? "text-green-700" : item.status === "processing" ? "text-blue-700 font-medium" : "text-gray-500"}>
+                          {item.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Live stats */}
+              <div className="flex items-center justify-between text-sm text-muted-foreground border-t pt-3">
+                {elapsedTime !== null && (
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Time:</span> {elapsedTime.toFixed(1)}s
+                  </span>
+                )}
+                {totalCost !== null && (
+                  <span className="flex items-center gap-1">
+                    <span className="font-medium">Cost:</span> ${totalCost.toFixed(4)}
+                  </span>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

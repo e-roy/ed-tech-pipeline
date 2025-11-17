@@ -238,19 +238,22 @@ class StoryImageGeneratorAgent:
         self,
         storage_service: StorageService,
         openrouter_api_key: str,
-        replicate_api_key: str
+        replicate_api_key: str,
+        websocket_manager=None
     ):
         """
         Initialize the agent.
-        
+
         Args:
             storage_service: StorageService instance for S3 operations
             openrouter_api_key: OpenRouter API key for verification
             replicate_api_key: Replicate API key for image generation
+            websocket_manager: Optional WebSocketManager for progress updates
         """
         self.storage_service = storage_service
         self.openrouter_api_key = openrouter_api_key
         self.replicate_api_key = replicate_api_key
+        self.websocket_manager = websocket_manager
     
     async def process(self, input: AgentInput) -> AgentOutput:
         """
@@ -281,7 +284,8 @@ class StoryImageGeneratorAgent:
             max_verification_passes = data.get("max_verification_passes", 3)
             fast_mode = data.get("fast_mode", False)
             template_title = data.get("template_title", "Untitled")
-            
+            cumulative_items = data.get("cumulative_items", [])
+
             if not segments:
                 return AgentOutput(
                     success=False,
@@ -290,7 +294,7 @@ class StoryImageGeneratorAgent:
                     duration=time.time() - start_time,
                     error="No segments provided"
                 )
-            
+
             # Download diagram if provided
             diagram_bytes = None
             if diagram_s3_path:
@@ -299,8 +303,12 @@ class StoryImageGeneratorAgent:
                     logger.info(f"Downloaded diagram from S3: {diagram_s3_path}")
                 except Exception as e:
                     logger.warning(f"Failed to download diagram: {e}, continuing without style reference")
-            
+
+            # Create a lock for thread-safe cumulative_items updates
+            items_lock = asyncio.Lock()
+
             # Process segments in parallel
+            total_segments = len(segments)
             segment_tasks = [
                 self._process_segment(
                     segment,
@@ -310,7 +318,11 @@ class StoryImageGeneratorAgent:
                     num_images,
                     max_passes,
                     max_verification_passes,
-                    fast_mode
+                    fast_mode,
+                    input.session_id,
+                    total_segments,
+                    cumulative_items,
+                    items_lock
                 )
                 for segment in segments
             ]
@@ -374,6 +386,46 @@ class StoryImageGeneratorAgent:
                 error=str(e)
             )
     
+    async def _update_cumulative_status(
+        self,
+        session_id: str,
+        cumulative_items: list,
+        items_lock: asyncio.Lock,
+        item_id: str,
+        new_status: str
+    ):
+        """Update a single item's status and broadcast the full cumulative state."""
+        if not cumulative_items or not items_lock or not self.websocket_manager:
+            return
+
+        async with items_lock:
+            # Find and update the item
+            for item in cumulative_items:
+                if item["id"] == item_id:
+                    item["status"] = new_status
+                    break
+
+            # Count completed items for progress calculation
+            completed_count = sum(1 for item in cumulative_items if item["status"] == "completed")
+            total_count = len(cumulative_items)
+            progress = int((completed_count / total_count) * 100) if total_count > 0 else 0
+
+            # Generate details message
+            processing_items = [item for item in cumulative_items if item["status"] == "processing"]
+            if processing_items:
+                details = f"Processing: {processing_items[0]['name']}"
+            else:
+                details = f"Completed {completed_count} of {total_count} items"
+
+            # Broadcast the full cumulative state
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_images_audio",
+                progress=progress,
+                details=details,
+                items=cumulative_items
+            )
+
     async def _process_segment(
         self,
         segment: Dict,
@@ -383,12 +435,25 @@ class StoryImageGeneratorAgent:
         num_images: int,
         max_passes: int,
         max_verification_passes: int,
-        fast_mode: bool
+        fast_mode: bool,
+        session_id: str,
+        total_segments: int,
+        cumulative_items: list = None,
+        items_lock: asyncio.Lock = None
     ) -> Dict:
         """Process a single segment and generate images."""
         segment_start_time = time.time()
         segment_num = segment["number"]
         segment_title = segment["title"]
+
+        # Send initial WebSocket update (still keep this for backward compatibility)
+        if self.websocket_manager and not cumulative_items:
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_images",
+                progress=10 + (segment_num - 1) * 10,
+                details=f"Generating images for segment {segment_num} of {total_segments}: {segment_title}"
+            )
         
         try:
             # Generate prompts
@@ -402,10 +467,21 @@ class StoryImageGeneratorAgent:
                 image_num = img_idx + 1
                 success = False
                 gen_attempt = 0
-                
+
+                # Update cumulative status: mark image as processing
+                item_id = f"image_seg{segment_num}_img{image_num}"
+                if cumulative_items and items_lock:
+                    await self._update_cumulative_status(
+                        session_id,
+                        cumulative_items,
+                        items_lock,
+                        item_id,
+                        "processing"
+                    )
+
                 while not success and gen_attempt < max_passes:
                     gen_attempt += 1
-                    
+
                     # Generate image
                     gen_success, gen_metadata = await self._generate_image_via_replicate(
                         prompt,
@@ -413,28 +489,28 @@ class StoryImageGeneratorAgent:
                         fast_mode,
                         diagram_bytes
                     )
-                    
+
                     if not gen_success:
                         segment_cost += gen_metadata.get("cost", 0.0)
                         if gen_attempt < max_passes:
                             await asyncio.sleep(2)  # Brief delay before retry
                             continue
                         break
-                    
+
                     image_bytes = gen_metadata.get("image_bytes")
                     if not image_bytes:
                         break
-                    
+
                     segment_cost += gen_metadata.get("cost", 0.0)
-                    
+
                     # Verify image
                     verify_success, verify_result, verify_error, verify_metadata = await self._verify_image_no_labels(
                         image_bytes,
                         max_verification_passes
                     )
-                    
+
                     segment_cost += verify_metadata.get("cost", 0.0)
-                    
+
                     if verify_success:
                         # Upload to S3
                         s3_key = f"{output_s3_prefix}{template_title}/{segment_num}. {segment_title}/generated_images/image_{image_num}.png"
@@ -443,19 +519,39 @@ class StoryImageGeneratorAgent:
                             s3_key,
                             content_type="image/png"
                         )
-                        
+
                         # Remove image_bytes from metadata before serialization (it's already uploaded to S3)
                         gen_metadata_serializable = {k: v for k, v in gen_metadata.items() if k != "image_bytes"}
                         verify_metadata_serializable = {k: v for k, v in verify_metadata.items() if k != "image_bytes"}
-                        
+
                         generated_images.append({
                             "image_number": image_num,
                             "s3_key": s3_key,
                             "generation_metadata": gen_metadata_serializable,
                             "verification_metadata": verify_metadata_serializable
                         })
-                        
+
+                        # Update cumulative status: mark image as completed
+                        if cumulative_items and items_lock:
+                            await self._update_cumulative_status(
+                                session_id,
+                                cumulative_items,
+                                items_lock,
+                                item_id,
+                                "completed"
+                            )
+
                         success = True
+
+                        # Send WebSocket update for each image generated
+                        if self.websocket_manager:
+                            await self.websocket_manager.broadcast_status(
+                                session_id,
+                                status="image_generated",
+                                progress=10 + (segment_num - 1) * 10 + (image_num * 2),
+                                details=f"Generated image {image_num} of {num_images} for segment {segment_num}: {segment_title}"
+                            )
+
                         break
                     else:
                         if gen_attempt < max_passes:

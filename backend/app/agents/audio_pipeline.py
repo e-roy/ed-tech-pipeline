@@ -73,7 +73,8 @@ class AudioPipelineAgent:
         self,
         api_key: Optional[str] = None,
         db: Optional[Session] = None,
-        storage_service: Optional[Any] = None
+        storage_service: Optional[Any] = None,
+        websocket_manager=None
     ):
         """
         Initialize the Audio Pipeline Agent.
@@ -82,10 +83,12 @@ class AudioPipelineAgent:
             api_key: OpenAI API key (defaults to env var)
             db: Database session for music selection
             storage_service: Storage service for music processing
+            websocket_manager: Optional WebSocketManager for progress updates
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.db = db
         self.storage_service = storage_service
+        self.websocket_manager = websocket_manager
 
         if not self.api_key:
             logger.warning(
@@ -100,6 +103,44 @@ class AudioPipelineAgent:
             self.music_selector = MusicSelectionAgent(db=self.db)
         if self.storage_service:
             self.music_processor = MusicProcessingService(storage_service=self.storage_service)
+
+    async def _update_cumulative_status(
+        self,
+        session_id: str,
+        cumulative_items: list,
+        item_id: str,
+        new_status: str
+    ):
+        """Update a single audio item's status and broadcast the full cumulative state."""
+        if not cumulative_items or not self.websocket_manager:
+            return
+
+        # Find and update the item
+        for item in cumulative_items:
+            if item["id"] == item_id:
+                item["status"] = new_status
+                break
+
+        # Count completed items for progress calculation
+        completed_count = sum(1 for item in cumulative_items if item["status"] == "completed")
+        total_count = len(cumulative_items)
+        progress = int((completed_count / total_count) * 100) if total_count > 0 else 0
+
+        # Generate details message
+        processing_items = [item for item in cumulative_items if item["status"] == "processing"]
+        if processing_items:
+            details = f"Processing: {processing_items[0]['name']}"
+        else:
+            details = f"Completed {completed_count} of {total_count} items"
+
+        # Broadcast the full cumulative state
+        await self.websocket_manager.broadcast_status(
+            session_id,
+            status="generating_images_audio",
+            progress=progress,
+            details=details,
+            items=cumulative_items
+        )
 
     async def process(self, input: AgentInput) -> AgentOutput:
         """
@@ -125,6 +166,7 @@ class AudioPipelineAgent:
             script = input.data.get("script", {})
             voice = input.data.get("voice", self.DEFAULT_VOICE)
             audio_option = input.data.get("audio_option", "tts")
+            cumulative_items = input.data.get("cumulative_items", [])
 
             # Handle non-TTS options
             if audio_option != "tts":
@@ -151,14 +193,27 @@ class AudioPipelineAgent:
             # Generate audio for each part
             audio_files = []
             total_cost = 0.0
+            total_parts = len(required_parts)
+            current_part_idx = 0
 
             for part_name in required_parts:
+                current_part_idx += 1
                 part_data = script[part_name]
                 text = part_data.get("text", "")
 
                 if not text:
                     logger.warning(f"Part '{part_name}' has no text, skipping audio generation")
                     continue
+
+                # Update cumulative status: mark audio as processing
+                item_id = f"audio_{part_name}"
+                if cumulative_items:
+                    await self._update_cumulative_status(
+                        input.session_id,
+                        cumulative_items,
+                        item_id,
+                        "processing"
+                    )
 
                 logger.info(
                     f"[{input.session_id}] Generating audio for '{part_name}' "
@@ -215,6 +270,24 @@ class AudioPipelineAgent:
                     f"[{input.session_id}] Generated audio for '{part_name}': "
                     f"{estimated_duration:.1f}s, {file_size} bytes, ${cost:.4f}"
                 )
+
+                # Update cumulative status: mark audio as completed
+                if cumulative_items:
+                    await self._update_cumulative_status(
+                        input.session_id,
+                        cumulative_items,
+                        item_id,
+                        "completed"
+                    )
+
+                # Send WebSocket update for each audio file generated (backward compatibility)
+                if self.websocket_manager and not cumulative_items:
+                    await self.websocket_manager.broadcast_status(
+                        input.session_id,
+                        status="audio_generated",
+                        progress=50 + (current_part_idx * 8),
+                        details=f"Generated audio {current_part_idx} of {total_parts}: {part_name.capitalize()}"
+                    )
 
             # Generate background music if music agents are available
             music_file = None
