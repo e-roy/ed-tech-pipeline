@@ -1,5 +1,6 @@
 import { auth } from "@/server/auth";
 import { HardcodeCreateForm } from "./hardcode-create-form";
+import { randomUUID } from "crypto";
 
 export default async function HardcodeCreatePage() {
   const session = await auth();
@@ -13,6 +14,8 @@ export default async function HardcodeCreatePage() {
     );
   }
 
+  const sessionId = randomUUID();
+
   return (
     <div className="flex h-full flex-col p-6">
       <div className="mb-6">
@@ -21,8 +24,7 @@ export default async function HardcodeCreatePage() {
           Manually create story segments and generate images
         </p>
       </div>
-      <HardcodeCreateForm userEmail={userEmail} />
+      <HardcodeCreateForm userEmail={userEmail} sessionId={sessionId} />
     </div>
   );
 }
-
