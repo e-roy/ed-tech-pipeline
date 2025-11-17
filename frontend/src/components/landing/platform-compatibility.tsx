@@ -7,45 +7,45 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
-import { Globe, Monitor, Smartphone, Cloud } from "lucide-react";
+import { ClipboardList, Presentation, BarChart3, Cloud } from "lucide-react";
 
 const PlatformCompatibility = () => {
   const platforms = [
     {
-      icon: Smartphone,
-      title: "For Mobile",
+      icon: ClipboardList,
+      title: "For Planning",
       description:
-        "Review and download videos on the go with fast, secure sync across all your devices. Access your video library instantly from your phone or tablet.",
-      uiElements: ["Keep it simple", "Book a Call"],
-      // AI Image Prompt: "Hand holding smartphone showing educational video interface, clean and modern, monochromatic design, professional"
+        "Input topics and student interests during lesson planning—videos ready before class starts. Transform prep time into engagement time with 15-minute video creation.",
+      uiElements: ["15 min videos", "Student interests"],
+      // AI Image Prompt: "Teacher planning with clipboard and student interest notes, educational workflow, monochromatic design, professional"
       imagePrompt:
-        "Hand holding smartphone showing educational video interface, clean and modern, monochromatic design, professional",
+        "Teacher planning with clipboard and student interest notes, educational workflow, monochromatic design, professional",
     },
     {
-      icon: Monitor,
-      title: "For Desktop",
+      icon: Presentation,
+      title: "For Classroom",
       description:
-        "Work smarter on desktop. Enjoy seamless syncing, keyboard shortcuts, and distraction-free video creation on Windows or Linux.",
-      uiElements: ["Video created", "Folders used"],
-      // AI Image Prompt: "Stylized computer mouse with educational theme, desktop interface, monochromatic, clean design"
+        "Deploy personalized content that maintains cognitive load optimization and student attention. Videos designed to activate engagement naturally through interest-alignment.",
+      uiElements: ["Cognitive activation", "Natural engagement"],
+      // AI Image Prompt: "Classroom presentation with engaged students, personalized video content, monochromatic, clean design"
       imagePrompt:
-        "Stylized computer mouse with educational theme, desktop interface, monochromatic, clean design",
+        "Classroom presentation with engaged students, personalized video content, monochromatic, clean design",
     },
     {
-      icon: Globe,
-      title: "For Web",
+      icon: BarChart3,
+      title: "For Assessment",
       description:
-        "Access your videos anywhere with a responsive web app that loads in under 3 seconds. Works on any browser, any device.",
-      uiElements: ["Responsive", "Under 3 seconds"],
-      // AI Image Prompt: "Circular icon with stylized headset/hat, surrounded by responsive label and speed indicator, educational web platform theme, monochromatic"
+        "Track which interest-aligned videos drive engagement and adjust future content. Understand what activates your students' attention and refine your approach.",
+      uiElements: ["Engagement tracking", "Content refinement"],
+      // AI Image Prompt: "Educational analytics dashboard showing student engagement metrics, monochromatic design, professional"
       imagePrompt:
-        "Circular icon with stylized headset/hat, surrounded by responsive label and speed indicator, educational web platform theme, monochromatic",
+        "Educational analytics dashboard showing student engagement metrics, monochromatic design, professional",
     },
     {
       icon: Cloud,
       title: "For Anywhere",
       description:
-        "Cloud-based platform that works on any device. Your videos sync automatically, so you can start on one device and finish on another.",
+        "Access your personalized video library across all devices. Cloud-based platform syncs automatically, so your interest-aligned content is always ready when you need it.",
       uiElements: ["Cloud sync", "Multi-device"],
       // AI Image Prompt: "Cloud-based educational platform visualization, multiple devices connected, monochromatic design, clean and professional"
       imagePrompt:
@@ -58,7 +58,7 @@ const PlatformCompatibility = () => {
       <div className="mx-auto max-w-7xl px-6">
         <div className="mx-auto mb-12 max-w-3xl text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Videos. Education. Clarity. Wherever you teach.
+            Seamless Integration Into Your Teaching Workflow
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

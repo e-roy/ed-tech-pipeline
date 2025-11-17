@@ -7,11 +7,12 @@ const CTASection = () => {
     <section className="border-accent bg-background w-full border-b py-16">
       <div className="mx-auto max-w-3xl px-6 text-center">
         <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Ready to Create Your First Educational Video?
+          Ready to Transform How Your Students Engage with Science?
         </h2>
         <p className="text-muted-foreground mt-6 text-lg">
-          Start creating educational videos instantly and keep your lesson
-          content organized effortlessly.
+          Join middle school science teachers creating personalized videos that
+          activate attention naturally. Your first video takes 15 minutes—stop
+          settling for generic content that students tune out from.
         </p>
         <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <Button
