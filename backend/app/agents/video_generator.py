@@ -411,6 +411,58 @@ Create scene-specific prompts for each image view."""
                     "audio_enabled": False
                 }
 
+            elif model == "gen-4-turbo":
+                # Minimax Video-01 configuration
+                # Generates 6-second videos at 720p, 25fps
+                duration_seconds = 6.0  # Fixed duration for Minimax Video-01
+
+                model_input = {
+                    "prompt": scene_prompt,
+                    "first_frame_image": image_url,  # Use image as first frame
+                    "prompt_optimizer": True  # Enable prompt optimization for better quality
+                }
+
+                logger.debug(
+                    f"[{session_id}] Generating Minimax Video-01 clip {index + 1} "
+                    f"(duration: {duration_seconds}s, 720p@25fps)"
+                )
+
+                # Call Replicate API
+                output = await self.client.async_run(model_id, input=model_input)
+
+                # Extract video URL
+                if isinstance(output, str):
+                    video_url = output
+                elif isinstance(output, list) and output:
+                    video_url = output[0]
+                else:
+                    raise ValueError(f"Unexpected output format: {type(output)}")
+
+                if not video_url:
+                    raise ValueError("No video URL returned from Replicate")
+
+                generation_time = time.time() - start
+                cost = self.costs_per_second[model] * duration_seconds
+
+                logger.debug(
+                    f"[{session_id}] Minimax Video-01 clip {index + 1} generated in {generation_time:.2f}s"
+                )
+
+                return {
+                    "id": f"clip_{uuid.uuid4().hex[:8]}",
+                    "url": str(video_url),
+                    "source_image_id": source_image_id,
+                    "duration": duration_seconds,
+                    "resolution": "1280x720",
+                    "fps": 25,
+                    "cost": cost,
+                    "generation_time": generation_time,
+                    "model": model,
+                    "scene_prompt": scene_prompt[:100] + "...",
+                    "motion_intensity": None,
+                    "audio_enabled": False
+                }
+
             else:
                 # Stable Video Diffusion configuration
                 # Motion bucket ID: 0-255 scale (higher = more motion)

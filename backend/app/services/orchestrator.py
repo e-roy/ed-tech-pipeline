@@ -1181,12 +1181,22 @@ class VideoGenerationOrchestrator:
 
             logger.info(f"[{session_id}] Extension factor: {extension_factor:.2f}x")
 
+            # Get the script to extract narration text for video prompts
+            script = db.query(Script).filter(Script.id == session.prompt.split(": ")[-1]).first() if session and session.prompt else None
+
             for part in parts:
                 # Get first approved image for this part (or first available)
                 image_url = images_by_part.get(part, [None])[0] if part in images_by_part else None
 
                 # Get audio for this part
                 audio_data = audio_by_part.get(part)
+
+                # Get script text for this part to use in video prompts
+                script_text = None
+                if script:
+                    part_data = getattr(script, part, None)
+                    if part_data and isinstance(part_data, dict):
+                        script_text = part_data.get("text", "")
 
                 if image_url and audio_data:
                     # Extend the duration based on desired_duration
@@ -1201,7 +1211,8 @@ class VideoGenerationOrchestrator:
                         "audio_url": audio_data["url"],
                         "duration": extended_duration,
                         "narration_duration": audio_data["duration"],  # Keep original for audio sync
-                        "gap_after_narration": gap_after_narration  # Gap to add after this narration
+                        "gap_after_narration": gap_after_narration,  # Gap to add after this narration
+                        "script_text": script_text  # Add script text for video prompts
                     })
                 else:
                     logger.warning(f"[{session_id}] Missing assets for part: {part}")
@@ -1211,70 +1222,200 @@ class VideoGenerationOrchestrator:
 
             logger.info(f"[{session_id}] Built timeline with {len(timeline_segments)} segments")
 
-            # Step 1: Generate video clips from images using image-to-video
-            logger.info(f"[{session_id}] Generating video clips from images...")
+            # Step 1: Generate video clips from images using image-to-video (IN PARALLEL!)
+            # Smart multi-clip generation: Each 6s gen-4-turbo clip covers ~6 seconds
+            # Calculate how many clips we need per section to reach desired duration
+
+            CLIP_DURATION = 6.0  # gen-4-turbo generates 6-second clips
+            MAX_RETRIES = 2  # Retry failed generations
+
+            # Calculate total clips needed
+            total_clips_needed = 0
+            clips_per_segment = {}
+
+            for segment in timeline_segments:
+                # How many 6-second clips do we need for this segment's duration?
+                clips_needed = max(1, int(segment["duration"] / CLIP_DURATION + 0.5))
+                clips_per_segment[segment["part"]] = clips_needed
+                total_clips_needed += clips_needed
+
+            logger.info(f"[{session_id}] Generating {total_clips_needed} video clips ({clips_per_segment}) in parallel...")
 
             await self.websocket_manager.broadcast_status(
                 session_id,
                 status="generating_videos",
                 progress=92,
-                details="Generating video clips from images with AI..."
+                details=f"Generating {total_clips_needed} video clips in parallel with AI..."
             )
 
-            video_clips = []
-            for i, segment in enumerate(timeline_segments):
-                logger.info(f"[{session_id}] Generating video for {segment['part']} ({i+1}/{len(timeline_segments)})")
+            # Create all video generation tasks with retry logic
+            async def generate_clip_with_retry(segment, clip_index, total_clips_for_segment):
+                """Generate a single video clip with retry logic."""
+                part = segment['part']
+                script_text = segment.get('script_text', '')
 
-                # Generate video clip from image
-                video_input = AgentInput(
-                    session_id=session_id,
-                    data={
-                        "approved_images": [{"url": segment["image_url"]}],
-                        "video_prompt": f"Educational visualization for {segment['part']}",
-                        "clip_duration": segment["duration"],
-                        "model": "gen-4-turbo"  # Cheapest option
-                    }
-                )
+                for attempt in range(MAX_RETRIES + 1):
+                    try:
+                        logger.info(f"[{session_id}] Generating clip {clip_index + 1}/{total_clips_for_segment} for {part} (attempt {attempt + 1}/{MAX_RETRIES + 1})")
 
-                video_result = await self.video_generator.process(video_input)
+                        # Use the actual script text as the prompt for contextual animation
+                        # This makes the video animation match what's being narrated!
+                        if script_text:
+                            # For multiple clips, add variety to camera movements
+                            camera_styles = [
+                                "smooth camera movement",
+                                "gentle pan and zoom",
+                                "subtle camera motion"
+                            ]
+                            camera_style = camera_styles[clip_index % len(camera_styles)]
+                            prompt = f"{script_text} - Educational video with {camera_style}"
+                        else:
+                            # Fallback if no script text available
+                            prompt = f"Educational visualization for {part} with smooth camera movement"
 
-                if not video_result.success or not video_result.data.get("clips"):
-                    logger.warning(f"[{session_id}] Video generation failed for {segment['part']}, using static image")
-                    video_clips.append({
-                        "part": segment["part"],
-                        "video_url": None,  # Will use static image fallback
-                        "image_url": segment["image_url"],
-                        "audio_url": segment["audio_url"],
-                        "duration": segment["duration"]
-                    })
-                else:
-                    clip_data = video_result.data["clips"][0]
+                        video_input = AgentInput(
+                            session_id=session_id,
+                            data={
+                                "approved_images": [{"url": segment["image_url"]}],
+                                "video_prompt": prompt,
+                                "clip_duration": CLIP_DURATION,
+                                "model": "gen-4-turbo"
+                            }
+                        )
 
-                    # Store video clip in database
+                        video_result = await self.video_generator.process(video_input)
+
+                        if video_result.success and video_result.data.get("clips"):
+                            clip_data = video_result.data["clips"][0]
+                            logger.info(f"[{session_id}] ✓ Successfully generated clip {clip_index + 1} for {part}")
+                            return {
+                                "part": part,
+                                "video_url": clip_data["url"],
+                                "image_url": segment["image_url"],
+                                "duration": CLIP_DURATION,
+                                "clip_data": clip_data,
+                                "clip_index": clip_index,
+                                "success": True
+                            }
+                        else:
+                            error_msg = video_result.error or "Unknown error"
+                            logger.warning(f"[{session_id}] Attempt {attempt + 1} failed for {part} clip {clip_index + 1}: {error_msg}")
+
+                            if attempt < MAX_RETRIES:
+                                await asyncio.sleep(2)  # Brief delay before retry
+                                continue
+
+                    except Exception as e:
+                        logger.error(f"[{session_id}] Exception generating {part} clip {clip_index + 1} (attempt {attempt + 1}): {e}")
+                        if attempt < MAX_RETRIES:
+                            await asyncio.sleep(2)
+                            continue
+
+                # All retries failed
+                logger.error(f"[{session_id}] ✗ Failed to generate clip {clip_index + 1} for {part} after {MAX_RETRIES + 1} attempts")
+                return {
+                    "part": part,
+                    "video_url": None,
+                    "image_url": segment["image_url"],
+                    "duration": CLIP_DURATION,
+                    "clip_index": clip_index,
+                    "success": False
+                }
+
+            # Build task list: multiple clips per segment
+            import asyncio
+            tasks = []
+            for segment in timeline_segments:
+                clips_needed = clips_per_segment[segment["part"]]
+                for clip_idx in range(clips_needed):
+                    tasks.append(generate_clip_with_retry(segment, clip_idx, clips_needed))
+
+            logger.info(f"[{session_id}] Running {len(tasks)} video generation tasks in parallel with retry...")
+            video_clip_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results and organize by part
+            clips_by_part = {}
+            for part in parts:
+                clips_by_part[part] = []
+
+            successful_count = 0
+            failed_count = 0
+
+            for result in video_clip_results:
+                if isinstance(result, Exception):
+                    logger.error(f"[{session_id}] Clip failed with exception: {result}")
+                    failed_count += 1
+                    continue
+
+                part = result["part"]
+
+                if result["success"]:
+                    # Store successful video clip in database
                     video_asset = Asset(
                         session_id=session_id,
                         type="video",
-                        url=clip_data["url"],
+                        url=result["video_url"],
                         approved=True,
                         asset_metadata={
-                            "part": segment["part"],
-                            "duration": segment["duration"],
-                            "cost": clip_data.get("cost", 0.0),
-                            "source_image": segment["image_url"]
+                            "part": part,
+                            "duration": result["duration"],
+                            "cost": result["clip_data"].get("cost", 0.0),
+                            "source_image": result["image_url"],
+                            "clip_index": result["clip_index"]
                         }
                     )
                     db.add(video_asset)
-
-                    video_clips.append({
-                        "part": segment["part"],
-                        "video_url": clip_data["url"],
-                        "image_url": segment["image_url"],
-                        "audio_url": segment["audio_url"],
-                        "duration": segment["duration"]
-                    })
+                    clips_by_part[part].append(result)
+                    successful_count += 1
+                else:
+                    failed_count += 1
 
             db.commit()
-            logger.info(f"[{session_id}] Generated {len(video_clips)} video clips")
+
+            logger.info(f"[{session_id}] Generated {successful_count}/{len(video_clip_results)} video clips successfully ({failed_count} failed)")
+
+            # Build final timeline with multiple clips per segment
+            # IMPORTANT: Only the first clip of each part gets the audio_url
+            # This prevents repeated narration when we have multiple clips per part
+            video_clips = []
+            for segment in timeline_segments:
+                part = segment["part"]
+                audio_url = segment["audio_url"]
+                narration_duration = segment["narration_duration"]
+                gap_after_narration = segment["gap_after_narration"]
+
+                # Get all clips for this part
+                part_clips = clips_by_part[part]
+
+                if part_clips:
+                    # Use generated clips
+                    for idx, clip in enumerate(part_clips):
+                        # Only first clip gets audio, others get None
+                        clip_audio_url = audio_url if idx == 0 else None
+                        clip_narration_duration = narration_duration if idx == 0 else 0.0
+                        clip_gap = gap_after_narration if idx == len(part_clips) - 1 else 0.0  # Gap only on last clip
+
+                        video_clips.append({
+                            "part": part,
+                            "video_url": clip["video_url"],
+                            "image_url": clip["image_url"],
+                            "audio_url": clip_audio_url,
+                            "duration": clip["duration"],
+                            "narration_duration": clip_narration_duration,
+                            "gap_after_narration": clip_gap
+                        })
+                else:
+                    # Fallback to static image
+                    logger.warning(f"[{session_id}] No video clips for {part}, using static image")
+                    video_clips.append({
+                        "part": part,
+                        "video_url": None,
+                        "image_url": segment["image_url"],
+                        "audio_url": audio_url,
+                        "duration": segment["duration"],
+                        "narration_duration": narration_duration,
+                        "gap_after_narration": gap_after_narration
+                    })
 
             # Step 2: Use FFmpeg compositor to stitch videos and add audio
             from app.services.educational_compositor import EducationalCompositor

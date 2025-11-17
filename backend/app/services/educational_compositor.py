@@ -463,36 +463,10 @@ class EducationalCompositor:
         output_path = os.path.join(self.work_dir, f"{session_id}_final.mp4")
 
         # Build volume control for ducking
-        if segment_files and intro_padding is not None:
-            # Calculate narration time windows
-            volume_expr = "volume="
-            current_time = intro_padding
-
-            # Start with higher volume during intro
-            volume_parts = []
-
-            for segment in segment_files:
-                narration_duration = segment.get('narration_duration', 5.0)
-                gap = segment.get('gap_after_narration', 0.0)
-
-                # During narration: lower volume (0.08 = 8%)
-                # During gaps: higher volume (0.18 = 18%)
-                narration_start = current_time
-                narration_end = current_time + narration_duration
-                gap_end = narration_end + gap
-
-                # Lower volume during narration
-                volume_parts.append(f"if(between(t,{narration_start},{narration_end}),0.08,")
-
-                current_time += narration_duration + gap
-
-            # Close all the if statements and set default volume for gaps
-            volume_expr += ''.join(volume_parts) + "0.18" + ")" * len(volume_parts)
-
-            filter_complex = f"[1:a]{volume_expr}[music];[0:a][music]amix=inputs=2:duration=longest[aout]"
-        else:
-            # Fallback: constant volume
-            filter_complex = "[1:a]volume=0.12[music];[0:a][music]amix=inputs=2:duration=longest[aout]"
+        # Simplified approach: Use constant low volume for music
+        # The narration will naturally be louder, creating a ducking effect
+        # This avoids complex nested if statements that can fail
+        filter_complex = "[1:a]volume=0.10[music];[0:a][music]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
 
         # Use -shortest to match video duration (not audio duration)
         cmd = [
