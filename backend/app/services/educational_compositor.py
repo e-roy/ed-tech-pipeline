@@ -8,6 +8,8 @@ Purpose: Create engaging educational videos by synchronizing:
 - Background music (optional)
 - Smooth transitions
 """
+# Version for tracking code changes in logs
+COMPOSITOR_VERSION = "1.1.0-duration-fix"
 
 import os
 import subprocess
@@ -85,7 +87,11 @@ class EducationalCompositor:
             Exception: If composition fails
         """
         try:
-            logger.info(f"[{session_id}] Starting educational video composition with {len(timeline)} segments (intro: {intro_padding}s, outro: {outro_padding}s)")
+            logger.info(f"[{session_id}] ========================================")
+            logger.info(f"[{session_id}] Starting educational video composition")
+            logger.info(f"[{session_id}] COMPOSITOR VERSION: {COMPOSITOR_VERSION}")
+            logger.info(f"[{session_id}] Segments: {len(timeline)}, Intro: {intro_padding}s, Outro: {outro_padding}s")
+            logger.info(f"[{session_id}] ========================================")
 
             # Step 1: Download all assets (videos or images + audio)
             segment_files = await self._download_segment_assets(timeline, session_id)
@@ -221,11 +227,12 @@ class EducationalCompositor:
             output_path = os.path.join(self.work_dir, f"{session_id}_clip_{i}.mp4")
 
             if segment["video_path"]:
-                # Normalize existing video to 1080p@30fps
-                logger.info(f"[{session_id}] Normalizing generated video for {segment['part']}")
+                # Normalize existing video to 1080p@30fps and trim to desired duration
+                logger.info(f"[{session_id}] Normalizing generated video for {segment['part']} (target duration: {segment['duration']}s)")
                 cmd = [
                     "ffmpeg", "-y",
                     "-i", segment["video_path"],
+                    "-t", str(segment["duration"]),  # Trim to desired duration
                     "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
                     "-c:v", "libx264",
                     "-preset", "medium",
@@ -362,19 +369,20 @@ class EducationalCompositor:
         for i, segment in enumerate(segment_files):
             # Skip segments without audio
             if not segment.get('audio_path'):
+                # Even without audio, account for this segment's duration in the timeline
+                current_time += segment.get('duration', 0.0)
                 continue
 
-            gap = segment.get('gap_after_narration', 0.0)
-
             # Add this audio segment with adelay to position it at the right time
-            # Use segment index in segments_with_audio for filter indexing
+            # Audio starts when this video segment starts in the timeline
             audio_index = segments_with_audio.index(segment)
             delay_ms = int(current_time * 1000)
             filter_parts.append(f"[{audio_index}:a]adelay={delay_ms}|{delay_ms}[a{audio_index}]")
 
-            # Update time for next segment (current narration + gap)
-            narration_duration = segment.get('narration_duration', 5.0)
-            current_time += narration_duration + gap
+            # Move to next segment's start time (use video segment duration, not narration duration)
+            # This keeps audio synchronized with video timeline
+            segment_duration = segment.get('duration', 5.0)
+            current_time += segment_duration
 
         # Mix all delayed audio tracks together
         mix_inputs = ''.join(f"[a{i}]" for i in range(len(segments_with_audio)))
@@ -392,7 +400,7 @@ class EducationalCompositor:
         cmd.extend([
             "-filter_complex", filter_complex,
             "-map", "[mixed]",
-            "-t", str(current_time),  # Total duration including intro, all segments, and gaps
+            "-t", str(current_time + outro_padding),  # Total duration including intro, all segments, gaps, and outro
             "-ac", "2",  # Stereo
             "-ar", "44100",  # Sample rate
             combined_audio

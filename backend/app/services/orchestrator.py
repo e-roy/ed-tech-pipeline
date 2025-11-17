@@ -4,6 +4,9 @@ Video Generation Orchestrator - Coordinates all microservices.
 This is the CRITICAL PATH component that unblocks the entire team.
 Updated to integrate script-based image generation workflow.
 """
+# Version for tracking code changes in logs
+ORCHESTRATOR_VERSION = "1.2.0-semantic-progression"
+
 from sqlalchemy.orm import Session
 from app.models.database import Session as SessionModel, Asset, GenerationCost, Script
 from app.services.websocket_manager import WebSocketManager
@@ -144,17 +147,27 @@ class VideoGenerationOrchestrator:
             }
 
             # Stage 1: Image Generation
-            images_per_part = options.get("images_per_part", 2) if options else 2
+            # Scale images based on segment duration
+            # Calculate images per part based on duration
+            images_per_part_config = {}
+            for part_name in ["hook", "concept", "process", "conclusion"]:
+                part_data = getattr(script, part_name)
+                if part_data and isinstance(part_data, dict):
+                    duration = float(part_data.get("duration", 10))
+                    # Base: 1 image per 5 seconds, minimum 2, maximum 6
+                    images_count = max(2, min(6, int(duration / 5) + 1))
+                    images_per_part_config[part_name] = images_count
+                else:
+                    images_per_part_config[part_name] = 2
+
+            total_images = sum(images_per_part_config.values())
+            logger.info(f"[{session_id}] Images per part: {images_per_part_config}, Total: {total_images}")
+
             await self.websocket_manager.broadcast_status(
                 session_id,
                 status="image_generation",
                 progress=20,
-                details=f"Generating {images_per_part} images per script part with AI..."
-            )
-
-            logger.info(
-                f"[{session_id}] Generating {images_per_part} images per part with "
-                f"{options.get('model', 'flux-schnell') if options else 'flux-schnell'}"
+                details=f"Generating {total_images} images with semantic progression..."
             )
 
             image_gen_input = AgentInput(
@@ -162,7 +175,8 @@ class VideoGenerationOrchestrator:
                 data={
                     "script": script_data,
                     "model": options.get("model", "flux-schnell") if options else "flux-schnell",
-                    "images_per_part": images_per_part
+                    "images_per_part_config": images_per_part_config,  # Pass per-part config
+                    "use_semantic_progression": True  # Enable semantic linking
                 }
             )
 
@@ -1103,7 +1117,11 @@ class VideoGenerationOrchestrator:
             Dict with status, video_url, duration, segments_count
         """
         try:
+            logger.info(f"[{session_id}] ========================================")
             logger.info(f"[{session_id}] Starting educational video composition")
+            logger.info(f"[{session_id}] ORCHESTRATOR VERSION: {ORCHESTRATOR_VERSION}")
+            logger.info(f"[{session_id}] Desired duration: {desired_duration}s")
+            logger.info(f"[{session_id}] ========================================")
 
             # Update session status
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
@@ -1185,8 +1203,8 @@ class VideoGenerationOrchestrator:
             script = db.query(Script).filter(Script.id == session.prompt.split(": ")[-1]).first() if session and session.prompt else None
 
             for part in parts:
-                # Get first approved image for this part (or first available)
-                image_url = images_by_part.get(part, [None])[0] if part in images_by_part else None
+                # Get ALL approved images for this part (not just the first)
+                images_for_part = images_by_part.get(part, []) if part in images_by_part else []
 
                 # Get audio for this part
                 audio_data = audio_by_part.get(part)
@@ -1198,7 +1216,7 @@ class VideoGenerationOrchestrator:
                     if part_data and isinstance(part_data, dict):
                         script_text = part_data.get("text", "")
 
-                if image_url and audio_data:
+                if images_for_part and audio_data:
                     # Extend the duration based on desired_duration
                     extended_duration = audio_data["duration"] * extension_factor
 
@@ -1207,13 +1225,14 @@ class VideoGenerationOrchestrator:
 
                     timeline_segments.append({
                         "part": part,
-                        "image_url": image_url,
+                        "images": images_for_part,  # Store ALL images for this part
                         "audio_url": audio_data["url"],
                         "duration": extended_duration,
                         "narration_duration": audio_data["duration"],  # Keep original for audio sync
                         "gap_after_narration": gap_after_narration,  # Gap to add after this narration
                         "script_text": script_text  # Add script text for video prompts
                     })
+                    logger.info(f"[{session_id}] {part}: {len(images_for_part)} images available for cycling")
                 else:
                     logger.warning(f"[{session_id}] Missing assets for part: {part}")
 
@@ -1253,6 +1272,30 @@ class VideoGenerationOrchestrator:
                 """Generate a single video clip with retry logic."""
                 part = segment['part']
                 script_text = segment.get('script_text', '')
+                images = segment.get('images', [])
+
+                # Cycle through available images intelligently:
+                # - If we have 2 images and 3 clips: distribute as [img0, img1, img1]
+                # - If we have 2 images and 2 clips: distribute as [img0, img1]
+                # - If we have 1 image and N clips: use [img0, img0, img0, ...]
+                # Strategy: Map clip_index linearly across available images
+                num_images = len(images)
+                if num_images == 0:
+                    logger.error(f"[{session_id}] No images available for {part}!")
+                    return {"part": part, "success": False}
+
+                # Calculate which image to use for this clip
+                # For 2 images, 3 clips: [0, 1, 1] (early concept, late concept, late concept)
+                # For 2 images, 2 clips: [0, 1] (early concept, late concept)
+                if total_clips_for_segment == 1:
+                    image_index = 0  # Use first image if only one clip
+                else:
+                    # Linear distribution: spread clips across available images
+                    image_index = min(int(clip_index * num_images / total_clips_for_segment), num_images - 1)
+
+                image_url = images[image_index]
+
+                logger.info(f"[{session_id}] {part} clip {clip_index + 1}/{total_clips_for_segment}: using image {image_index + 1}/{num_images}")
 
                 for attempt in range(MAX_RETRIES + 1):
                     try:
@@ -1276,7 +1319,7 @@ class VideoGenerationOrchestrator:
                         video_input = AgentInput(
                             session_id=session_id,
                             data={
-                                "approved_images": [{"url": segment["image_url"]}],
+                                "approved_images": [{"url": image_url}],
                                 "video_prompt": prompt,
                                 "clip_duration": CLIP_DURATION,
                                 "model": "gen-4-turbo"
@@ -1291,7 +1334,7 @@ class VideoGenerationOrchestrator:
                             return {
                                 "part": part,
                                 "video_url": clip_data["url"],
-                                "image_url": segment["image_url"],
+                                "image_url": image_url,
                                 "duration": CLIP_DURATION,
                                 "clip_data": clip_data,
                                 "clip_index": clip_index,
@@ -1316,7 +1359,7 @@ class VideoGenerationOrchestrator:
                 return {
                     "part": part,
                     "video_url": None,
-                    "image_url": segment["image_url"],
+                    "image_url": image_url,
                     "duration": CLIP_DURATION,
                     "clip_index": clip_index,
                     "success": False
@@ -1383,11 +1426,19 @@ class VideoGenerationOrchestrator:
                 audio_url = segment["audio_url"]
                 narration_duration = segment["narration_duration"]
                 gap_after_narration = segment["gap_after_narration"]
+                extended_duration = segment["duration"]  # The extended duration we calculated
 
                 # Get all clips for this part
                 part_clips = clips_by_part[part]
 
                 if part_clips:
+                    # Calculate duration per clip to distribute extended_duration proportionally
+                    # This ensures the total timeline matches the extension_factor
+                    num_clips = len(part_clips)
+                    duration_per_clip = extended_duration / num_clips
+
+                    logger.info(f"[{session_id}] {part}: Distributing {extended_duration:.2f}s across {num_clips} clips ({duration_per_clip:.2f}s each)")
+
                     # Use generated clips
                     for idx, clip in enumerate(part_clips):
                         # Only first clip gets audio, others get None
@@ -1400,22 +1451,29 @@ class VideoGenerationOrchestrator:
                             "video_url": clip["video_url"],
                             "image_url": clip["image_url"],
                             "audio_url": clip_audio_url,
-                            "duration": clip["duration"],
+                            "duration": duration_per_clip,  # Use calculated duration, not actual clip duration
                             "narration_duration": clip_narration_duration,
                             "gap_after_narration": clip_gap
                         })
                 else:
                     # Fallback to static image
                     logger.warning(f"[{session_id}] No video clips for {part}, using static image")
-                    video_clips.append({
-                        "part": part,
-                        "video_url": None,
-                        "image_url": segment["image_url"],
-                        "audio_url": audio_url,
-                        "duration": segment["duration"],
-                        "narration_duration": narration_duration,
-                        "gap_after_narration": gap_after_narration
-                    })
+                    # Use the first image from the segment's images list
+                    images = segment.get("images", [])
+                    first_image_url = images[0] if images else None
+
+                    if first_image_url:
+                        video_clips.append({
+                            "part": part,
+                            "video_url": None,
+                            "image_url": first_image_url,
+                            "audio_url": audio_url,
+                            "duration": segment["duration"],
+                            "narration_duration": narration_duration,
+                            "gap_after_narration": gap_after_narration
+                        })
+                    else:
+                        logger.error(f"[{session_id}] No images available for {part} fallback!")
 
             # Step 2: Use FFmpeg compositor to stitch videos and add audio
             from app.services.educational_compositor import EducationalCompositor

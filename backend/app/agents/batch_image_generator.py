@@ -73,13 +73,21 @@ class BatchImageGeneratorAgent:
 
             # Extract input parameters
             script = input.data["script"]
-            images_per_part = input.data.get("images_per_part", 2)
+            images_per_part_config = input.data.get("images_per_part_config")
+            images_per_part = input.data.get("images_per_part", 2)  # Fallback for old API
             prefer_templates = input.data.get("prefer_templates", True)
+            use_semantic_progression = input.data.get("use_semantic_progression", False)
 
-            logger.info(
-                f"[{input.session_id}] Generating {images_per_part} images per script part "
-                f"(prefer_templates={prefer_templates})"
-            )
+            # If per-part config provided, use it; otherwise use uniform count
+            if images_per_part_config:
+                logger.info(
+                    f"[{input.session_id}] Generating images with duration-based scaling: {images_per_part_config}"
+                )
+            else:
+                logger.info(
+                    f"[{input.session_id}] Generating {images_per_part} images per script part "
+                    f"(prefer_templates={prefer_templates})"
+                )
 
             # Generate images for each script part in parallel
             script_parts = ["hook", "concept", "process", "conclusion"]
@@ -89,18 +97,23 @@ class BatchImageGeneratorAgent:
             for part_name in script_parts:
                 script_part = script[part_name]
 
-                for i in range(images_per_part):
+                # Get images count for this part
+                part_images_count = images_per_part_config.get(part_name, images_per_part) if images_per_part_config else images_per_part
+
+                for i in range(part_images_count):
                     # For 60% templates: use template for first 60% of images
                     # Strategy: template for image 0, DALL-E for image 1 (if 2 images/part)
                     # Or: template, template, DALL-E for 3 images
-                    use_template = prefer_templates and (i < int(images_per_part * 0.6) or i == 0)
+                    use_template = prefer_templates and (i < int(part_images_count * 0.6) or i == 0)
 
                     task = self._generate_image_for_script_part(
                         session_id=input.session_id,
                         script_part=script_part,
                         part_name=part_name,
                         image_index=i,
-                        prefer_template=use_template
+                        prefer_template=use_template,
+                        total_images=part_images_count,
+                        use_semantic_progression=use_semantic_progression
                     )
                     all_tasks.append(task)
                     task_metadata.append({"part_name": part_name, "index": i})
@@ -192,13 +205,93 @@ class BatchImageGeneratorAgent:
                 error=str(e)
             )
 
+    def _get_progression_keywords(self, image_index: int, total_images: int) -> str:
+        """
+        Get semantic progression keywords based on image position.
+
+        Creates visual flow:
+        - Image 0: Establishing shot, wide view, context
+        - Image 1: Medium shot, detail focus
+        - Image 2+: Close-up, specific detail
+
+        Args:
+            image_index: Current image index (0-based)
+            total_images: Total images for this segment
+
+        Returns:
+            Comma-separated keywords for visual progression
+        """
+        if total_images == 1:
+            return "balanced composition, clear view"
+
+        # Calculate progression (0.0 = start, 1.0 = end)
+        progression = image_index / (total_images - 1)
+
+        if progression < 0.33:
+            # Early images: Establish context
+            return "establishing shot, wide angle, context view, cinematic framing"
+        elif progression < 0.67:
+            # Middle images: Focus on details
+            return "medium shot, focused composition, key details visible"
+        else:
+            # Late images: Close-up, emphasis
+            return "close-up detail, emphasis on subject, intimate view"
+
+    def _split_narration_for_images(self, text: str, image_index: int, total_images: int) -> str:
+        """
+        Split narration text to create progressive images that match different
+        parts of the narration timeline.
+
+        For image 0: Use first half of narration (early concepts)
+        For image 1: Use second half of narration (late concepts)
+        For image 2+: Use full narration
+
+        This ensures images appear in sync with what's being narrated.
+
+        Args:
+            text: Full narration text
+            image_index: Which image this is (0, 1, 2, etc.)
+            total_images: Total number of images for this part
+
+        Returns:
+            Portion of narration text for this image
+        """
+        if not text or total_images == 1:
+            return text
+
+        # Split by sentences
+        sentences = [s.strip() + '.' for s in text.split('.') if s.strip()]
+        num_sentences = len(sentences)
+
+        if num_sentences <= 1:
+            # Only one sentence, can't split meaningfully
+            return text
+
+        if image_index == 0 and total_images >= 2:
+            # First image: Use first half of sentences (early concepts)
+            split_point = max(1, num_sentences // 2)
+            result = ' '.join(sentences[:split_point])
+            logger.debug(f"Image {image_index}: Early concepts (first {split_point}/{num_sentences} sentences)")
+            return result
+        elif image_index == 1 and total_images >= 2:
+            # Second image: Use second half of sentences (late concepts)
+            split_point = num_sentences // 2
+            result = ' '.join(sentences[split_point:])
+            logger.debug(f"Image {image_index}: Late concepts (last {num_sentences - split_point}/{num_sentences} sentences)")
+            return result
+        else:
+            # Third+ image or fallback: Use full text
+            return text
+
     async def _generate_image_for_script_part(
         self,
         session_id: str,
         script_part: Dict[str, Any],
         part_name: str,
         image_index: int,
-        prefer_template: bool = True
+        prefer_template: bool = True,
+        total_images: int = 2,
+        use_semantic_progression: bool = False
     ) -> dict:
         """
         Generate a single image for a script part.
@@ -210,6 +303,7 @@ class BatchImageGeneratorAgent:
             part_name: Name of script part (hook, concept, process, conclusion)
             image_index: Image index for this part (0-2)
             prefer_template: Try template before DALL-E
+            total_images: Total number of images for this part
 
         Returns:
             Dict with URL and metadata
@@ -222,6 +316,23 @@ class BatchImageGeneratorAgent:
         try:
             visual_guidance = script_part.get("visual_guidance", "")
             key_concepts = script_part.get("key_concepts", [])
+            narration_text = script_part.get("text", "")
+
+            # Split narration to create progressive images that match narration timeline
+            # Image 0: Early concepts, Image 1: Late concepts
+            focused_text = self._split_narration_for_images(narration_text, image_index, total_images)
+
+            # Use the focused text as the visual guidance for this image
+            # This ensures each image shows what's being said when it appears on screen
+            if focused_text != narration_text:
+                logger.info(
+                    f"[{session_id}] {part_name} image {image_index + 1}: "
+                    f"{'Early' if image_index == 0 else 'Late'} concepts - '{focused_text[:60]}...'"
+                )
+                focused_guidance = focused_text
+            else:
+                # Fallback to original visual guidance if we couldn't split
+                focused_guidance = visual_guidance
 
             # Try template first if preferred
             if prefer_template:
@@ -276,13 +387,23 @@ class BatchImageGeneratorAgent:
                         # Fall through to DALL-E
 
             # Generate with DALL-E 3
-            logger.info(
-                f"[{session_id}] Generating {part_name} image {image_index + 1} "
-                f"with DALL-E 3"
-            )
+            # Add semantic progression keywords if enabled
+            if use_semantic_progression and total_images > 1:
+                progression_keywords = self._get_progression_keywords(image_index, total_images)
+                enhanced_guidance = f"{focused_guidance}, {progression_keywords}"
+                logger.info(
+                    f"[{session_id}] Generating {part_name} image {image_index + 1}/{total_images} "
+                    f"with DALL-E 3 ({progression_keywords})"
+                )
+            else:
+                enhanced_guidance = focused_guidance
+                logger.info(
+                    f"[{session_id}] Generating {part_name} image {image_index + 1} "
+                    f"with DALL-E 3"
+                )
 
             result = await self.dalle_generator.generate_image(
-                visual_guidance,
+                enhanced_guidance,  # Use enhanced guidance with progression
                 style="educational"
             )
 
