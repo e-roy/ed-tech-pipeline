@@ -1,22 +1,22 @@
-import { CheckCircle, Shield, User, XCircle } from "lucide-react";
+import { Clock, Shield, User, DollarSign } from "lucide-react";
 
 const TrustBar = () => {
   const trustSignals = [
     {
-      icon: CheckCircle,
-      text: "No Setup Fee",
+      icon: Clock,
+      text: "Videos in 15 Minutes",
     },
     {
       icon: Shield,
       text: "100% Scientific Accuracy",
     },
     {
-      icon: User,
-      text: "Teacher Control",
+      icon: DollarSign,
+      text: "$4-5 Per Video",
     },
     {
-      icon: XCircle,
-      text: "Cancel Anytime",
+      icon: User,
+      text: "Full Teacher Control",
     },
   ];
 

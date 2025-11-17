@@ -1,31 +1,33 @@
-import Image from "next/image";
-
 const VideoInterface = () => {
   return (
     <section className="border-accent bg-background w-full border-b py-16">
       <div className="mx-auto max-w-7xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Videos that work the way you teach
+            Personalized Learning Through Interest-Aligned Content
           </h2>
           <p className="text-muted-foreground mt-6 text-lg">
-            Educational videos shouldn&apos;t feel generic or inaccurate. With
-            our AI-powered system, every video flows from your learning
-            objectives and adapts to your teaching style, helping you stay
-            focused and productive.
+            Stop settling for generic YouTube videos that students instantly
+            recognize and disengage from. Input your topic, learning objectives,
+            and student interests (like axolotls or gaming), and our AI creates
+            videos where students see themselves in the material—triggering
+            natural attention through cognitive activation, not entertainment
+            gimmicks.
           </p>
         </div>
 
         <div className="mt-12">
-          {/* AI Image Prompt: "Clean educational video editing interface mockup, monochromatic design, showing script editor with formatting tools, professional and minimal, grayscale color scheme" */}
           <div className="relative mx-auto max-w-5xl">
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-white">
-              <Image
-                src="/placeholder.svg"
-                fill
-                alt="Educational video editing interface mockup showing script editor"
-                className="object-contain"
-              />
+            <div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-black">
+              <video
+                className="h-full w-full object-contain"
+                controls
+                preload="metadata"
+                playsInline
+              >
+                <source src="/Final_Video.mp4" type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
             </div>
           </div>
         </div>
