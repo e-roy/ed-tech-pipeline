@@ -3,6 +3,8 @@ import { env } from "@/env";
 import type { UIMessage } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { streamText, convertToModelMessages } from "ai";
+import { NarrativeBuilderAgent } from "@/server/agents/narrative-builder";
+import { parseFactsFromMessage } from "@/lib/factParsing";
 
 export const runtime = "nodejs";
 
@@ -64,10 +66,88 @@ export async function POST(req: Request) {
       return new Response("Messages array is required", { status: 400 });
     }
 
+    // Check for fact confirmation and trigger script generation in background
+    const lastUserMessage = messages.filter((m) => m.role === "user").pop();
+    const confirmationPatterns = [
+      /yes/i,
+      /approve/i,
+      /confirm/i,
+      /continue/i,
+      /proceed/i,
+      /go ahead/i,
+      /that's correct/i,
+      /looks good/i,
+    ];
+
+    if (lastUserMessage) {
+      // Extract text content from UIMessage using parts
+      const userTextPart = lastUserMessage.parts?.find(
+        (part): part is { type: "text"; text: string } => part.type === "text",
+      );
+      const userContent = userTextPart?.text ?? "";
+
+      if (
+        userContent &&
+        confirmationPatterns.some((pattern) => pattern.test(userContent))
+      ) {
+        // Extract facts from assistant messages
+        const assistantMessages = messages.filter(
+          (m) => m.role === "assistant",
+        );
+        let extractedFacts: Array<{ concept: string; details: string }> | null =
+          null;
+        let topic = "";
+
+        for (const msg of assistantMessages.reverse()) {
+          const assistantTextPart = msg.parts?.find(
+            (part): part is { type: "text"; text: string } =>
+              part.type === "text",
+          );
+          const assistantContent = assistantTextPart?.text ?? "";
+
+          if (assistantContent) {
+            const facts = parseFactsFromMessage(assistantContent);
+            if (facts && facts.length > 0) {
+              extractedFacts = facts.map((f) => ({
+                concept: f.concept,
+                details: f.details,
+              }));
+              // Try to extract topic from the message or use a default
+              const topicRegex = /topic[:\s]+([^\n]+)/i;
+              const topicMatch = topicRegex.exec(assistantContent);
+              topic = topicMatch?.[1]?.trim() ?? "Educational Content";
+              break;
+            }
+          }
+        }
+
+        if (extractedFacts && extractedFacts.length > 0 && session.user?.id) {
+          // Generate script without creating a session yet
+          // Script will be saved to DB when user approves it
+          const agent = new NarrativeBuilderAgent();
+          agent
+            .process({
+              sessionId: "temp", // Temporary, session will be created on approval
+              data: {
+                topic,
+                facts: extractedFacts,
+                target_duration: 60,
+              },
+            })
+            .catch((error) => {
+              console.error("Error generating script:", error);
+            });
+        }
+      }
+    }
+
     const result = streamText({
       model: openai("gpt-4o-mini"),
       messages: convertToModelMessages(messages),
       system: systemMessage,
+      // onFinish: async (completion) => {
+      //   console.log("Streamed Text Completion ===>", completion);
+      // },
     });
 
     return result.toUIMessageStreamResponse();

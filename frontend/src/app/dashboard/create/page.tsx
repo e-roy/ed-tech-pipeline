@@ -2,6 +2,7 @@
 
 import { useFactExtraction } from "@/components/fact-extraction/FactExtractionContext";
 import { FactExtractionPanel } from "@/components/fact-extraction/FactExtractionPanel";
+import { ScriptReviewPanel } from "@/components/generation/ScriptReviewPanel";
 import {
   Card,
   CardContent,
@@ -28,6 +29,7 @@ export default function CreatePage() {
     extractionError,
     confirmFacts,
     confirmedFacts,
+    sessionId,
   } = useFactExtraction();
 
   const handleFactsChange = (_facts: typeof extractedFacts) => {
@@ -43,9 +45,11 @@ export default function CreatePage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">Create Educational Video</h1>
         <p className="text-muted-foreground text-sm">
-          {confirmedFacts
-            ? `Step 2: Generate script (${confirmedFacts.length} facts ready)`
-            : "Step 1: Extract facts from your learning materials"}
+          {sessionId
+            ? `Step 3: Review Script`
+            : confirmedFacts
+              ? `Step 2: Generate script (${confirmedFacts.length} facts ready)`
+              : "Step 1: Extract facts from your learning materials"}
         </p>
       </div>
 
@@ -80,11 +84,16 @@ export default function CreatePage() {
         )}
 
         {confirmedFacts && confirmedFacts.length > 0 && (
+          <ScriptReviewPanel topic="Educational Content" />
+        )}
+
+        {confirmedFacts && confirmedFacts.length > 0 && !sessionId && (
           <Card>
             <CardHeader>
               <CardTitle>Facts Confirmed ({confirmedFacts.length})</CardTitle>
               <CardDescription>
-                Your facts are ready. Proceed to script generation in Phase 04.
+                Your facts are ready. Script generation will start automatically
+                after you confirm the facts in the chat.
               </CardDescription>
             </CardHeader>
             <CardContent>

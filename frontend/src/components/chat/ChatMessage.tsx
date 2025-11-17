@@ -27,7 +27,7 @@ export function ChatMessage({
   isStreaming: _isStreaming,
   isStreamingAssistant,
   isCreatePage,
-  factExtraction: _factExtraction,
+  factExtraction,
 }: ChatMessageProps) {
   // Extract text and file parts from message
   const textPart = message.parts?.find(

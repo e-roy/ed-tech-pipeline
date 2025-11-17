@@ -5,9 +5,11 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from "react";
 import type { Fact } from "@/types";
+import { api } from "@/trpc/react";
 
 export interface FactExtractionContextValue {
   extractedFacts: Fact[];
@@ -19,6 +21,9 @@ export interface FactExtractionContextValue {
   clearFacts: () => void;
   confirmFacts: (facts: Fact[]) => void;
   confirmedFacts: Fact[] | null;
+  sessionId: string | null;
+  isGeneratingScript: boolean;
+  setIsGeneratingScript: (isGenerating: boolean) => void;
 }
 
 const FactExtractionContext = createContext<
@@ -30,6 +35,27 @@ export function FactExtractionProvider({ children }: { children: ReactNode }) {
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [confirmedFacts, setConfirmedFacts] = useState<Fact[] | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+
+  // Query for latest session when confirmedFacts change
+  const { data: latestSession } = api.script.getLatestSession.useQuery(
+    undefined,
+    {
+      enabled: !!confirmedFacts && confirmedFacts.length > 0,
+      refetchInterval: (query) => {
+        // Poll every 2 seconds if we have confirmed facts but no sessionId yet
+        return query.state.data?.sessionId ? false : 2000;
+      },
+    },
+  );
+
+  // Update sessionId when latest session is found
+  useEffect(() => {
+    if (latestSession?.sessionId) {
+      setSessionId(latestSession.sessionId);
+    }
+  }, [latestSession]);
 
   const extractFactsFromInput = useCallback(
     async (text: string, files: File[]) => {
@@ -108,11 +134,17 @@ export function FactExtractionProvider({ children }: { children: ReactNode }) {
     setExtractionError(null);
   }, []);
 
-  const confirmFacts = useCallback((facts: Fact[]) => {
-    setConfirmedFacts(facts);
-    // Store in localStorage
-    localStorage.setItem("facts_current", JSON.stringify(facts));
-  }, []);
+  const confirmFacts = useCallback(
+    async (facts: Fact[]) => {
+      setConfirmedFacts(facts);
+      // Store in localStorage
+      localStorage.setItem("facts_current", JSON.stringify(facts));
+      
+      // Add user message to chat when facts are confirmed
+      // This will be handled by a component that has access to chat context
+    },
+    [],
+  );
 
   return (
     <FactExtractionContext.Provider
@@ -126,6 +158,9 @@ export function FactExtractionProvider({ children }: { children: ReactNode }) {
         clearFacts,
         confirmFacts,
         confirmedFacts,
+        sessionId,
+        isGeneratingScript,
+        setIsGeneratingScript,
       }}
     >
       {children}
