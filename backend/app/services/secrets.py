@@ -9,8 +9,10 @@ import time
 import logging
 from typing import Optional, Tuple
 from botocore.exceptions import ClientError
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # Global cache: {secret_name: (value, expiry_timestamp)}
 _secret_cache: dict[str, Tuple[str, float]] = {}
@@ -56,7 +58,21 @@ def get_secret(secret_name: str) -> str:
     # Cache miss or expired, fetch from Secrets Manager
     try:
         logger.info(f"Fetching secret '{secret_name}' from AWS Secrets Manager")
-        client = boto3.client('secretsmanager')
+        # Get AWS region from settings (defaults to us-east-1)
+        aws_region = settings.AWS_REGION or "us-east-1"
+        
+        # Only initialize if credentials are provided
+        if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+            raise ValueError(
+                "AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables."
+            )
+        
+        client = boto3.client(
+            'secretsmanager',
+            region_name=aws_region,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+        )
         
         response = client.get_secret_value(SecretId=secret_name)
         secret_value = response['SecretString']
