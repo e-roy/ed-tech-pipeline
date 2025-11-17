@@ -6,7 +6,9 @@ import {
   ChevronsUpDown,
   CreditCard,
   LogOut,
+  Moon,
   Sparkles,
+  Sun,
 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,6 +28,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { signOutAction } from "@/server/actions/signout";
+import { useTheme } from "next-themes";
 
 type User = {
   name?: string | null;
@@ -35,6 +38,7 @@ type User = {
 
 export function NavUser({ user }: { user: User }) {
   const { isMobile } = useSidebar();
+  const { theme, setTheme } = useTheme();
 
   const displayName = user.name ?? user.email ?? "User";
   const displayEmail = user.email ?? "";
@@ -114,6 +118,12 @@ export function NavUser({ user }: { user: User }) {
               <DropdownMenuItem>
                 <Bell />
                 Notifications
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              >
+                {theme === "dark" ? <Sun /> : <Moon />}
+                Theme: {theme === "dark" ? "Light" : "Dark"}
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
