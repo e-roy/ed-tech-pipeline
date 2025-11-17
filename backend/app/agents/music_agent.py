@@ -18,8 +18,9 @@ class MusicSelectionAgent:
     Selects appropriate background music based on script content and mood.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, storage_service: Optional[StorageService] = None):
         self.db = db
+        self.storage_service = storage_service or StorageService()
 
     async def select_music(
         self,
@@ -196,20 +197,20 @@ class MusicProcessingService:
             return None
 
     async def _download_from_s3(self, s3_url: str, local_path: str):
-        """Download file from S3 URL to local path."""
-        import boto3
+        """Download file from S3 URL to local path using StorageService."""
         import re
 
-        # Parse S3 URL to get bucket and key
+        # Parse S3 URL to get S3 key
         # Format: https://bucket.s3.region.amazonaws.com/key
-        match = re.match(r'https://([^.]+)\.s3\.([^.]+)\.amazonaws\.com/(.+)', s3_url)
+        match = re.match(r'https://[^.]+\.s3\.[^.]+\.amazonaws\.com/(.+)', s3_url)
         if not match:
             raise ValueError(f"Invalid S3 URL format: {s3_url}")
 
-        bucket_name = match.group(1)
-        region = match.group(2)
-        s3_key = match.group(3)
+        s3_key = match.group(1)
 
-        # Download
-        s3_client = boto3.client('s3', region_name=region)
-        s3_client.download_file(bucket_name, s3_key, local_path)
+        # Download using StorageService
+        file_content = self.storage_service.read_file(s3_key)
+
+        # Write to local path
+        with open(local_path, 'wb') as f:
+            f.write(file_content)

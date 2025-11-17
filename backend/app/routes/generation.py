@@ -899,9 +899,9 @@ async def hardcode_upload(
                 detail=f"Database error: {str(db_error)}"
             )
         
-        # Prepare S3 paths
-        output_s3_prefix = f"users/{current_user.id}/{session_id}/images/"
-        segments_s3_key = f"{output_s3_prefix}segments.md"
+        # Prepare S3 paths using StorageService helpers
+        output_s3_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
+        segments_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "segments.md")
         
         # Read segments.md content
         try:
@@ -933,7 +933,7 @@ async def hardcode_upload(
         if diagram:
             try:
                 diagram_content = await diagram.read()
-                diagram_s3_key = f"{output_s3_prefix}diagram.png"
+                diagram_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "diagram.png")
                 storage_service.upload_file_direct(
                     diagram_content,
                     diagram_s3_key,
@@ -986,7 +986,17 @@ async def hardcode_upload(
                     background_db.close()
             except Exception as e:
                 logger.exception(f"Error in async hardcode story processing (images + audio) for session {session_id}: {e}")
-        
+                # Send error notification via WebSocket
+                try:
+                    await websocket_manager.broadcast_status(
+                        session_id,
+                        status="error",
+                        progress=0,
+                        details=f"Processing failed: {str(e)}"
+                    )
+                except Exception as ws_error:
+                    logger.error(f"Failed to send WebSocket error notification: {ws_error}")
+
         asyncio.create_task(process_async())
         
         logger.info(f"Successfully processed hardcode_upload for session {session_id}")
@@ -1312,8 +1322,8 @@ async def generate_story_images(
                 detail="Script has no valid segments to process"
             )
         
-        # Prepare S3 paths
-        output_s3_prefix = f"users/{current_user.id}/{session_id}/images/"
+        # Prepare S3 paths using StorageService helpers
+        output_s3_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
         
         # Start async processing
         async def process_async():
@@ -1425,6 +1435,8 @@ class StoryImageSegmentInfo(BaseModel):
     segment_number: int
     segment_title: str
     images: List[Dict[str, Any]]  # List of {s3_key, presigned_url, image_number}
+    audio_url: Optional[str] = None  # Presigned URL for audio file
+    audio_s3_key: Optional[str] = None  # S3 key for audio file
     cost: float
     time_seconds: float
     status: str
@@ -1441,6 +1453,7 @@ class GetStoryImagesResponse(BaseModel):
     total_time_seconds: float
     segments: List[StoryImageSegmentInfo]
     failed_segments: List[Dict[str, Any]]
+    audio_files: Optional[List[Dict[str, Any]]] = None  # List of audio files with presigned URLs
     status_s3_key: Optional[str] = None
 
 
@@ -1471,22 +1484,22 @@ async def get_story_images(
         )
     
     # Read status.json from S3
-    status_s3_key = f"users/{current_user.id}/{session_id}/images/status.json"
-    
+    status_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "status.json")
+    images_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
+
     try:
         if not storage_service.file_exists(status_s3_key):
             raise HTTPException(
                 status_code=404,
                 detail="Story image generation not started or status.json not found"
             )
-        
+
         status_content = storage_service.read_file(status_s3_key)
         status_data = json.loads(status_content.decode("utf-8"))
-        
+
         # Extract template title from segments directory structure
-        # (images_prefix already defined above)
         template_title = None
-        
+
         # Try to find template directory
         all_files = storage_service.list_files_by_prefix(images_prefix, limit=1000)
         for file_info in all_files:
@@ -1542,7 +1555,39 @@ async def get_story_images(
         
         # Get failed segments info
         failed_segments = status_data.get("errors", [])
-        
+
+        # Check for audio files and add presigned URLs to segments
+        audio_prefix = f"{images_prefix}audio/"
+        audio_files_list = []
+        try:
+            audio_files = storage_service.list_files_by_prefix(audio_prefix, limit=100)
+            # Map audio files to segments by part name
+            segment_part_map = {
+                1: "hook",
+                2: "concept",
+                3: "process",
+                4: "conclusion"
+            }
+
+            for audio_file in audio_files:
+                if audio_file["key"].endswith(".mp3"):
+                    audio_files_list.append({
+                        "s3_key": audio_file["key"],
+                        "presigned_url": audio_file["presigned_url"],
+                        "filename": audio_file["key"].split("/")[-1]
+                    })
+
+                    # Match audio to segment
+                    filename = audio_file["key"].split("/")[-1].replace(".mp3", "")
+                    for seg in segments_info:
+                        part_name = segment_part_map.get(seg.segment_number, "")
+                        if part_name and part_name in filename.lower():
+                            seg.audio_url = audio_file["presigned_url"]
+                            seg.audio_s3_key = audio_file["key"]
+                            break
+        except Exception as audio_error:
+            logger.warning(f"Failed to fetch audio files: {audio_error}")
+
         return GetStoryImagesResponse(
             status=status_data.get("status", "unknown"),
             template_title=template_title,
@@ -1554,6 +1599,7 @@ async def get_story_images(
             total_time_seconds=status_data.get("total_time_seconds", 0.0),
             segments=segments_info,
             failed_segments=failed_segments,
+            audio_files=audio_files_list if audio_files_list else None,
             status_s3_key=status_s3_key
         )
     
@@ -1675,8 +1721,8 @@ async def regenerate_segment(
         _processing_sessions[processing_key] = True
     
     try:
-        # Prepare S3 paths
-        output_s3_prefix = f"users/{current_user.id}/{session_id}/images/"
+        # Prepare S3 paths using StorageService helpers
+        output_s3_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
         template_title = request.template_title or "Educational Video"
         
         # Start async processing
@@ -1752,6 +1798,281 @@ async def regenerate_segment(
         with _processing_lock:
             _processing_sessions[processing_key] = False
         logger.exception(f"Unexpected error in regenerate_segment endpoint: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+class ComposeHardcodeVideoResponse(BaseModel):
+    status: str
+    session_id: str
+    message: str
+    video_url: Optional[str] = None
+    total_cost: Optional[float] = None
+
+
+@router.post("/compose-hardcode-video/{session_id}", response_model=ComposeHardcodeVideoResponse)
+async def compose_hardcode_video(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Compose video from previously generated images and audio.
+
+    This endpoint:
+    1. Retrieves session data from database and S3
+    2. Gets the generated images and audio files
+    3. Calls orchestrator's compose_hardcode_video method
+    4. Returns video URL when complete
+    """
+    import time
+
+    try:
+        logger.info(f"Starting video composition for session {session_id}, user {current_user.id}")
+
+        # Verify session belongs to user
+        session = db.query(SessionModel).filter(
+            SessionModel.id == session_id,
+            SessionModel.user_id == current_user.id
+        ).first()
+
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found or does not belong to user"
+            )
+
+        # Get S3 paths using StorageService helpers
+        output_s3_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
+        segments_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "segments.md")
+        diagram_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "diagram.png")
+
+        # Check if segments.md exists
+        if not storage_service.file_exists(segments_s3_key):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Segments file not found at {segments_s3_key}"
+            )
+
+        # Read and parse segments.md
+        from app.agents.story_image_generator import parse_segments_md
+        segments_content = storage_service.read_file(segments_s3_key)
+        segments_text = segments_content.decode("utf-8")
+        template_title, segments = parse_segments_md(segments_text)
+
+        # Get audio files from S3
+        audio_prefix = storage_service.get_session_prefix(current_user.id, session_id, "audio")
+        audio_files_list = []
+        try:
+            audio_files = storage_service.list_files_by_prefix(audio_prefix, limit=100)
+            segment_part_map = {1: "hook", 2: "concept", 3: "process", 4: "conclusion"}
+
+            for audio_file in audio_files:
+                if audio_file["key"].endswith(".mp3"):
+                    filename = audio_file["key"].split("/")[-1].replace(".mp3", "")
+                    # Determine which part this audio belongs to
+                    part = None
+                    for seg_num, part_name in segment_part_map.items():
+                        if part_name in filename.lower():
+                            part = part_name
+                            break
+
+                    if part:
+                        audio_files_list.append({
+                            "part": part,
+                            "url": audio_file["presigned_url"],
+                            "s3_key": audio_file["key"],
+                            "duration": 10.0  # Placeholder - actual duration should be retrieved
+                        })
+        except Exception as audio_error:
+            logger.warning(f"Failed to fetch audio files: {audio_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch audio files: {str(audio_error)}"
+            )
+
+        if not audio_files_list:
+            raise HTTPException(
+                status_code=404,
+                detail="No audio files found for this session"
+            )
+
+        # Get image result data from status.json OR reconstruct from S3 images
+        status_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "status.json")
+        image_result = None
+
+        logger.error(f"[COMPOSE VIDEO] Starting video composition for session {session_id}")
+        logger.error(f"[COMPOSE VIDEO] status_s3_key: {status_s3_key}")
+        logger.error(f"[COMPOSE VIDEO] output_s3_prefix: {output_s3_prefix}")
+
+        try:
+            # Check if status.json exists and has data
+            has_status_data = False
+            logger.error(f"[COMPOSE VIDEO] Checking if status.json exists: {status_s3_key}")
+            if storage_service.file_exists(status_s3_key):
+                logger.error(f"[COMPOSE VIDEO] status.json EXISTS, reading it...")
+                status_content = storage_service.read_file(status_s3_key)
+                status_data = json.loads(status_content.decode("utf-8"))
+
+                # Check if status_data has successful_segments
+                successful_segments_from_status = status_data.get("successful_segments", [])
+                logger.error(f"[COMPOSE VIDEO] Found {len(successful_segments_from_status)} segments in status.json")
+                if successful_segments_from_status:
+                    logger.error(f"[COMPOSE VIDEO] Using segments from status.json")
+                    # Reconstruct image_result format needed by compose_hardcode_video
+                    from app.agents.base import AgentOutput
+                    image_result = AgentOutput(
+                        success=True,
+                        data=status_data,
+                        cost=status_data.get("image_cost", 0.0),
+                        duration=status_data.get("image_duration", 0.0)
+                    )
+                    has_status_data = True
+                else:
+                    logger.error(f"[COMPOSE VIDEO] status.json exists but has no successful_segments, will reconstruct from S3")
+
+            if not has_status_data:
+                logger.error(f"[COMPOSE VIDEO] status.json not found for session {session_id}, reconstructing from S3 images")
+                # For hardcode workflow, we don't have status.json - reconstruct from S3 directory listing
+                from app.agents.base import AgentOutput
+
+                # List all images in the images directory
+                # output_s3_prefix already ends with "images/", so use it directly
+                images_prefix = output_s3_prefix
+                logger.error(f"[COMPOSE VIDEO] Looking for images with prefix: {images_prefix}")
+                image_files = storage_service.list_files_by_prefix(images_prefix, limit=100)
+                logger.error(f"[COMPOSE VIDEO] Found {len(image_files)} total files in images directory")
+
+                # Log all filenames for debugging
+                for img_file in image_files[:10]:  # Log first 10 files
+                    logger.error(f"  File: {img_file['key']}")
+
+                # Organize images by segment number
+                # File structure: users/{user_id}/{session_id}/images/{template_title}/{segment_num}. {segment_title}/generated_images/image_{img_num}.png
+                segments_images = {}
+                import re
+                for img_file in image_files:
+                    key = img_file["key"]
+                    filename = key.split("/")[-1]
+
+                    # Skip diagram.png and non-image files
+                    if filename == "diagram.png" or not filename.endswith(('.png', '.jpg', '.jpeg')):
+                        continue
+
+                    # Parse the directory path to extract segment number
+                    # Key format: users/{user_id}/{session_id}/images/{template_title}/{segment_num}. {segment_title}/generated_images/image_X.png
+                    # Split path: ["users", "{user_id}", "{session_id}", "images", "{template_title}", "{segment_num}. {segment_title}", "generated_images", "image_X.png"]
+                    path_parts = key.split("/")
+
+                    # Find the segment directory (should be after "images/" and template_title)
+                    # The segment directory format is: "{number}. {title}"
+                    segment_dir = None
+                    for part in path_parts:
+                        # Match pattern like "1. Hook" or "2. Concept"
+                        seg_match = re.match(r"^(\d+)\.\s+", part)
+                        if seg_match:
+                            segment_dir = part
+                            seg_num = int(seg_match.group(1))
+                            break
+
+                    if not segment_dir:
+                        logger.warning(f"  Could not extract segment number from path: {key}")
+                        continue
+
+                    # Parse image number from filename (image_1.png -> 1)
+                    img_match = re.match(r"image_(\d+)\.(?:png|jpg|jpeg)", filename, re.IGNORECASE)
+                    if img_match:
+                        img_num = int(img_match.group(1))
+
+                        if seg_num not in segments_images:
+                            segments_images[seg_num] = []
+
+                        segments_images[seg_num].append({
+                            "s3_key": key,
+                            "image_number": img_num,
+                            "url": img_file.get("presigned_url", "")
+                        })
+                        logger.error(f"  Matched: seg={seg_num}, img={img_num}, path={key}")
+                    else:
+                        logger.warning(f"  No match for filename: {filename}")
+
+                logger.info(f"Organized images into {len(segments_images)} segments: {list(segments_images.keys())}")
+
+                # Build successful_segments structure
+                successful_segments = []
+                for seg_num, segment in enumerate(segments, start=1):
+                    if seg_num in segments_images:
+                        # Sort images by image number
+                        images = sorted(segments_images[seg_num], key=lambda x: x["image_number"])
+
+                        successful_segments.append({
+                            "segment_number": seg_num,
+                            "segment_title": segment.get("title", ""),
+                            "generated_images": images,
+                            "number": seg_num  # For React keys
+                        })
+                        logger.info(f"  Added segment {seg_num} with {len(images)} images")
+
+                image_result = AgentOutput(
+                    success=True,
+                    data={"successful_segments": successful_segments},
+                    cost=0.0,
+                    duration=0.0
+                )
+                logger.info(f"Reconstructed {len(successful_segments)} segments with images from S3")
+        except Exception as status_error:
+            logger.warning(f"Error processing image data: {status_error}, continuing with empty data")
+            from app.agents.base import AgentOutput
+            image_result = AgentOutput(
+                success=True,
+                data={"successful_segments": []},
+                cost=0.0,
+                duration=0.0
+            )
+
+        # Trigger video composition asynchronously
+        async def compose_video_task():
+            start_time = time.time()
+            try:
+                video_result = await orchestrator.compose_hardcode_video(
+                    session_id=session_id,
+                    user_id=current_user.id,
+                    image_result=image_result,
+                    audio_files=audio_files_list,
+                    diagram_s3_key=diagram_s3_key,
+                    segments=segments,
+                    output_s3_prefix=output_s3_prefix,
+                    template_title=template_title
+                )
+
+                logger.info(f"Video composition completed for session {session_id}: {video_result}")
+
+                # Update session with video URL
+                session.final_video_url = video_result.get("final_video_s3_key")
+                session.status = "completed"
+                db.commit()
+
+            except Exception as e:
+                logger.exception(f"Error in video composition task: {e}")
+                session.status = "failed"
+                db.commit()
+
+        # Start composition in background
+        import asyncio
+        asyncio.create_task(compose_video_task())
+
+        return ComposeHardcodeVideoResponse(
+            status="accepted",
+            session_id=session_id,
+            message="Video composition started. Use WebSocket to track progress."
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error in compose_hardcode_video endpoint: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"

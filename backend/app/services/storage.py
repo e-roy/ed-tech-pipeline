@@ -179,9 +179,72 @@ class StorageService:
         """
         return f"users/{user_id}/input/{filename}"
 
+    def get_session_path(self, user_id: int, session_id: str, asset_type: str, filename: str) -> str:
+        """
+        Generate S3 key for session-based storage.
+
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            asset_type: Type of asset (images, videos, audio, final, etc.)
+            filename: Filename to store
+
+        Returns:
+            S3 key path: users/{user_id}/{session_id}/{asset_type}/{filename}
+        """
+        return f"users/{user_id}/{session_id}/{asset_type}/{filename}"
+
+    def get_session_prefix(self, user_id: int, session_id: str, asset_type: Optional[str] = None) -> str:
+        """
+        Generate S3 prefix for listing session files.
+
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            asset_type: Optional asset type filter (images, videos, audio, final, etc.)
+
+        Returns:
+            S3 prefix: users/{user_id}/{session_id}/ or users/{user_id}/{session_id}/{asset_type}/
+        """
+        base = f"users/{user_id}/{session_id}/"
+        if asset_type:
+            return f"{base}{asset_type}/"
+        return base
+
+    def get_nested_session_path(
+        self,
+        user_id: int,
+        session_id: str,
+        asset_type: str,
+        subfolders: List[str],
+        filename: str
+    ) -> str:
+        """
+        Generate S3 key for nested session-based storage with additional subfolders.
+
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            asset_type: Type of asset (images, videos, audio, etc.)
+            subfolders: List of subfolder names to nest under asset_type
+            filename: Filename to store
+
+        Returns:
+            S3 key path: users/{user_id}/{session_id}/{asset_type}/{subfolder1}/{subfolder2}/.../{filename}
+
+        Example:
+            get_nested_session_path(123, "abc", "images", ["Template A", "1. Introduction"], "image_1.png")
+            -> "users/123/abc/images/Template A/1. Introduction/image_1.png"
+        """
+        base = f"users/{user_id}/{session_id}/{asset_type}"
+        subfolder_path = "/".join(subfolders) if subfolders else ""
+        if subfolder_path:
+            return f"{base}/{subfolder_path}/{filename}"
+        return f"{base}/{filename}"
+
     def get_user_output_path(self, user_id: int, asset_type: str, filename: str) -> str:
         """
-        Generate S3 key for user output folder.
+        Generate S3 key for user output folder (deprecated - use get_session_path instead).
 
         Args:
             user_id: User ID
@@ -199,7 +262,8 @@ class StorageService:
         asset_type: str,
         session_id: str,
         asset_id: str,
-        user_id: int
+        user_id: int,
+        use_session_structure: bool = True
     ) -> Dict[str, Any]:
         """
         Download a file from Replicate and upload to S3/R2.
@@ -210,6 +274,7 @@ class StorageService:
             session_id: Session ID for organizing files
             asset_id: Unique asset identifier
             user_id: User ID for organizing files in user folders
+            use_session_structure: If True, use users/{user_id}/{session_id}/{asset_type} structure
 
         Returns:
             Dict containing:
@@ -240,11 +305,11 @@ class StorageService:
             logger.info(f"Downloaded {file_size} bytes")
 
             # Determine file extension and content type
-            if asset_type == 'image':
+            if asset_type == 'image' or asset_type == 'images':
                 extension = '.png'
                 content_type = 'image/png'
                 output_type = 'images'
-            elif asset_type in ['video', 'clip']:
+            elif asset_type in ['video', 'clip', 'videos']:
                 extension = '.mp4'
                 content_type = 'video/mp4'
                 output_type = 'videos'
@@ -261,9 +326,12 @@ class StorageService:
                 content_type = 'application/octet-stream'
                 output_type = 'other'
 
-            # Create S3 key using new user-based structure
+            # Create S3 key using session-based structure
             filename = f"{asset_id}{extension}"
-            s3_key = self.get_user_output_path(user_id, output_type, filename)
+            if use_session_structure:
+                s3_key = self.get_session_path(user_id, session_id, output_type, filename)
+            else:
+                s3_key = self.get_user_output_path(user_id, output_type, filename)
 
             # Upload to S3
             logger.info(f"Uploading to S3: {s3_key}")
@@ -514,7 +582,8 @@ class StorageService:
         asset_type: str,
         session_id: str,
         asset_id: str,
-        user_id: int
+        user_id: int,
+        use_session_structure: bool = True
     ) -> Dict[str, Any]:
         """
         Upload a local file to S3/R2.
@@ -525,6 +594,7 @@ class StorageService:
             session_id: Session ID for organizing files
             asset_id: Unique asset identifier
             user_id: User ID for organizing files in user folders
+            use_session_structure: If True, use users/{user_id}/{session_id}/{asset_type} structure
 
         Returns:
             Dict containing:
@@ -553,11 +623,11 @@ class StorageService:
             logger.info(f"Read {file_size} bytes")
 
             # Determine file extension and content type
-            if asset_type == 'image':
+            if asset_type == 'image' or asset_type == 'images':
                 extension = '.png'
                 content_type = 'image/png'
                 output_type = 'images'
-            elif asset_type in ['video', 'clip']:
+            elif asset_type in ['video', 'clip', 'videos']:
                 extension = '.mp4'
                 content_type = 'video/mp4'
                 output_type = 'videos'
@@ -574,9 +644,12 @@ class StorageService:
                 content_type = 'application/octet-stream'
                 output_type = 'other'
 
-            # Create S3 key using new user-based structure
+            # Create S3 key using session-based structure
             filename = f"{asset_id}{extension}"
-            s3_key = self.get_user_output_path(user_id, output_type, filename)
+            if use_session_structure:
+                s3_key = self.get_session_path(user_id, session_id, output_type, filename)
+            else:
+                s3_key = self.get_user_output_path(user_id, output_type, filename)
 
             # Upload to S3
             logger.info(f"Uploading to S3: {s3_key}")
