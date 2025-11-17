@@ -1,7 +1,7 @@
 """
 Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from app.config import get_settings
@@ -25,16 +25,11 @@ app = FastAPI(
 # Allow "null" origin for local file testing (test_ui.html)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.FRONTEND_URL,
-        "http://localhost:3000",
-        "https://localhost:3000",
-        "http://localhost:8080",  # Local HTTP server for test UI
-        "null",  # Allow local file testing
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "X-User-Id", "X-User-Email"],
+    allow_origins=["*"],  # Allow all origins for local file testing
+    allow_credentials=False,  # Set to False when using allow_origins=["*"]
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],
 )
 
 # Get shared WebSocket manager from generation module
@@ -45,6 +40,53 @@ app.include_router(generation.router, prefix="/api", tags=["Generation"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Sessions"])
 app.include_router(storage.router, prefix="/api/storage", tags=["Storage"])
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    """Handle HTTPException with CORS headers."""
+    from fastapi.responses import JSONResponse
+    from fastapi import HTTPException as FastAPIHTTPException
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler to catch all unhandled exceptions."""
+    import logging
+    import traceback
+    from fastapi.responses import JSONResponse
+    from fastapi import HTTPException
+    
+    # Don't handle HTTPException here - it's handled above
+    if isinstance(exc, HTTPException):
+        raise exc
+    
+    logger = logging.getLogger(__name__)
+    logger.error(f"Unhandled exception on {request.method} {request.url}")
+    logger.error(f"Exception: {exc}")
+    logger.error(f"Traceback: {''.join(traceback.format_tb(exc.__traceback__))}")
+    
+    # Return JSON response with CORS headers
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Internal server error: {str(exc)}",
+            "type": type(exc).__name__
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 @app.get("/")
 async def root():

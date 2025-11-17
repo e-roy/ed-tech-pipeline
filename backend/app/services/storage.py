@@ -711,3 +711,54 @@ class StorageService:
             # Re-raise other errors
             logger.error(f"Error checking file existence: {e}")
             raise Exception(f"Error checking file existence: {e}")
+
+    def list_files_by_prefix(self, s3_prefix: str, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        List files in S3 by prefix with presigned URLs.
+
+        Args:
+            s3_prefix: S3 key prefix (e.g., "users/123/session456/images/")
+            limit: Maximum number of files to return
+
+        Returns:
+            List of file info dicts with keys: key, size, last_modified, presigned_url
+
+        Raises:
+            ValueError: If storage service not configured
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        try:
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(
+                Bucket=self.bucket_name,
+                Prefix=s3_prefix,
+                MaxKeys=limit
+            )
+
+            files = []
+            for page in page_iterator:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        s3_key = obj['Key']
+                        # Skip directory markers
+                        if s3_key.endswith('/'):
+                            continue
+
+                        # Generate presigned URL
+                        presigned_url = self.generate_presigned_url(s3_key, expires_in=3600)
+
+                        files.append({
+                            "key": s3_key,
+                            "size": obj['Size'],
+                            "last_modified": obj['LastModified'].isoformat() if obj.get('LastModified') else None,
+                            "presigned_url": presigned_url
+                        })
+
+            logger.debug(f"Listed {len(files)} files with prefix {s3_prefix}")
+            return files
+
+        except ClientError as e:
+            logger.error(f"Failed to list files by prefix: {e}")
+            raise Exception(f"File listing failed: {e}")

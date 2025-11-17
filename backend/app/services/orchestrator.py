@@ -68,7 +68,13 @@ class VideoGenerationOrchestrator:
         # Initialize Person C agents (Video Pipeline)
         # VideoGeneratorAgent uses Veo 3.1 via Replicate
         self.video_generator = VideoGeneratorAgent(replicate_api_key) if replicate_api_key else None
-        self.ffmpeg_compositor = FFmpegCompositor()
+        
+        # Initialize FFmpeg compositor (optional - only needed for video composition)
+        try:
+            self.ffmpeg_compositor = FFmpegCompositor()
+        except RuntimeError as e:
+            logger.warning(f"FFmpeg not available: {e}. Video composition will not work.")
+            self.ffmpeg_compositor = None
 
         # Initialize storage service for S3 uploads
         self.storage_service = StorageService()
