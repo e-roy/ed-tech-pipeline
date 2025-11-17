@@ -38,23 +38,40 @@ async def get_current_user(
     Raises:
         HTTPException: If user headers missing or user not found
     """
-    if not x_user_email:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        if not x_user_email:
+            logger.warning("Missing X-User-Email header")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing user authentication headers. Please ensure you're logged in."
+            )
+
+        logger.debug(f"Getting user for email: {x_user_email}")
+        
+        # Find or create user by email
+        user = db.query(User).filter(User.email == x_user_email).first()
+
+        if user is None:
+            logger.info(f"Creating new user for email: {x_user_email}")
+            # Auto-create user for new OAuth users (Google, Discord, etc.)
+            # Set placeholder password since OAuth users don't have passwords
+            import bcrypt
+            placeholder_password = bcrypt.hashpw(f"oauth_{x_user_email}".encode(), bcrypt.gensalt()).decode()
+            user = User(email=x_user_email, hashed_password=placeholder_password)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Created user: {user.id}")
+
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error in get_current_user: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing user authentication headers. Please ensure you're logged in."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Authentication error: {str(e)}"
         )
-
-    # Find or create user by email
-    user = db.query(User).filter(User.email == x_user_email).first()
-
-    if user is None:
-        # Auto-create user for new OAuth users (Google, Discord, etc.)
-        # Set placeholder password since OAuth users don't have passwords
-        import bcrypt
-        placeholder_password = bcrypt.hashpw(f"oauth_{x_user_email}".encode(), bcrypt.gensalt()).decode()
-        user = User(email=x_user_email, hashed_password=placeholder_password)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    return user

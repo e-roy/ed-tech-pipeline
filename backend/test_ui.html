@@ -109,9 +109,16 @@
         }
 
         button:disabled {
-            background: #9ca3af;
-            cursor: not-allowed;
+            background: #9ca3af !important;
+            cursor: not-allowed !important;
             transform: none;
+            opacity: 0.6;
+        }
+
+        button:disabled:hover {
+            background: #9ca3af !important;
+            transform: none;
+            box-shadow: none;
         }
 
         .result {
@@ -310,7 +317,7 @@
         <!-- Info Box -->
         <div class="info-box">
             <h3>ℹ️ Test Interface</h3>
-            <p>This UI tests the audio and image generation agents. Make sure the backend is running on <code>http://localhost:8000</code></p>
+            <p>This UI tests the audio and image generation agents. Make sure the backend is running on <code>http://127.0.0.1:8000</code></p>
         </div>
 
         <!-- Step 1: Create Script -->
@@ -344,9 +351,10 @@
                 </div>
             </div>
 
-            <div style="display: flex; gap: 10px;">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <button onclick="createScript()">Create Script</button>
                 <button onclick="viewCurrentScript()" style="background: #10b981;" disabled id="view-script-btn">View Script</button>
+                <button onclick="generateStoryImages()" style="background: #f59e0b;" disabled id="generate-story-images-btn">🎨 Generate Story Images</button>
                 <button onclick="finalizeScript()" style="background: #7c3aed;" disabled id="finalize-script-btn">🚀 Finalize Script (Images + Audio)</button>
             </div>
             <div id="script-progress" class="progress">Creating script...</div>
@@ -361,6 +369,21 @@
             <!-- Finalization Progress -->
             <div id="finalize-progress" class="progress" style="background: #ddd6fe; color: #5b21b6;">Generating images and audio in parallel...</div>
             <div id="finalize-result" class="result" style="display:none;"></div>
+
+            <!-- Story Images Results -->
+            <div id="story-images-results" style="display:none; margin-top: 30px;">
+                <h3 style="color: #065f46; margin-bottom: 15px;">🎨 Story Image Generation Results</h3>
+                <button onclick="loadStoryImages()" style="background: #10b981; margin-bottom: 15px;">Refresh Results</button>
+                
+                <!-- Report Summary -->
+                <div id="story-report-summary" style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #10b981;">
+                    <h4 style="margin-top: 0;">📊 Generation Report</h4>
+                    <div id="report-content"></div>
+                </div>
+
+                <!-- Segments with Images -->
+                <div id="story-segments-container"></div>
+            </div>
         </div>
 
         <!-- Step 2: Generate Images -->
@@ -501,7 +524,7 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8000/api';
+        const API_BASE = 'http://127.0.0.1:8000/api';
         let selectedVoice = 'alloy';
         let currentScriptId = null;
         let currentSessionId = null;
@@ -603,6 +626,7 @@
                 // Enable audio and image generation
                 document.getElementById('generate-audio-btn').disabled = false;
                 document.getElementById('generate-images-btn').disabled = false;
+                document.getElementById('generate-story-images-btn').disabled = false;
                 document.getElementById('view-script-btn').disabled = false;
                 document.getElementById('finalize-script-btn').disabled = false;
 
@@ -677,6 +701,258 @@
             } finally {
                 document.getElementById('audio-progress').classList.remove('show');
                 document.getElementById('generate-audio-btn').disabled = false;
+            }
+        }
+
+        // Generate Story Images (using StoryImageGeneratorAgent)
+        async function generateStoryImages() {
+            if (!currentScriptId || !currentSessionId) {
+                alert('Please create a script first!');
+                return;
+            }
+
+            const email = document.getElementById('user-email').value;
+            
+            // Get options (you can add UI controls for these later)
+            const numImages = 2; // Default
+            const maxPasses = 5; // Default
+            const maxVerificationPasses = 3; // Default
+            const fastMode = false; // Default
+            const templateTitle = prompt('Enter template title (or leave blank for default):', 'Educational Video') || 'Educational Video';
+            const diagramS3Path = prompt('Enter diagram S3 path (optional, leave blank to skip):', '') || null;
+
+            updateStatus('script-status', 'running', 'Generating story images...');
+            document.getElementById('script-progress').classList.add('show');
+            document.getElementById('generate-story-images-btn').disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/generate-story-images`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Email': email
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        script_id: currentScriptId,
+                        template_title: templateTitle,
+                        num_images: numImages,
+                        max_passes: maxPasses,
+                        max_verification_passes: maxVerificationPasses,
+                        fast_mode: fastMode,
+                        diagram_s3_path: diagramS3Path
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateStatus('script-status', 'success', 'Story images generating!');
+                    showResult('script-result', {
+                        message: data.message,
+                        status: data.status,
+                        note: 'Check WebSocket for real-time progress. Images will be saved to S3.'
+                    });
+                    
+                    // Show results section and start polling
+                    document.getElementById('story-images-results').style.display = 'block';
+                    setTimeout(() => loadStoryImages(), 3000); // Wait 3 seconds then check
+                } else {
+                    throw new Error(data.detail || data.message || 'Story image generation failed');
+                }
+
+            } catch (error) {
+                updateStatus('script-status', 'error', 'Failed');
+                showResult('script-result', { error: error.message }, true);
+            } finally {
+                document.getElementById('script-progress').classList.remove('show');
+                document.getElementById('generate-story-images-btn').disabled = false;
+            }
+        }
+
+        // Load and display story images results
+        async function loadStoryImages() {
+            if (!currentSessionId) {
+                alert('No session ID available');
+                return;
+            }
+
+            const email = document.getElementById('user-email').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/story-images/${currentSessionId}`, {
+                    method: 'GET',
+                    headers: {
+                        'X-User-Email': email
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        document.getElementById('report-content').innerHTML = 
+                            '<p style="color: #6b7280;">Generation not started or still in progress. Check back in a moment.</p>';
+                        return;
+                    }
+                    throw new Error('Failed to load story images');
+                }
+
+                const data = await response.json();
+
+                // Display report summary
+                const reportHtml = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <strong>Status:</strong> <span style="color: ${data.status === 'completed' ? '#10b981' : '#f59e0b'}">${data.status}</span>
+                        </div>
+                        <div>
+                            <strong>Template:</strong> ${data.template_title || 'N/A'}
+                        </div>
+                        <div>
+                            <strong>Segments:</strong> ${data.segments_succeeded}/${data.segments_total} succeeded
+                        </div>
+                        <div>
+                            <strong>Total Images:</strong> ${data.total_images_generated}
+                        </div>
+                        <div>
+                            <strong>Total Cost:</strong> $${data.total_cost_usd.toFixed(4)}
+                        </div>
+                        <div>
+                            <strong>Total Time:</strong> ${data.total_time_seconds.toFixed(1)}s
+                        </div>
+                    </div>
+                `;
+                document.getElementById('report-content').innerHTML = reportHtml;
+
+                // Display segments with images
+                const segmentsContainer = document.getElementById('story-segments-container');
+                segmentsContainer.innerHTML = '';
+
+                if (data.segments && data.segments.length > 0) {
+                    data.segments.forEach(segment => {
+                        const segmentDiv = document.createElement('div');
+                        segmentDiv.style.cssText = 'margin-bottom: 30px; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;';
+                        
+                        const segmentHeader = `
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h4 style="margin: 0;">
+                                    Segment ${segment.segment_number}: ${segment.segment_title}
+                                    <span style="color: ${segment.status === 'success' ? '#10b981' : '#ef4444'}; font-size: 0.875rem; margin-left: 10px;">
+                                        (${segment.status})
+                                    </span>
+                                </h4>
+                                <button onclick="regenerateSegment(${segment.segment_number})" 
+                                        style="background: #f59e0b; padding: 8px 16px; border: none; border-radius: 6px; color: white; cursor: pointer;">
+                                    🔄 Regenerate
+                                </button>
+                            </div>
+                            <div style="color: #6b7280; font-size: 0.875rem; margin-bottom: 15px;">
+                                Cost: $${segment.cost.toFixed(4)} | Time: ${segment.time_seconds.toFixed(1)}s | Images: ${segment.images.length}
+                            </div>
+                        `;
+                        
+                        // Image grid
+                        let imagesHtml = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">';
+                        if (segment.images && segment.images.length > 0) {
+                            segment.images.forEach(img => {
+                                imagesHtml += `
+                                    <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                                        <img src="${img.presigned_url}" 
+                                             alt="Image ${img.image_number}" 
+                                             style="width: 100%; height: auto; display: block; cursor: pointer;"
+                                             onclick="window.open('${img.presigned_url}', '_blank')"
+                                             onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'200\\' height=\\'200\\'%3E%3Crect fill=\\'%23f3f4f6\\' width=\\'200\\' height=\\'200\\'/%3E%3Ctext x=\\'50%25\\' y=\\'50%25\\' text-anchor=\\'middle\\' dy=\\'.3em\\' fill=\\'%239ca3af\\'%3EImage not found%3C/text%3E%3C/svg%3E'">
+                                        <div style="padding: 8px; text-align: center; font-size: 0.875rem; color: #6b7280;">
+                                            Image ${img.image_number}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                        } else {
+                            imagesHtml += '<div style="grid-column: 1 / -1; color: #6b7280; padding: 20px; text-align: center;">No images generated for this segment</div>';
+                        }
+                        imagesHtml += '</div>';
+                        
+                        segmentDiv.innerHTML = segmentHeader + imagesHtml;
+                        segmentsContainer.appendChild(segmentDiv);
+                    });
+                }
+
+                // Show failed segments if any
+                if (data.failed_segments && data.failed_segments.length > 0) {
+                    const failedDiv = document.createElement('div');
+                    failedDiv.style.cssText = 'margin-top: 20px; padding: 15px; background: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;';
+                    failedDiv.innerHTML = `
+                        <h4 style="margin-top: 0; color: #991b1b;">❌ Failed Segments</h4>
+                        ${data.failed_segments.map(seg => `
+                            <div style="margin-bottom: 10px;">
+                                <strong>Segment ${seg.segment_number}: ${seg.segment_title || 'Unknown'}</strong>
+                                <div style="color: #991b1b; font-size: 0.875rem;">${seg.error || 'Unknown error'}</div>
+                            </div>
+                        `).join('')}
+                    `;
+                    segmentsContainer.appendChild(failedDiv);
+                }
+
+            } catch (error) {
+                console.error('Error loading story images:', error);
+                document.getElementById('report-content').innerHTML = 
+                    `<p style="color: #ef4444;">Error loading results: ${error.message}</p>`;
+            }
+        }
+
+        // Regenerate a specific segment
+        async function regenerateSegment(segmentNumber) {
+            if (!currentScriptId || !currentSessionId) {
+                alert('Please create a script first!');
+                return;
+            }
+
+            if (!confirm(`Regenerate images for Segment ${segmentNumber}?`)) {
+                return;
+            }
+
+            const email = document.getElementById('user-email').value;
+            
+            // Get options (same defaults as generateStoryImages)
+            const numImages = 2;
+            const maxPasses = 5;
+            const maxVerificationPasses = 3;
+            const fastMode = false;
+            const templateTitle = prompt('Enter template title (or leave blank for default):', 'Educational Video') || 'Educational Video';
+            const diagramS3Path = prompt('Enter diagram S3 path (optional, leave blank to skip):', '') || null;
+
+            try {
+                const response = await fetch(`${API_BASE}/regenerate-segment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Email': email
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        script_id: currentScriptId,
+                        segment_number: segmentNumber,
+                        template_title: templateTitle,
+                        num_images: numImages,
+                        max_passes: maxPasses,
+                        max_verification_passes: maxVerificationPasses,
+                        fast_mode: fastMode,
+                        diagram_s3_path: diagramS3Path
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert(`Segment ${segmentNumber} regeneration started! Check back in a moment.`);
+                    // Refresh results after a delay
+                    setTimeout(() => loadStoryImages(), 5000);
+                } else {
+                    throw new Error(data.detail || data.message || 'Segment regeneration failed');
+                }
+
+            } catch (error) {
+                alert(`Error: ${error.message}`);
             }
         }
 
