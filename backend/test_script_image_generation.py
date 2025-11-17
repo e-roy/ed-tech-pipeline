@@ -1,0 +1,247 @@
+"""
+Test script for script-based image generation workflow.
+
+This script tests the new flow:
+1. Creates a test user
+2. Creates a test script with all 4 parts
+3. Calls the image generation orchestrator
+4. Verifies the micro_scenes output
+"""
+import asyncio
+import sys
+import os
+import uuid
+from datetime import datetime
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from sqlalchemy.orm import Session
+from app.database import SessionLocal, engine
+from app.models.database import User, Script, Session as SessionModel
+from app.services.orchestrator import VideoGenerationOrchestrator
+from app.services.websocket_manager import WebSocketManager
+from app.config import get_settings
+
+settings = get_settings()
+
+
+def create_test_user(db: Session) -> User:
+    """Create a test user for testing."""
+    # Check if test user exists
+    test_email = "test@example.com"
+    user = db.query(User).filter(User.email == test_email).first()
+
+    if user:
+        print(f"✓ Using existing test user: {user.email} (ID: {user.id})")
+        return user
+
+    # Create new test user
+    user = User(
+        email=test_email,
+        hashed_password="test_hash_not_real"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    print(f"✓ Created test user: {user.email} (ID: {user.id})")
+    return user
+
+
+def create_test_script(db: Session, user_id: int) -> Script:
+    """Create a test script with sample content."""
+    script_id = f"test_script_{uuid.uuid4().hex[:8]}"
+
+    script = Script(
+        id=script_id,
+        user_id=user_id,
+        hook={
+            "text": "Did you know that AI can generate stunning product images in seconds?",
+            "duration": "8",
+            "key_concepts": ["AI image generation", "product photography", "automation"],
+            "visual_guidance": "Modern tech workspace with holographic product displays, futuristic lighting"
+        },
+        concept={
+            "text": "Traditional product photography is expensive and time-consuming. AI changes everything.",
+            "duration": "12",
+            "key_concepts": ["traditional photography", "cost comparison", "efficiency"],
+            "visual_guidance": "Split screen showing traditional photo studio vs AI generation on computer"
+        },
+        process={
+            "text": "Simply describe your product, choose a style, and let AI create perfect images instantly.",
+            "duration": "15",
+            "key_concepts": ["user interface", "text input", "style selection", "instant results"],
+            "visual_guidance": "Clean UI showing product description being typed, style options, generated images appearing"
+        },
+        conclusion={
+            "text": "Transform your product visuals today with AI-powered image generation.",
+            "duration": "10",
+            "key_concepts": ["call to action", "product showcase", "future of commerce"],
+            "visual_guidance": "Carousel of beautiful AI-generated product images, professional and vibrant"
+        }
+    )
+
+    db.add(script)
+    db.commit()
+    db.refresh(script)
+
+    print(f"✓ Created test script: {script.id}")
+    print(f"  - Hook: {script.hook['text'][:50]}...")
+    print(f"  - Concept: {script.concept['text'][:50]}...")
+    print(f"  - Process: {script.process['text'][:50]}...")
+    print(f"  - Conclusion: {script.conclusion['text'][:50]}...")
+
+    return script
+
+
+async def test_image_generation(
+    db: Session,
+    user: User,
+    script: Script
+):
+    """Test the image generation flow."""
+    print("\n" + "="*60)
+    print("TESTING IMAGE GENERATION FROM SCRIPT")
+    print("="*60)
+
+    # Create orchestrator
+    websocket_manager = WebSocketManager()
+    orchestrator = VideoGenerationOrchestrator(websocket_manager)
+
+    # Create session ID
+    session_id = f"test_session_{uuid.uuid4().hex[:8]}"
+    print(f"\n✓ Session ID: {session_id}")
+
+    # Test parameters
+    options = {
+        "model": "flux-schnell",  # Use fastest/cheapest model for testing
+        "images_per_part": 2  # Generate 2 images per part (8 total)
+    }
+
+    print(f"✓ Model: {options['model']}")
+    print(f"✓ Images per part: {options['images_per_part']}")
+    print(f"\nGenerating {options['images_per_part'] * 4} total images...")
+    print("This may take 30-60 seconds...\n")
+
+    # Call the orchestrator
+    try:
+        result = await orchestrator.generate_images(
+            db=db,
+            session_id=session_id,
+            user_id=user.id,
+            script_id=script.id,
+            options=options
+        )
+
+        # Check result
+        if result["status"] == "error":
+            print(f"\n❌ ERROR: {result.get('message', 'Unknown error')}")
+            return False
+
+        # Print results
+        print("\n" + "="*60)
+        print("✓ IMAGE GENERATION SUCCESSFUL!")
+        print("="*60)
+
+        micro_scenes = result["micro_scenes"]
+
+        print(f"\nTotal cost: ${micro_scenes['cost']}")
+        print(f"\nImages generated by script part:")
+
+        for part_name in ["hook", "concept", "process", "conclusion"]:
+            part_data = micro_scenes[part_name]
+            num_images = len(part_data["images"])
+            print(f"\n  {part_name.upper()}: {num_images} images")
+
+            for i, img in enumerate(part_data["images"], 1):
+                print(f"    {i}. {img['image'][:80]}...")
+                metadata = img['metadata']
+                print(f"       Model: {metadata['model']}, Duration: {metadata['duration']:.2f}s")
+                if metadata.get('key_concepts'):
+                    print(f"       Key concepts: {', '.join(metadata['key_concepts'][:3])}")
+
+        # Verify database records
+        print("\n" + "-"*60)
+        print("Verifying database records...")
+
+        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if session:
+            print(f"✓ Session found: {session.id}")
+            print(f"  Status: {session.status}")
+            print(f"  User ID: {session.user_id}")
+        else:
+            print("❌ Session not found in database")
+
+        # Count assets
+        from app.models.database import Asset
+        assets = db.query(Asset).filter(Asset.session_id == session_id).all()
+        print(f"✓ Assets in database: {len(assets)}")
+
+        for asset in assets[:3]:  # Show first 3
+            print(f"  - {asset.type}: {asset.url[:60]}...")
+
+        if len(assets) > 3:
+            print(f"  ... and {len(assets) - 3} more")
+
+        print("\n" + "="*60)
+        print("✓ ALL TESTS PASSED!")
+        print("="*60)
+
+        return True
+
+    except Exception as e:
+        print(f"\n❌ EXCEPTION: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+async def main():
+    """Main test function."""
+    print("\n" + "="*60)
+    print("SCRIPT-BASED IMAGE GENERATION TEST")
+    print("="*60)
+
+    # Check if REPLICATE_API_KEY is set
+    if not settings.REPLICATE_API_KEY:
+        print("\n❌ ERROR: REPLICATE_API_KEY not set in environment")
+        print("Please set it in your .env file")
+        return
+
+    print(f"\n✓ REPLICATE_API_KEY is set")
+
+    # Create database session
+    db = SessionLocal()
+
+    try:
+        # Step 1: Create test user
+        print("\n" + "-"*60)
+        print("Step 1: Creating test user...")
+        print("-"*60)
+        user = create_test_user(db)
+
+        # Step 2: Create test script
+        print("\n" + "-"*60)
+        print("Step 2: Creating test script...")
+        print("-"*60)
+        script = create_test_script(db, user.id)
+
+        # Step 3: Test image generation
+        print("\n" + "-"*60)
+        print("Step 3: Testing image generation...")
+        print("-"*60)
+        success = await test_image_generation(db, user, script)
+
+        if success:
+            print("\n✓ Test completed successfully!")
+        else:
+            print("\n❌ Test failed")
+            sys.exit(1)
+
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

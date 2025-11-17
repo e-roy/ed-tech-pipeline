@@ -33,11 +33,24 @@ def get_db():
         def get_items(db: Session = Depends(get_db)):
             ...
     """
-    db = SessionLocal()
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    db = None
     try:
+        db = SessionLocal()
+        # Test the connection
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
         yield db
+    except Exception as e:
+        logger.exception(f"Database connection error: {e}")
+        if db:
+            db.rollback()
+        raise
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 def init_db():

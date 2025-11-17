@@ -13,3 +13,6 @@ export {
   usersRelations,
   verificationTokens,
 } from "./auth/schema";
+
+// Re-export video generation tables
+export { videoSessions, videoAssets } from "./video-generation/schema";

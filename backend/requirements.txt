@@ -17,6 +17,11 @@ pydantic-settings==2.1.0
 # External Services
 replicate==0.22.0
 httpx==0.26.0
+openai==1.54.0
+
+# Image Processing
+pillow==10.4.0
+requests==2.32.3
 
 # WebSocket
 websockets==12.0

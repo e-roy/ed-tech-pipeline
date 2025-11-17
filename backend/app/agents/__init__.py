@@ -9,6 +9,7 @@ from app.agents.base import AgentInput, AgentOutput, Agent
 from app.agents.prompt_parser import PromptParserAgent
 from app.agents.batch_image_generator import BatchImageGeneratorAgent
 from app.agents.video_generator import VideoGeneratorAgent
+from app.agents.narrative_builder import NarrativeBuilderAgent
 
 __all__ = [
     "AgentInput",
@@ -17,4 +18,5 @@ __all__ = [
     "PromptParserAgent",
     "BatchImageGeneratorAgent",
     "VideoGeneratorAgent",
+    "NarrativeBuilderAgent",
 ]

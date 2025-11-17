@@ -3,7 +3,7 @@ Database models for Gauntlet Pipeline.
 
 Models based on DATABASE_SCHEMA.md specification.
 """
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Float, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Float, JSON, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -45,6 +45,11 @@ class Session(Base):
     clip_config = Column(JSON, nullable=True)  # Video clip configuration
     text_config = Column(JSON, nullable=True)  # Text overlay configuration
     audio_config = Column(JSON, nullable=True)  # Audio configuration
+
+    # Music configuration
+    music_track_id = Column(String(255), nullable=True)
+    music_s3_url = Column(Text, nullable=True)
+    music_volume = Column(Float, nullable=True, default=0.15)
 
     # Results
     final_video_url = Column(String(500), nullable=True)
@@ -111,6 +116,54 @@ class GenerationCost(Base):
         return f"<GenerationCost(id={self.id}, service={self.service}, cost={self.cost})>"
 
 
+class Script(Base):
+    """Script model for video generation."""
+
+    __tablename__ = "scripts"
+
+    id = Column(String(255), primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Script structure with four parts
+    # Each part has: {text: str, duration: str, key_concepts: list[str], visual_guidance: str}
+    hook = Column(JSON, nullable=False)
+    concept = Column(JSON, nullable=False)
+    process = Column(JSON, nullable=False)
+    conclusion = Column(JSON, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User")
+
+    def __repr__(self):
+        return f"<Script(id={self.id}, user_id={self.user_id})>"
+
+
+class Template(Base):
+    """Educational template for visual generation."""
+
+    __tablename__ = "templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False)  # e.g., 'biology', 'astronomy', 'earth_science'
+    keywords = Column(JSON, nullable=False)  # Array of keywords for matching
+    psd_url = Column(String(500), nullable=True)  # URL to PSD file (if available)
+    preview_url = Column(String(500), nullable=False)  # URL to preview PNG
+    editable_layers = Column(JSON, nullable=True)  # Info about editable text layers
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<Template(id={self.template_id}, name={self.name}, category={self.category})>"
+
+
 class WebSocketConnection(Base):
     """Track active WebSocket connections for real-time updates."""
 
@@ -127,3 +180,27 @@ class WebSocketConnection(Base):
 
     def __repr__(self):
         return f"<WebSocketConnection(id={self.id}, session_id={self.session_id})>"
+
+
+class MusicTrack(Base):
+    """Music track library for background audio."""
+
+    __tablename__ = "music_tracks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(String(255), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(50), nullable=False)  # upbeat, calm, inspiring
+    mood = Column(String(50), nullable=True)  # energetic, peaceful, motivational
+    duration = Column(Integer, nullable=False)  # in seconds
+    bpm = Column(Integer, nullable=True)  # beats per minute
+    s3_url = Column(Text, nullable=False)
+    license_type = Column(String(100), nullable=True)  # royalty_free, creative_commons, etc.
+    attribution = Column(Text, nullable=True)
+    suitable_for = Column(ARRAY(String(255)), nullable=True)  # ['science', 'math', 'general']
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<MusicTrack(track_id={self.track_id}, name={self.name}, category={self.category})>"

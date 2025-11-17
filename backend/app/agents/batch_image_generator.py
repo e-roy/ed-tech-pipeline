@@ -1,131 +1,175 @@
 """
 Batch Image Generator Agent
-Person B - Hours 4-8: Batch Image Generation
 
-Purpose: Generate multiple product images in parallel using structured prompts
-from Prompt Parser Agent, ensuring visual consistency via seed control.
+Purpose: Generate multiple images for video scripts using:
+- 60% Educational Templates (customized with text overlays)
+- 40% DALL-E 3 AI Generation
 
-Based on PRD Section 4.3.
+Each script part (hook, concept, process, conclusion) gets 2-3 images.
 """
 
 import time
 import asyncio
 import logging
-from typing import Optional
-import replicate
+from typing import Optional, Dict, List, Any
+from io import BytesIO
 
 from app.agents.base import AgentInput, AgentOutput
+from app.agents.helpers.template_matcher import TemplateMatcher
+from app.agents.helpers.psd_customizer import PSDCustomizer
+from app.agents.helpers.dalle_generator import DALLEGenerator
+from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
 
 class BatchImageGeneratorAgent:
     """
-    Generates multiple product images in parallel using AI image generation.
+    Generates images for video scripts using templates (60%) and DALL-E 3 (40%).
 
-    Uses Flux-Pro or SDXL via Replicate to generate consistent product
-    images from structured prompts.
+    Strategy:
+    - Tries to match templates first based on key concepts
+    - Falls back to DALL-E 3 for images without template matches
+    - Targets 60% template usage to minimize costs
     """
 
-    def __init__(self, replicate_api_key: str):
+    def __init__(self, openai_api_key: str = None):
         """
         Initialize the Batch Image Generator Agent.
 
         Args:
-            replicate_api_key: Replicate API key for image generation
+            openai_api_key: OpenAI API key for DALL-E 3
         """
-        self.api_key = replicate_api_key
-        self.client = replicate.Client(api_token=replicate_api_key)
-
-        # Model configurations
-        self.models = {
-            "flux-pro": "black-forest-labs/flux-pro",
-            "flux-dev": "black-forest-labs/flux-dev",
-            "flux-schnell": "black-forest-labs/flux-schnell",
-            "sdxl": "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
-        }
-
-        # Cost estimates (USD per image)
-        self.costs = {
-            "flux-pro": 0.05,
-            "flux-dev": 0.025,
-            "flux-schnell": 0.003,
-            "sdxl": 0.01
-        }
+        self.template_matcher = TemplateMatcher()
+        self.psd_customizer = PSDCustomizer()
+        self.dalle_generator = DALLEGenerator(api_key=openai_api_key)
+        self.storage_service = StorageService()
 
     async def process(self, input: AgentInput) -> AgentOutput:
         """
-        Generate multiple images in parallel from structured prompts.
+        Generate images for each part of a video script.
 
         Args:
             input: AgentInput containing:
-                - data["image_prompts"]: List of prompt objects from Prompt Parser
-                - data["model"]: Model to use ("flux-pro", "flux-dev", "flux-schnell", "sdxl")
+                - data["script"]: Script object with {hook, concept, process, conclusion}
+                - data["images_per_part"]: Number of images per script part (default: 2)
+                - data["prefer_templates"]: Prefer templates over AI (default: True)
 
         Returns:
             AgentOutput containing:
-                - data["images"]: List of generated image objects with URLs
-                - data["total_cost"]: Total cost for all images
-                - cost: Total cost (same as data["total_cost"])
+                - data["micro_scenes"]: {
+                    hook: {images: [{image: url, metadata: {...}}]},
+                    concept: {images: [{image: url, metadata: {...}}]},
+                    process: {images: [{image: url, metadata: {...}}]},
+                    conclusion: {images: [{image: url, metadata: {...}}]},
+                  }
+                - data["cost"]: Total cost for all images
+                - data["stats"]: {templates_used: int, dalle_used: int}
+                - cost: Total cost (same as data["cost"])
                 - duration: Total time taken
         """
         try:
             start_time = time.time()
 
             # Extract input parameters
-            image_prompts = input.data["image_prompts"]
-            model_name = input.data.get("model", "flux-schnell")  # Default to schnell for testing
+            script = input.data["script"]
+            images_per_part_config = input.data.get("images_per_part_config")
+            images_per_part = input.data.get("images_per_part", 2)  # Fallback for old API
+            prefer_templates = input.data.get("prefer_templates", True)
+            use_semantic_progression = input.data.get("use_semantic_progression", False)
 
-            if model_name not in self.models:
-                raise ValueError(
-                    f"Invalid model '{model_name}'. "
-                    f"Choose from: {list(self.models.keys())}"
+            # If per-part config provided, use it; otherwise use uniform count
+            if images_per_part_config:
+                logger.info(
+                    f"[{input.session_id}] Generating images with duration-based scaling: {images_per_part_config}"
+                )
+            else:
+                logger.info(
+                    f"[{input.session_id}] Generating {images_per_part} images per script part "
+                    f"(prefer_templates={prefer_templates})"
                 )
 
-            logger.info(
-                f"[{input.session_id}] Generating {len(image_prompts)} images "
-                f"with {model_name}"
-            )
+            # Generate images for each script part in parallel
+            script_parts = ["hook", "concept", "process", "conclusion"]
+            all_tasks = []
+            task_metadata = []  # Track which task belongs to which part
 
-            # Generate images in parallel
-            tasks = []
-            for i, prompt_data in enumerate(image_prompts):
-                task = self._generate_single_image(
-                    session_id=input.session_id,
-                    model=model_name,
-                    prompt_data=prompt_data,
-                    index=i
-                )
-                tasks.append(task)
+            for part_name in script_parts:
+                script_part = script[part_name]
+
+                # Get images count for this part
+                part_images_count = images_per_part_config.get(part_name, images_per_part) if images_per_part_config else images_per_part
+
+                for i in range(part_images_count):
+                    # For 60% templates: use template for first 60% of images
+                    # Strategy: template for image 0, DALL-E for image 1 (if 2 images/part)
+                    # Or: template, template, DALL-E for 3 images
+                    use_template = prefer_templates and (i < int(part_images_count * 0.6) or i == 0)
+
+                    task = self._generate_image_for_script_part(
+                        session_id=input.session_id,
+                        script_part=script_part,
+                        part_name=part_name,
+                        image_index=i,
+                        prefer_template=use_template,
+                        total_images=part_images_count,
+                        use_semantic_progression=use_semantic_progression
+                    )
+                    all_tasks.append(task)
+                    task_metadata.append({"part_name": part_name, "index": i})
 
             # Execute all tasks concurrently
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
-            # Process results
-            images = []
+            # Organize results by script part
+            micro_scenes = {
+                "hook": {"images": []},
+                "concept": {"images": []},
+                "process": {"images": []},
+                "conclusion": {"images": []}
+            }
+
             total_cost = 0.0
             errors = []
+            templates_used = 0
+            dalle_used = 0
 
             for i, result in enumerate(results):
+                part_name = task_metadata[i]["part_name"]
+
                 if isinstance(result, Exception):
-                    error_msg = f"Image {i} generation failed: {result}"
+                    error_msg = f"{part_name} image {task_metadata[i]['index']} failed: {result}"
                     logger.error(f"[{input.session_id}] {error_msg}")
                     errors.append(error_msg)
                     continue
 
-                images.append(result)
+                # Add image to corresponding script part
+                micro_scenes[part_name]["images"].append({
+                    "image": result["url"],
+                    "metadata": result["metadata"]
+                })
                 total_cost += result["cost"]
+
+                # Track stats
+                if result["metadata"]["source"] == "template":
+                    templates_used += 1
+                else:
+                    dalle_used += 1
 
             duration = time.time() - start_time
 
-            # Determine success (at least one image generated)
-            success = len(images) > 0
+            # Check if we have at least some images generated
+            total_images = sum(len(part["images"]) for part in micro_scenes.values())
+            success = total_images > 0
 
             if success:
+                template_pct = (templates_used / total_images * 100) if total_images > 0 else 0
                 logger.info(
-                    f"[{input.session_id}] Generated {len(images)}/{len(image_prompts)} images "
+                    f"[{input.session_id}] Generated {total_images} total images "
+                    f"({templates_used} templates, {dalle_used} DALL-E) "
                     f"in {duration:.2f}s (${total_cost:.2f})"
                 )
+                logger.info(f"[{input.session_id}] Template usage: {template_pct:.1f}%")
             else:
                 logger.error(
                     f"[{input.session_id}] All image generations failed"
@@ -134,8 +178,13 @@ class BatchImageGeneratorAgent:
             return AgentOutput(
                 success=success,
                 data={
-                    "images": images,
-                    "total_cost": total_cost,
+                    "micro_scenes": micro_scenes,
+                    "cost": total_cost,
+                    "stats": {
+                        "templates_used": templates_used,
+                        "dalle_used": dalle_used,
+                        "total_images": total_images
+                    },
                     "failed_count": len(errors),
                     "errors": errors if errors else None
                 },
@@ -156,122 +205,241 @@ class BatchImageGeneratorAgent:
                 error=str(e)
             )
 
-    async def _generate_single_image(
+    def _get_progression_keywords(self, image_index: int, total_images: int) -> str:
+        """
+        Get semantic progression keywords based on image position.
+
+        Creates visual flow:
+        - Image 0: Establishing shot, wide view, context
+        - Image 1: Medium shot, detail focus
+        - Image 2+: Close-up, specific detail
+
+        Args:
+            image_index: Current image index (0-based)
+            total_images: Total images for this segment
+
+        Returns:
+            Comma-separated keywords for visual progression
+        """
+        if total_images == 1:
+            return "balanced composition, clear view"
+
+        # Calculate progression (0.0 = start, 1.0 = end)
+        progression = image_index / (total_images - 1)
+
+        if progression < 0.33:
+            # Early images: Establish context
+            return "establishing shot, wide angle, context view, cinematic framing"
+        elif progression < 0.67:
+            # Middle images: Focus on details
+            return "medium shot, focused composition, key details visible"
+        else:
+            # Late images: Close-up, emphasis
+            return "close-up detail, emphasis on subject, intimate view"
+
+    def _split_narration_for_images(self, text: str, image_index: int, total_images: int) -> str:
+        """
+        Split narration text to create progressive images that match different
+        parts of the narration timeline.
+
+        For image 0: Use first half of narration (early concepts)
+        For image 1: Use second half of narration (late concepts)
+        For image 2+: Use full narration
+
+        This ensures images appear in sync with what's being narrated.
+
+        Args:
+            text: Full narration text
+            image_index: Which image this is (0, 1, 2, etc.)
+            total_images: Total number of images for this part
+
+        Returns:
+            Portion of narration text for this image
+        """
+        if not text or total_images == 1:
+            return text
+
+        # Split by sentences
+        sentences = [s.strip() + '.' for s in text.split('.') if s.strip()]
+        num_sentences = len(sentences)
+
+        if num_sentences <= 1:
+            # Only one sentence, can't split meaningfully
+            return text
+
+        if image_index == 0 and total_images >= 2:
+            # First image: Use first half of sentences (early concepts)
+            split_point = max(1, num_sentences // 2)
+            result = ' '.join(sentences[:split_point])
+            logger.debug(f"Image {image_index}: Early concepts (first {split_point}/{num_sentences} sentences)")
+            return result
+        elif image_index == 1 and total_images >= 2:
+            # Second image: Use second half of sentences (late concepts)
+            split_point = num_sentences // 2
+            result = ' '.join(sentences[split_point:])
+            logger.debug(f"Image {image_index}: Late concepts (last {num_sentences - split_point}/{num_sentences} sentences)")
+            return result
+        else:
+            # Third+ image or fallback: Use full text
+            return text
+
+    async def _generate_image_for_script_part(
         self,
         session_id: str,
-        model: str,
-        prompt_data: dict,
-        index: int
+        script_part: Dict[str, Any],
+        part_name: str,
+        image_index: int,
+        prefer_template: bool = True,
+        total_images: int = 2,
+        use_semantic_progression: bool = False
     ) -> dict:
         """
-        Generate a single image via Replicate API.
+        Generate a single image for a script part.
+        Tries template first (if prefer_template), then DALL-E 3 as fallback.
 
         Args:
             session_id: Session ID for logging
-            model: Model name to use
-            prompt_data: Prompt object with prompt, seed, etc.
-            index: Image index for logging
+            script_part: Script part object with {text, duration, key_concepts, visual_guidance}
+            part_name: Name of script part (hook, concept, process, conclusion)
+            image_index: Image index for this part (0-2)
+            prefer_template: Try template before DALL-E
+            total_images: Total number of images for this part
 
         Returns:
-            Image result dict with URL, metadata, cost, duration
+            Dict with URL and metadata
 
         Raises:
-            Exception: If image generation fails
+            Exception: If both template and DALL-E generation fail
         """
         start = time.time()
 
         try:
-            model_id = self.models[model]
+            visual_guidance = script_part.get("visual_guidance", "")
+            key_concepts = script_part.get("key_concepts", [])
+            narration_text = script_part.get("text", "")
 
-            # Build model input based on model type
-            if model.startswith("flux"):
-                model_input = self._build_flux_input(prompt_data)
-            else:  # SDXL
-                model_input = self._build_sdxl_input(prompt_data)
+            # Split narration to create progressive images that match narration timeline
+            # Image 0: Early concepts, Image 1: Late concepts
+            focused_text = self._split_narration_for_images(narration_text, image_index, total_images)
 
-            logger.debug(
-                f"[{session_id}] Generating image {index + 1} "
-                f"({prompt_data.get('view_type', 'unknown')} view)"
+            # Use the focused text as the visual guidance for this image
+            # This ensures each image shows what's being said when it appears on screen
+            if focused_text != narration_text:
+                logger.info(
+                    f"[{session_id}] {part_name} image {image_index + 1}: "
+                    f"{'Early' if image_index == 0 else 'Late'} concepts - '{focused_text[:60]}...'"
+                )
+                focused_guidance = focused_text
+            else:
+                # Fallback to original visual guidance if we couldn't split
+                focused_guidance = visual_guidance
+
+            # Try template first if preferred
+            if prefer_template:
+                template_match = self.template_matcher.match_template(
+                    visual_guidance,
+                    key_concepts
+                )
+
+                if template_match:
+                    logger.info(
+                        f"[{session_id}] Using template '{template_match['name']}' "
+                        f"for {part_name} image {image_index + 1}"
+                    )
+
+                    # Customize template with text overlays
+                    customizations = {
+                        "title": key_concepts[0] if key_concepts else "",
+                        "labels": key_concepts[:3]
+                    }
+
+                    try:
+                        customized_image_bytes = self.psd_customizer.customize_template(
+                            template_match['preview_url'],
+                            customizations
+                        )
+
+                        # Upload customized template to S3
+                        # (For now, return a placeholder - storage integration needed)
+                        url = template_match['preview_url']  # TODO: Upload customized version
+
+                        duration = time.time() - start
+
+                        return {
+                            "url": url,
+                            "cost": 0.0,  # Templates are free
+                            "metadata": {
+                                "part_name": part_name,
+                                "image_index": image_index,
+                                "duration": duration,
+                                "source": "template",
+                                "template_id": template_match['template_id'],
+                                "template_name": template_match['name'],
+                                "key_concepts": key_concepts,
+                                "visual_guidance": visual_guidance[:200]
+                            }
+                        }
+                    except Exception as e:
+                        logger.warning(
+                            f"[{session_id}] Template customization failed: {e}, "
+                            f"falling back to DALL-E"
+                        )
+                        # Fall through to DALL-E
+
+            # Generate with DALL-E 3
+            # Add semantic progression keywords if enabled
+            if use_semantic_progression and total_images > 1:
+                progression_keywords = self._get_progression_keywords(image_index, total_images)
+                enhanced_guidance = f"{focused_guidance}, {progression_keywords}"
+                logger.info(
+                    f"[{session_id}] Generating {part_name} image {image_index + 1}/{total_images} "
+                    f"with DALL-E 3 ({progression_keywords})"
+                )
+            else:
+                enhanced_guidance = focused_guidance
+                logger.info(
+                    f"[{session_id}] Generating {part_name} image {image_index + 1} "
+                    f"with DALL-E 3"
+                )
+
+            result = await self.dalle_generator.generate_image(
+                enhanced_guidance,  # Use enhanced guidance with progression
+                style="educational"
             )
 
-            # Call Replicate API
-            output = await self.client.async_run(model_id, input=model_input)
-
-            # Extract image URL (output format varies by model)
-            if isinstance(output, list):
-                image_url = output[0] if output else None
-            else:
-                image_url = output
-
-            if not image_url:
-                raise ValueError("No image URL returned from Replicate")
+            if not result['success']:
+                raise Exception(result.get('error', 'DALL-E generation failed'))
 
             duration = time.time() - start
-            cost = self.costs[model]
-
-            logger.debug(
-                f"[{session_id}] Image {index + 1} generated in {duration:.2f}s"
-            )
 
             return {
-                "url": str(image_url),
-                "view_type": prompt_data.get("view_type", "unknown"),
-                "seed": prompt_data.get("seed", 0),
-                "cost": cost,
-                "duration": duration,
-                "model": model,
-                "resolution": "1024x1024",
-                "prompt": prompt_data.get("prompt", "")[:100] + "..."  # Truncate for storage
+                "url": result['url'],
+                "cost": result['cost'],
+                "metadata": {
+                    "part_name": part_name,
+                    "image_index": image_index,
+                    "duration": duration,
+                    "source": "dalle3",
+                    "quality": result.get('quality', 'standard'),
+                    "key_concepts": key_concepts,
+                    "visual_guidance": visual_guidance[:200],
+                    "prompt_used": result.get('prompt_used', '')[:200]
+                }
             }
 
         except Exception as e:
             duration = time.time() - start
             logger.error(
-                f"[{session_id}] Image {index + 1} generation failed "
+                f"[{session_id}] {part_name} image {image_index + 1} generation failed "
                 f"after {duration:.2f}s: {e}"
             )
             raise
 
-    def _build_flux_input(self, prompt_data: dict) -> dict:
-        """
-        Build input parameters for Flux models.
+    def close(self):
+        """Cleanup resources."""
+        if hasattr(self, 'template_matcher'):
+            self.template_matcher.close()
 
-        Args:
-            prompt_data: Prompt object from Prompt Parser
-
-        Returns:
-            Flux model input dict
-        """
-        return {
-            "prompt": prompt_data["prompt"],
-            "guidance": prompt_data.get("guidance_scale", 7.5),
-            "num_outputs": 1,
-            "aspect_ratio": "1:1",
-            "output_format": "png",
-            "output_quality": 100,
-            "safety_tolerance": 2,
-            "seed": prompt_data.get("seed", 0)
-        }
-
-    def _build_sdxl_input(self, prompt_data: dict) -> dict:
-        """
-        Build input parameters for SDXL model.
-
-        Args:
-            prompt_data: Prompt object from Prompt Parser
-
-        Returns:
-            SDXL model input dict
-        """
-        return {
-            "prompt": prompt_data["prompt"],
-            "negative_prompt": prompt_data.get(
-                "negative_prompt",
-                "blurry, distorted, low quality, watermark, text"
-            ),
-            "width": 1024,
-            "height": 1024,
-            "guidance_scale": prompt_data.get("guidance_scale", 7.5),
-            "num_inference_steps": 50,
-            "seed": prompt_data.get("seed", 0)
-        }
+    def __del__(self):
+        """Cleanup on deletion."""
+        self.close()

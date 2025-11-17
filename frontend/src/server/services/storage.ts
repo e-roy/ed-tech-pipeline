@@ -64,18 +64,6 @@ export async function listUserFiles(
     throw new Error("S3_BUCKET_NAME not configured");
   }
 
-  // Build S3 prefix
-  let prefix: string;
-  if (folder === "input") {
-    prefix = `users/${userId}/input/`;
-  } else {
-    if (asset_type) {
-      prefix = `users/${userId}/output/${asset_type}/`;
-    } else {
-      prefix = `users/${userId}/output/`;
-    }
-  }
-
   const client = getS3Client();
   const allObjects: Array<{
     Key: string;
@@ -84,32 +72,139 @@ export async function listUserFiles(
     ContentType?: string;
   }> = [];
 
-  // List all objects with pagination
-  let continuationToken: string | undefined;
-  do {
-    const command = new ListObjectsV2Command({
-      Bucket: env.S3_BUCKET_NAME,
-      Prefix: prefix,
-      MaxKeys: limit + offset,
-      ContinuationToken: continuationToken,
-    });
+  if (folder === "input") {
+    // List input folder files
+    const prefix = `users/${userId}/input/`;
+    let continuationToken: string | undefined;
+    do {
+      const command = new ListObjectsV2Command({
+        Bucket: env.S3_BUCKET_NAME,
+        Prefix: prefix,
+        MaxKeys: limit + offset,
+        ContinuationToken: continuationToken,
+      });
 
-    const response = await client.send(command);
-    if (response.Contents) {
-      // Filter out objects without a Key and map to our type
-      const validObjects = response.Contents.filter(
-        (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-      ).map((obj) => ({
-        Key: obj.Key,
-        Size: obj.Size ?? 0,
-        LastModified: obj.LastModified,
-        // ContentType is not available in ListObjectsV2 response
-        ContentType: undefined,
-      }));
-      allObjects.push(...validObjects);
+      const response = await client.send(command);
+      if (response.Contents) {
+        const validObjects = response.Contents.filter(
+          (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+        ).map((obj) => ({
+          Key: obj.Key,
+          Size: obj.Size ?? 0,
+          LastModified: obj.LastModified,
+          ContentType: undefined,
+        }));
+        allObjects.push(...validObjects);
+      }
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+  } else {
+    // For output folder, list both traditional output and session image folders
+    const prefixes: string[] = [];
+    
+    // Add traditional output prefix
+    if (asset_type) {
+      prefixes.push(`users/${userId}/output/${asset_type}/`);
+    } else {
+      prefixes.push(`users/${userId}/output/`);
     }
-    continuationToken = response.NextContinuationToken;
-  } while (continuationToken);
+    
+    // Also search for session image folders: users/{userId}/*/images/**
+    // List all session folders under user prefix
+    const userPrefix = `users/${userId}/`;
+    const sessionFolders: string[] = [];
+    
+    // List all session folders (users/{userId}/{session_id}/)
+    let continuationToken: string | undefined;
+    do {
+      const command = new ListObjectsV2Command({
+        Bucket: env.S3_BUCKET_NAME,
+        Prefix: userPrefix,
+        Delimiter: "/",
+        MaxKeys: 1000,
+        ContinuationToken: continuationToken,
+      });
+
+      const response = await client.send(command);
+      
+      // Collect session folder prefixes
+      if (response.CommonPrefixes) {
+        for (const prefix of response.CommonPrefixes) {
+          if (prefix.Prefix) {
+            // Check if this session folder has an images subfolder
+            // We'll list it directly: users/{userId}/{session_id}/images/
+            const sessionIdMatch = prefix.Prefix.match(/^users\/\d+\/([^/]+)\/$/);
+            if (sessionIdMatch) {
+              sessionFolders.push(`${prefix.Prefix}images/`);
+            }
+          }
+        }
+      }
+      
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+    
+    // Now list files from each session's images folder
+    for (const sessionImagesPrefix of sessionFolders) {
+      let sessionContinuationToken: string | undefined;
+      do {
+        const command = new ListObjectsV2Command({
+          Bucket: env.S3_BUCKET_NAME,
+          Prefix: sessionImagesPrefix,
+          MaxKeys: 1000,
+          ContinuationToken: sessionContinuationToken,
+        });
+
+        const response = await client.send(command);
+        if (response.Contents) {
+          const validObjects = response.Contents.filter(
+            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+          )
+            .filter((obj) => {
+              // Only include image files, exclude segments.md, status.json, and diagram.png
+              const key = obj.Key;
+              const isImage = /\.(png|jpg|jpeg|gif|webp)$/i.test(key);
+              return isImage && !key.endsWith("segments.md") && !key.endsWith("status.json") && !key.endsWith("diagram.png");
+            })
+            .map((obj) => ({
+              Key: obj.Key,
+              Size: obj.Size ?? 0,
+              LastModified: obj.LastModified,
+              ContentType: undefined,
+            }));
+          allObjects.push(...validObjects);
+        }
+        sessionContinuationToken = response.NextContinuationToken;
+      } while (sessionContinuationToken);
+    }
+    
+    // Also list traditional output folder files
+    for (const prefix of prefixes) {
+      let continuationToken: string | undefined;
+      do {
+        const command = new ListObjectsV2Command({
+          Bucket: env.S3_BUCKET_NAME,
+          Prefix: prefix,
+          MaxKeys: limit + offset,
+          ContinuationToken: continuationToken,
+        });
+
+        const response = await client.send(command);
+        if (response.Contents) {
+          const validObjects = response.Contents.filter(
+            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+          ).map((obj) => ({
+            Key: obj.Key,
+            Size: obj.Size ?? 0,
+            LastModified: obj.LastModified,
+            ContentType: undefined,
+          }));
+          allObjects.push(...validObjects);
+        }
+        continuationToken = response.NextContinuationToken;
+      } while (continuationToken);
+    }
+  }
 
   // Filter out directory markers and apply pagination
   const files = allObjects

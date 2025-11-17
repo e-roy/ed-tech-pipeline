@@ -57,6 +57,29 @@ class PresignedUrlResponse(BaseModel):
     expires_in: int
 
 
+class FolderInfo(BaseModel):
+    """Folder information model."""
+    name: str
+    path: str
+
+
+class DirectoryFileInfo(BaseModel):
+    """File information model for directory listing."""
+    key: str
+    name: str
+    size: int
+    last_modified: Optional[str]
+    content_type: str
+    presigned_url: str
+
+
+class DirectoryStructureResponse(BaseModel):
+    """Directory structure response model."""
+    folders: List[FolderInfo]
+    files: List[DirectoryFileInfo]
+    prefix: str
+
+
 @router.post("/upload-input", response_model=UploadInputResponse)
 async def upload_input_file(
     file: UploadFile = File(...),
@@ -251,4 +274,54 @@ async def delete_user_file(
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File deletion failed: {str(e)}")
+
+
+@router.get("/directory", response_model=DirectoryStructureResponse)
+async def list_directory_structure(
+    prefix: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List directory structure under users/{user_id}/ with folders and files.
+    
+    Query parameters:
+    - prefix: Optional subdirectory prefix (e.g., "input" or "session_id/images")
+    
+    Returns folders and files in the specified directory.
+    """
+    try:
+        result = storage_service.list_directory_structure(
+            user_id=current_user.id,
+            prefix=prefix
+        )
+        
+        # Convert to response models
+        folder_list = [
+            FolderInfo(name=f["name"], path=f["path"])
+            for f in result["folders"]
+        ]
+        
+        file_list = [
+            DirectoryFileInfo(
+                key=f["key"],
+                name=f["name"],
+                size=f["size"],
+                last_modified=f["last_modified"],
+                content_type=f["content_type"],
+                presigned_url=f["presigned_url"]
+            )
+            for f in result["files"]
+        ]
+        
+        return DirectoryStructureResponse(
+            folders=folder_list,
+            files=file_list,
+            prefix=result["prefix"]
+        )
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Directory listing failed: {str(e)}")
 

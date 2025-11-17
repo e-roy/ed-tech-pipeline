@@ -99,9 +99,47 @@ curl http://localhost:8000/api/v1/jobs/{JOB_ID}
 
 ---
 
-## Docker Deployment
+## Deployment
 
-### Build and Run with Docker Compose
+### EC2 Production Deployment
+
+Deploy the latest backend code to the production EC2 instance:
+
+```bash
+# Deploy to EC2 (runs from your local machine)
+./deploy_to_ec2.sh
+```
+
+This script will:
+1. Pull latest code from GitHub to EC2
+2. Update environment configuration
+3. Install/update dependencies
+4. Restart the backend service
+5. Verify deployment health
+
+**Production Backend**: http://13.58.115.166:8000
+
+**Manual deployment steps:**
+
+```bash
+# SSH into EC2
+ssh -i ~/Downloads/pipeline_orchestrator.pem ec2-user@13.58.115.166
+
+# Pull latest code
+cd /opt/pipeline
+sudo git pull
+
+# Restart service
+sudo systemctl restart pipeline-backend
+
+# Check status
+sudo systemctl status pipeline-backend
+
+# View logs
+sudo journalctl -u pipeline-backend -f
+```
+
+### Docker Deployment (Local Development)
 
 ```bash
 # Build and start all services
