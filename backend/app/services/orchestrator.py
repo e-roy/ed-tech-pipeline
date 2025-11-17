@@ -19,13 +19,74 @@ from app.agents.audio_pipeline import AudioPipelineAgent
 from app.services.ffmpeg_compositor import FFmpegCompositor
 from app.services.storage import StorageService
 from app.config import get_settings
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uuid
+import os
+import json
+import asyncio
+import time
+import traceback
 from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _write_errors_json(storage_service: StorageService, session_folder: str, error_data: Dict[str, Any]) -> None:
+    """
+    Write errors.json to the session folder in S3.
+    
+    Args:
+        storage_service: Storage service instance
+        session_folder: S3 path to session folder (e.g., "users/{user_id}/{session_id}")
+        error_data: Dictionary containing error information
+    """
+    try:
+        errors_s3_key = f"{session_folder}/errors.json"
+        errors_json = json.dumps(error_data, indent=2, default=str)
+        storage_service.upload_file_direct(
+            errors_json.encode("utf-8"),
+            errors_s3_key,
+            content_type="application/json"
+        )
+        logger.info(f"Created errors.json at {errors_s3_key}")
+    except Exception as e:
+        logger.error(f"Failed to write errors.json: {e}")
+
+
+async def _wait_for_images_folder(storage_service: StorageService, images_prefix: str, max_wait_seconds: int = 30, check_interval: float = 1.0) -> bool:
+    """
+    Wait for the images folder to be created (at least one file exists with the prefix).
+    
+    Args:
+        storage_service: Storage service instance
+        images_prefix: S3 prefix for images folder (e.g., "users/{user_id}/{session_id}/images/")
+        max_wait_seconds: Maximum time to wait in seconds
+        check_interval: Interval between checks in seconds
+    
+    Returns:
+        True if images folder exists, False if timeout
+    """
+    start_time = time.time()
+    
+    while True:
+        try:
+            # Check if any files exist with the images prefix
+            files = storage_service.list_files_by_prefix(images_prefix, limit=1)
+            if files:
+                logger.info(f"Images folder confirmed: found {len(files)} file(s) with prefix {images_prefix}")
+                return True
+        except Exception as e:
+            logger.debug(f"Error checking images folder: {e}")
+        
+        elapsed = time.time() - start_time
+        if elapsed >= max_wait_seconds:
+            logger.warning(f"Timeout waiting for images folder after {elapsed:.1f}s")
+            return False
+        
+        await asyncio.sleep(check_interval)
+        logger.debug(f"Waiting for images folder... ({elapsed:.1f}s elapsed)")
 
 
 class VideoGenerationOrchestrator:
@@ -1628,6 +1689,9 @@ class VideoGenerationOrchestrator:
         diagram_s3_key = f"{segments_dir}/diagram.png"
         config_s3_key = f"{segments_dir}/config.json"
         status_s3_key = f"{segments_dir}/status.json"
+        # Create timestamp file for reference
+        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp_s3_key = f"{segments_dir}/{timestamp_str}.json"
         output_s3_prefix = f"{segments_dir}/"
         
         initial_status = None
@@ -1656,6 +1720,12 @@ class VideoGenerationOrchestrator:
             
             # Merge config with options (options take precedence)
             num_images = options.get("num_images", config.get("num_images", 2))
+            # Validate and limit num_images to maximum of 3
+            if num_images > 3:
+                logger.warning(f"[{session_id}] num_images ({num_images}) exceeds maximum of 3, limiting to 3")
+                num_images = 3
+            if num_images < 1:
+                raise ValueError("num_images must be at least 1")
             max_passes = options.get("max_passes", config.get("max_passes", 5))
             max_verification_passes = options.get("max_verification_passes", config.get("max_verification_passes", 3))
             fast_mode = options.get("fast_mode", config.get("fast_mode", False))
@@ -1683,6 +1753,17 @@ class VideoGenerationOrchestrator:
                 content_type="application/json"
             )
             
+            # Create empty timestamp file at the same level
+            try:
+                self.storage_service.upload_file_direct(
+                    b"{}",
+                    timestamp_s3_key,
+                    content_type="application/json"
+                )
+                logger.info(f"[{session_id}] Created timestamp file: {timestamp_s3_key}")
+            except Exception as ts_error:
+                logger.warning(f"[{session_id}] Failed to create timestamp file: {ts_error}")
+            
             # Send WebSocket update
             await self.websocket_manager.broadcast_status(
                 session_id,
@@ -1693,11 +1774,44 @@ class VideoGenerationOrchestrator:
             
             # Get API keys from Secrets Manager
             try:
+                logger.info(f"[{session_id}] Retrieving API keys from Secrets Manager...")
                 openrouter_key = get_secret("pipeline/openrouter-api-key")
                 replicate_key = get_secret("pipeline/replicate-api-key")
+                logger.info(f"[{session_id}] Successfully retrieved API keys")
             except Exception as e:
-                logger.error(f"[{session_id}] Failed to retrieve API keys from Secrets Manager: {e}")
-                raise ValueError(f"Failed to retrieve API keys: {e}")
+                error_msg = f"Failed to retrieve API keys: {e}"
+                logger.error(f"[{session_id}] {error_msg}")
+                # Update status.json immediately with the error
+                error_status = {
+                    "status": "failed",
+                    "started_at": initial_status.get("started_at") if initial_status else datetime.utcnow().isoformat() + "Z",
+                    "completed_at": datetime.utcnow().isoformat() + "Z",
+                    "segments_total": len(segments) if segments else 0,
+                    "segments_completed": 0,
+                    "segments_succeeded": 0,
+                    "segments_failed": 0,
+                    "error": error_msg
+                }
+                try:
+                    self.storage_service.upload_file_direct(
+                        json.dumps(error_status, indent=2).encode("utf-8"),
+                        status_s3_key,
+                        content_type="application/json"
+                    )
+                    logger.info(f"[{session_id}] Updated status.json with API key retrieval error")
+                except Exception as status_error:
+                    logger.error(f"[{session_id}] Failed to update status.json: {status_error}")
+                # Send error WebSocket update
+                try:
+                    await self.websocket_manager.broadcast_status(
+                        session_id,
+                        status="error",
+                        progress=0,
+                        details=error_msg
+                    )
+                except Exception as ws_error:
+                    logger.error(f"[{session_id}] Failed to send WebSocket error update: {ws_error}")
+                raise ValueError(error_msg)
             
             # Instantiate agent
             agent = StoryImageGeneratorAgent(
@@ -1826,3 +1940,863 @@ class VideoGenerationOrchestrator:
             )
             
             raise
+
+    async def process_hardcode_story_with_audio(
+        self,
+        db: Session,
+        session_id: str,
+        user_id: int,
+        hook_text: str,
+        concept_text: str,
+        process_text: str,
+        conclusion_text: str,
+        template_title: str,
+        s3_path: str,
+        image_options: Dict[str, Any],
+        voice: str = "alloy",
+        audio_option: str = "tts"
+    ) -> Dict[str, Any]:
+        """
+        Process hardcode story segments: generate both images and audio in parallel.
+        
+        Args:
+            db: Database session
+            session_id: Session ID
+            user_id: User ID
+            hook_text: Text for hook segment
+            concept_text: Text for concept segment
+            process_text: Text for process segment
+            conclusion_text: Text for conclusion segment
+            template_title: Template title
+            s3_path: S3 path to segments.md
+            image_options: Options for image generation (num_images, max_passes, etc.)
+            voice: Voice for TTS (default: "alloy")
+            audio_option: Audio option (default: "tts")
+        
+        Returns:
+            Dict with both image and audio generation results
+        
+        Raises:
+            ValueError: If either image or audio generation fails
+        """
+        from app.agents.story_image_generator import StoryImageGeneratorAgent, parse_segments_md
+        from app.agents.audio_pipeline import AudioPipelineAgent
+        from app.services.secrets import get_secret
+        from app.agents.base import AgentInput
+        from datetime import datetime
+        import json
+        import asyncio
+        
+        logger.info(f"[{session_id}] Starting hardcode story processing with images and audio in parallel")
+        
+        # Track start time for status.json
+        start_time = datetime.utcnow()
+        initial_status = None
+        segments_dir = "/".join(s3_path.split("/")[:-1])
+        status_s3_key = f"{segments_dir}/status.json"
+        # Create timestamp file for reference
+        timestamp_str = start_time.strftime("%Y%m%d_%H%M%S")
+        timestamp_s3_key = f"{segments_dir}/{timestamp_str}.json"
+        
+        # Write initial status.json
+        try:
+            initial_status = {
+                "status": "in_progress",
+                "started_at": start_time.isoformat() + "Z",
+                "segments_total": 4,  # Hardcode always has 4 segments
+                "segments_completed": 0,
+                "segments_succeeded": 0,
+                "segments_failed": 0,
+                "generating_images": True,
+                "generating_audio": True
+            }
+            self.storage_service.upload_file_direct(
+                json.dumps(initial_status, indent=2).encode("utf-8"),
+                status_s3_key,
+                content_type="application/json"
+            )
+            
+            # Create empty timestamp file at the same level
+            try:
+                self.storage_service.upload_file_direct(
+                    b"{}",
+                    timestamp_s3_key,
+                    content_type="application/json"
+                )
+                logger.info(f"[{session_id}] Created timestamp file: {timestamp_s3_key}")
+            except Exception as ts_error:
+                logger.warning(f"[{session_id}] Failed to create timestamp file: {ts_error}")
+        except Exception as e:
+            logger.warning(f"[{session_id}] Failed to write initial status.json: {e}")
+        
+        # Helper function to estimate duration from text (words/150 * 60 seconds)
+        def estimate_duration(text: str) -> float:
+            words = len(text.split())
+            return round((words / 150) * 60, 1)
+        
+        # Build script object for audio pipeline
+        script_data = {
+            "hook": {
+                "text": hook_text,
+                "duration": str(estimate_duration(hook_text))
+            },
+            "concept": {
+                "text": concept_text,
+                "duration": str(estimate_duration(concept_text))
+            },
+            "process": {
+                "text": process_text,
+                "duration": str(estimate_duration(process_text))
+            },
+            "conclusion": {
+                "text": conclusion_text,
+                "duration": str(estimate_duration(conclusion_text))
+            }
+        }
+        
+        # Get API keys
+        try:
+            logger.info(f"[{session_id}] Retrieving API keys from Secrets Manager...")
+            openrouter_key = get_secret("pipeline/openrouter-api-key")
+            replicate_key = get_secret("pipeline/replicate-api-key")
+            openai_key = settings.OPENAI_API_KEY
+            if not openai_key:
+                raise ValueError("OPENAI_API_KEY not configured in settings")
+            logger.info(f"[{session_id}] Successfully retrieved API keys")
+        except Exception as e:
+            error_msg = f"Failed to retrieve API keys: {e}"
+            logger.error(f"[{session_id}] {error_msg}")
+            raise ValueError(error_msg)
+        
+        # Initialize agents
+        image_agent = StoryImageGeneratorAgent(
+            storage_service=self.storage_service,
+            openrouter_api_key=openrouter_key,
+            replicate_api_key=replicate_key
+        )
+        
+        audio_agent = AudioPipelineAgent(
+            api_key=openai_key,
+            db=db,
+            storage_service=self.storage_service
+        )
+        
+        # Prepare image generation input (from segments.md)
+        output_s3_prefix = f"{segments_dir}/"
+        
+        # Read and parse segments.md
+        segments_content = self.storage_service.read_file(s3_path)
+        segments_text = segments_content.decode("utf-8")
+        parsed_template_title, segments = parse_segments_md(segments_text)
+        
+        # Check if diagram exists
+        diagram_s3_path = None
+        diagram_s3_key = f"{segments_dir}/diagram.png"
+        if self.storage_service.file_exists(diagram_s3_key):
+            diagram_s3_path = diagram_s3_key
+        
+        image_input = AgentInput(
+            session_id=session_id,
+            data={
+                "segments": segments,
+                "diagram_s3_path": diagram_s3_path,
+                "output_s3_prefix": output_s3_prefix,
+                "num_images": image_options.get("num_images", 2),
+                "max_passes": image_options.get("max_passes", 5),
+                "max_verification_passes": image_options.get("max_verification_passes", 3),
+                "fast_mode": image_options.get("fast_mode", False),
+                "template_title": template_title
+            },
+            metadata={
+                "user_id": user_id,
+                "s3_path": s3_path
+            }
+        )
+        
+        # Prepare audio generation input
+        audio_input = AgentInput(
+            session_id=session_id,
+            data={
+                "script": script_data,
+                "voice": voice,
+                "audio_option": audio_option,
+                "user_id": user_id
+            }
+        )
+        
+        # Send initial WebSocket update
+        await self.websocket_manager.broadcast_status(
+            session_id,
+            status="processing_hardcode_story",
+            progress=0,
+            details="Starting image and audio generation in parallel..."
+        )
+        
+        # Get session folder for errors.json (parent of segments_dir)
+        # segments_dir is like "users/{user_id}/{session_id}/images"
+        # session_folder should be "users/{user_id}/{session_id}"
+        session_folder = "/".join(segments_dir.split("/")[:-1]) if "/images" in segments_dir else segments_dir
+        
+        # Run both in parallel
+        logger.info(f"[{session_id}] Starting parallel image and audio generation")
+        try:
+            image_task = image_agent.process(image_input)
+            audio_task = audio_agent.process(audio_input)
+            
+            # Wait for both to complete
+            image_result, audio_result = await asyncio.gather(
+                image_task,
+                audio_task,
+                return_exceptions=True
+            )
+            
+            # Check for exceptions
+            if isinstance(image_result, Exception):
+                error_msg = f"Image generation raised exception: {str(image_result)}"
+                logger.error(f"[{session_id}] {error_msg}")
+                _write_errors_json(
+                    self.storage_service,
+                    session_folder,
+                    {
+                        "session_id": session_id,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "error_type": "ImageGenerationException",
+                        "error_message": str(image_result),
+                        "traceback": None
+                    }
+                )
+                raise ValueError(f"Image generation failed: {str(image_result)}")
+            
+            if isinstance(audio_result, Exception):
+                error_msg = f"Audio generation raised exception: {str(audio_result)}"
+                logger.error(f"[{session_id}] {error_msg}")
+                _write_errors_json(
+                    self.storage_service,
+                    session_folder,
+                    {
+                        "session_id": session_id,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "error_type": "AudioGenerationException",
+                        "error_message": str(audio_result),
+                        "traceback": None
+                    }
+                )
+                raise ValueError(f"Audio generation failed: {str(audio_result)}")
+            
+            # Check for failures
+            if not image_result.success:
+                error_msg = image_result.error or "Image generation failed"
+                logger.error(f"[{session_id}] Image generation failed: {error_msg}")
+                _write_errors_json(
+                    self.storage_service,
+                    session_folder,
+                    {
+                        "session_id": session_id,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "error_type": "ImageGenerationFailure",
+                        "error_message": error_msg,
+                        "agent_output": {
+                            "success": False,
+                            "error": image_result.error,
+                            "cost": image_result.cost,
+                            "duration": image_result.duration
+                        }
+                    }
+                )
+                raise ValueError(f"Image generation failed: {error_msg}")
+            
+            if not audio_result.success:
+                error_msg = audio_result.error or "Audio generation failed"
+                logger.error(f"[{session_id}] Audio generation failed: {error_msg}")
+                _write_errors_json(
+                    self.storage_service,
+                    session_folder,
+                    {
+                        "session_id": session_id,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "error_type": "AudioGenerationFailure",
+                        "error_message": error_msg,
+                        "agent_output": {
+                            "success": False,
+                            "error": audio_result.error,
+                            "cost": audio_result.cost,
+                            "duration": audio_result.duration
+                        }
+                    }
+                )
+                raise ValueError(f"Audio generation failed: {error_msg}")
+            
+            # Both succeeded - wait for images folder before uploading audio
+            logger.info(f"[{session_id}] Waiting for images folder to be created before uploading audio...")
+            images_folder_exists = await _wait_for_images_folder(
+                self.storage_service,
+                output_s3_prefix,
+                max_wait_seconds=30,
+                check_interval=1.0
+            )
+            
+            if not images_folder_exists:
+                logger.warning(f"[{session_id}] Images folder not found after waiting, but proceeding with audio upload")
+            
+            # Upload audio files to S3
+            audio_files = audio_result.data.get("audio_files", [])
+            logger.info(f"[{session_id}] Audio agent returned {len(audio_files)} audio files")
+            
+            if not audio_files:
+                logger.warning(f"[{session_id}] No audio files returned from audio agent!")
+            
+            uploaded_audio_files = []
+            
+            for audio_data in audio_files:
+                logger.debug(f"[{session_id}] Processing audio file: {audio_data.get('part', 'unknown')}")
+                # Skip music files (they're already in S3)
+                if audio_data.get("part") == "music":
+                    uploaded_audio_files.append(audio_data)
+                    continue
+                
+                # Get part name first
+                part_name = audio_data.get("part", "unknown")
+                
+                filepath = audio_data.get("filepath")
+                if not filepath:
+                    logger.error(f"[{session_id}] Audio file for {part_name} has no filepath, skipping upload")
+                    continue
+                
+                if not os.path.exists(filepath):
+                    logger.error(
+                        f"[{session_id}] Audio file not found at path: {filepath}, skipping upload. "
+                        f"File may have been cleaned up or path is incorrect."
+                    )
+                    # Try to list temp directory to debug
+                    temp_dir = os.path.dirname(filepath) if filepath else "/tmp"
+                    if os.path.exists(temp_dir):
+                        try:
+                            temp_files = os.listdir(temp_dir)
+                            logger.debug(f"[{session_id}] Files in {temp_dir}: {temp_files[:10]}")
+                        except:
+                            pass
+                    continue
+                
+                logger.info(f"[{session_id}] Found audio file for {part_name} at: {filepath}")
+                
+                # Upload to S3
+                audio_s3_key = f"{output_s3_prefix}audio/{part_name}.mp3"
+                
+                try:
+                    with open(filepath, "rb") as f:
+                        audio_bytes = f.read()
+                    
+                    self.storage_service.upload_file_direct(
+                        audio_bytes,
+                        audio_s3_key,
+                        content_type="audio/mpeg"
+                    )
+                    
+                    # Generate presigned URL
+                    presigned_url = self.storage_service.generate_presigned_url(
+                        audio_s3_key,
+                        expires_in=3600
+                    )
+                    
+                    uploaded_audio_files.append({
+                        **audio_data,
+                        "s3_key": audio_s3_key,
+                        "url": presigned_url
+                    })
+                    
+                    logger.info(f"[{session_id}] Uploaded audio file {part_name} to {audio_s3_key}")
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(filepath)
+                    except Exception as e:
+                        logger.warning(f"[{session_id}] Failed to remove temp file {filepath}: {e}")
+                        
+                except Exception as e:
+                    logger.error(f"[{session_id}] Failed to upload audio file {part_name}: {e}")
+                    # Continue with other files
+            
+            # Update status.json with combined results
+            combined_status = {
+                "status": "completed",
+                "started_at": initial_status.get("started_at") if initial_status else start_time.isoformat() + "Z",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "segments_total": len(segments),
+                "segments_completed": len(segments),
+                "segments_succeeded": image_result.data.get("segments_succeeded", 0),
+                "segments_failed": image_result.data.get("segments_failed", 0),
+                "total_images_generated": image_result.data.get("total_images_generated", 0),
+                "total_audio_files": len(uploaded_audio_files),
+                "total_cost_usd": image_result.cost + audio_result.cost,
+                "total_time_seconds": image_result.duration + audio_result.duration,
+                "image_cost": image_result.cost,
+                "audio_cost": audio_result.cost,
+                "voice_used": voice,
+                "audio_files": uploaded_audio_files
+            }
+            
+            try:
+                self.storage_service.upload_file_direct(
+                    json.dumps(combined_status, indent=2).encode("utf-8"),
+                    status_s3_key,
+                    content_type="application/json"
+                )
+                logger.info(f"[{session_id}] Updated status.json with combined results")
+            except Exception as e:
+                logger.warning(f"[{session_id}] Failed to update status.json: {e}")
+            
+            # Both succeeded - now generate videos
+            logger.info(
+                f"[{session_id}] Both image and audio generation completed successfully. "
+                f"Images: ${image_result.cost:.4f}, Audio: ${audio_result.cost:.4f}. "
+                f"Starting video generation..."
+            )
+            
+            # Send WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="generating_videos",
+                progress=85,
+                details="Generating video clips from images and audio..."
+            )
+            
+            # Generate videos
+            try:
+                video_result = await self.compose_hardcode_video(
+                    session_id=session_id,
+                    user_id=user_id,
+                    image_result=image_result,
+                    audio_files=uploaded_audio_files,
+                    diagram_s3_key=diagram_s3_key,
+                    segments=segments,
+                    output_s3_prefix=output_s3_prefix,
+                    template_title=template_title
+                )
+                
+                logger.info(
+                    f"[{session_id}] Video generation completed. "
+                    f"Total cost: ${image_result.cost + audio_result.cost + video_result.get('total_cost', 0):.4f}"
+                )
+                
+                # Send final success WebSocket update
+                await self.websocket_manager.broadcast_status(
+                    session_id,
+                    status="hardcode_story_complete",
+                    progress=100,
+                    details=f"Completed: {image_result.data.get('segments_succeeded', 0)} segments, "
+                           f"{image_result.data.get('total_images_generated', 0)} images, "
+                           f"{len(uploaded_audio_files)} audio files, "
+                           f"1 final video. "
+                           f"Total: ${image_result.cost + audio_result.cost + video_result.get('total_cost', 0):.4f}"
+                )
+                
+                return {
+                    "status": "success",
+                    "session_id": session_id,
+                    "template_title": template_title,
+                    "image_result": {
+                        "segments_succeeded": image_result.data.get("segments_succeeded", 0),
+                        "segments_failed": image_result.data.get("segments_failed", 0),
+                        "total_images_generated": image_result.data.get("total_images_generated", 0),
+                        "cost": image_result.cost,
+                        "duration": image_result.duration
+                    },
+                    "audio_result": {
+                        "audio_files": uploaded_audio_files,
+                        "total_duration": audio_result.data.get("total_duration", 0.0),
+                        "cost": audio_result.cost,
+                        "duration": audio_result.duration,
+                        "voice_used": voice
+                    },
+                    "video_result": video_result,
+                    "total_cost": image_result.cost + audio_result.cost + video_result.get("total_cost", 0)
+                }
+                
+            except Exception as video_error:
+                logger.error(f"[{session_id}] Video generation failed: {video_error}")
+                
+                # Write error to errors.json
+                _write_errors_json(
+                    self.storage_service,
+                    session_folder,
+                    {
+                        "session_id": session_id,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "error_type": "VideoGenerationException",
+                        "error_message": str(video_error),
+                        "context": "Images and audio generation succeeded, but video generation failed",
+                        "traceback": None
+                    }
+                )
+                
+                # Still return success for images and audio, but note video failure
+                await self.websocket_manager.broadcast_status(
+                    session_id,
+                    status="hardcode_story_partial",
+                    progress=95,
+                    details=f"Images and audio complete, but video generation failed: {str(video_error)}"
+                )
+                
+                return {
+                    "status": "partial_success",
+                    "session_id": session_id,
+                    "template_title": template_title,
+                    "image_result": {
+                        "segments_succeeded": image_result.data.get("segments_succeeded", 0),
+                        "segments_failed": image_result.data.get("segments_failed", 0),
+                        "total_images_generated": image_result.data.get("total_images_generated", 0),
+                        "cost": image_result.cost,
+                        "duration": image_result.duration
+                    },
+                    "audio_result": {
+                        "audio_files": uploaded_audio_files,
+                        "total_duration": audio_result.data.get("total_duration", 0.0),
+                        "cost": audio_result.cost,
+                        "duration": audio_result.duration,
+                        "voice_used": voice
+                    },
+                    "video_error": str(video_error),
+                    "total_cost": image_result.cost + audio_result.cost
+                }
+            
+        except ValueError as ve:
+            # Write error to errors.json
+            session_folder = "/".join(segments_dir.split("/")[:-1]) if "/images" in segments_dir else segments_dir
+            _write_errors_json(
+                self.storage_service,
+                session_folder,
+                {
+                    "session_id": session_id,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "error_type": "ValueError",
+                    "error_message": str(ve),
+                    "context": "Image or audio generation failed",
+                    "traceback": None
+                }
+            )
+            
+            # Update status.json with error
+            error_status = {
+                "status": "failed",
+                "started_at": initial_status.get("started_at") if initial_status else start_time.isoformat() + "Z",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "error": str(ve)
+            }
+            try:
+                self.storage_service.upload_file_direct(
+                    json.dumps(error_status, indent=2).encode("utf-8"),
+                    status_s3_key,
+                    content_type="application/json"
+                )
+            except:
+                pass
+            
+            # Send error WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Processing failed: {str(ve)}"
+            )
+            
+            # Re-raise ValueError (these are our intentional failures)
+            raise
+        except Exception as e:
+            logger.exception(f"[{session_id}] Unexpected error in parallel processing: {e}")
+            
+            # Write error to errors.json
+            session_folder = "/".join(segments_dir.split("/")[:-1]) if "/images" in segments_dir else segments_dir
+            _write_errors_json(
+                self.storage_service,
+                session_folder,
+                {
+                    "session_id": session_id,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "context": "Unexpected error during hardcode story processing",
+                    "traceback": traceback.format_exc()
+                }
+            )
+            
+            # Update status.json with error
+            error_status = {
+                "status": "failed",
+                "started_at": initial_status.get("started_at") if initial_status else start_time.isoformat() + "Z",
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+                "error": str(e)
+            }
+            try:
+                self.storage_service.upload_file_direct(
+                    json.dumps(error_status, indent=2).encode("utf-8"),
+                    status_s3_key,
+                    content_type="application/json"
+                )
+            except:
+                pass
+            
+            # Send error WebSocket update
+            await self.websocket_manager.broadcast_status(
+                session_id,
+                status="error",
+                progress=0,
+                details=f"Processing failed: {str(e)}"
+            )
+            
+            raise ValueError(f"Processing failed: {str(e)}")
+
+    async def compose_hardcode_video(
+        self,
+        session_id: str,
+        user_id: int,
+        image_result: Any,
+        audio_files: List[Dict[str, Any]],
+        diagram_s3_key: str,
+        segments: List[Dict[str, Any]],
+        output_s3_prefix: str,
+        template_title: str
+    ) -> Dict[str, Any]:
+        """
+        Compose video from hardcode story images and audio.
+        
+        Uses diagram as primary image for each segment, with generated images
+        as mood/inspiration. Generates one video clip per segment, then composes
+        final video with audio.
+        
+        Args:
+            session_id: Session ID
+            user_id: User ID
+            image_result: AgentOutput from story image generator
+            audio_result: AgentOutput from audio pipeline
+            diagram_s3_key: S3 key to diagram.png
+            segments: List of parsed segments
+            output_s3_prefix: S3 prefix for output
+            template_title: Template title
+        
+        Returns:
+            Dict with video result including final_video_s3_key, total_cost, etc.
+        """
+        from app.agents.base import AgentInput
+        from app.services.educational_compositor import EducationalCompositor
+        import asyncio
+        
+        logger.info(f"[{session_id}] Starting hardcode video composition")
+        
+        # Map segment numbers to parts
+        segment_to_part = {
+            1: "hook",
+            2: "concept",
+            3: "process",
+            4: "conclusion"
+        }
+        
+        # Organize data by part
+        successful_segments = image_result.data.get("successful_segments", [])
+        if not successful_segments:
+            raise ValueError("No successful image segments found. Cannot generate video without images.")
+        
+        if not segments:
+            raise ValueError("No segments provided. Cannot generate video without segment data.")
+        
+        audio_files_by_part = {}
+        for audio_file in audio_files:
+            part = audio_file.get("part")
+            if part and part != "music":
+                audio_files_by_part[part] = audio_file
+        
+        # Check if diagram exists
+        if not self.storage_service.file_exists(diagram_s3_key):
+            raise ValueError(f"Diagram not found at {diagram_s3_key}. Diagram is required for video generation.")
+        
+        # Get diagram presigned URL
+        diagram_url = self.storage_service.generate_presigned_url(
+            diagram_s3_key,
+            expires_in=3600
+        )
+        
+        # Generate video clips for each segment
+        video_clips = []
+        total_video_cost = 0.0
+        
+        if not self.video_generator:
+            raise ValueError("Video generator not initialized - check REPLICATE_API_KEY")
+        
+        # Process each segment
+        for segment_result in successful_segments:
+            segment_num = segment_result.get("segment_number")
+            part = segment_to_part.get(segment_num)
+            
+            if not part:
+                logger.warning(f"[{session_id}] Unknown segment number {segment_num}, skipping")
+                continue
+            
+            # Get audio for this part
+            audio_file = audio_files_by_part.get(part)
+            if not audio_file:
+                logger.warning(f"[{session_id}] No audio file for {part}, skipping video generation")
+                continue
+            
+            # Validate audio file has URL
+            audio_url = audio_file.get("url") or audio_file.get("presigned_url")
+            if not audio_url:
+                logger.warning(f"[{session_id}] Audio file for {part} has no URL, skipping video generation")
+                continue
+            
+            # Get duration (ensure it's a float)
+            audio_duration = float(audio_file.get("duration", 10.0))
+            
+            # Get generated images for mood/inspiration
+            generated_images = segment_result.get("generated_images", [])
+            mood_images = [img.get("s3_key") for img in generated_images[:3]]  # Use first 3 as mood
+            
+            # Get segment data for narration text
+            segment_data = next((s for s in segments if s.get("number") == segment_num), None)
+            narration_text = segment_data.get("narrationtext", "") if segment_data else ""
+            
+            # Build video prompt with mood context
+            mood_context = ""
+            if mood_images:
+                mood_context = " Use the generated images as visual inspiration for mood and style, but focus on the diagram's structure."
+            
+            video_prompt = f"{narration_text}{mood_context} Educational video with smooth camera movement, focusing on the diagram's key elements."
+            
+            logger.info(f"[{session_id}] Generating video clip for {part} (segment {segment_num})")
+            
+            # Generate video clip using diagram as primary image
+            video_input = AgentInput(
+                session_id=session_id,
+                data={
+                    "approved_images": [{"url": diagram_url}],
+                    "video_prompt": video_prompt,
+                    "clip_duration": audio_duration,  # Match audio duration
+                    "model": "gen-4-turbo"
+                }
+            )
+            
+            try:
+                video_clip_result = await self.video_generator.process(video_input)
+                
+                if video_clip_result.success and video_clip_result.data.get("clips"):
+                    clip_data = video_clip_result.data["clips"][0]
+                    total_video_cost += video_clip_result.cost
+                    
+                    video_clips.append({
+                        "part": part,
+                        "video_url": clip_data["url"],
+                        "audio_url": audio_url,
+                        "duration": audio_duration,
+                        "narration_duration": audio_duration,
+                        "gap_after_narration": 0.0,
+                        "script_text": narration_text
+                    })
+                    
+                    logger.info(f"[{session_id}] ✓ Generated video clip for {part}")
+                else:
+                    logger.error(f"[{session_id}] Video clip generation failed for {part}: {video_clip_result.error}")
+                    # Fallback: use static image
+                    image_url = self.storage_service.generate_presigned_url(
+                        diagram_s3_key,
+                        expires_in=3600
+                    )
+                    video_clips.append({
+                        "part": part,
+                        "video_url": None,  # Will be created from static image
+                        "image_url": image_url,
+                        "audio_url": audio_url,
+                        "duration": audio_duration,
+                        "narration_duration": audio_duration,
+                        "gap_after_narration": 0.0,
+                        "script_text": narration_text
+                    })
+                    
+            except Exception as e:
+                logger.error(f"[{session_id}] Exception generating video clip for {part}: {e}")
+                # Fallback: use static image
+                image_url = self.storage_service.generate_presigned_url(
+                    diagram_s3_key,
+                    expires_in=3600
+                )
+                video_clips.append({
+                    "part": part,
+                    "video_url": None,
+                    "image_url": image_url,
+                    "audio_url": audio_url,
+                    "duration": audio_duration,
+                    "narration_duration": audio_duration,
+                    "gap_after_narration": 0.0,
+                    "script_text": narration_text
+                })
+        
+        if not video_clips:
+            raise ValueError("No video clips generated")
+        
+        # Compose final video using EducationalCompositor
+        logger.info(f"[{session_id}] Composing final video from {len(video_clips)} clips")
+        
+        await self.websocket_manager.broadcast_status(
+            session_id,
+            status="composing_final_video",
+            progress=95,
+            details="Composing final video with FFmpeg..."
+        )
+        
+        if not self.ffmpeg_compositor:
+            raise ValueError("FFmpeg compositor not available")
+        
+        # Use EducationalCompositor for final composition
+        compositor = EducationalCompositor(work_dir="/tmp/educational_videos")
+        
+        # Get music URL if available
+        music_url = None
+        for audio_file in audio_files:
+            if audio_file.get("part") == "music":
+                music_url = audio_file.get("url")
+                break
+        
+        final_video_result = await compositor.compose_educational_video(
+            timeline=video_clips,
+            music_url=music_url,
+            session_id=session_id,
+            intro_padding=2.0,
+            outro_padding=2.0
+        )
+        
+        # Upload final video to S3
+        final_video_s3_key = f"{output_s3_prefix}final_video.mp4"
+        
+        # Download final video from compositor result
+        final_video_path = final_video_result.get("output_path")
+        if final_video_path and os.path.exists(final_video_path):
+            with open(final_video_path, "rb") as f:
+                video_bytes = f.read()
+            
+            self.storage_service.upload_file_direct(
+                video_bytes,
+                final_video_s3_key,
+                content_type="video/mp4"
+            )
+            
+            # Generate presigned URL
+            final_video_url = self.storage_service.generate_presigned_url(
+                final_video_s3_key,
+                expires_in=86400  # 24 hours
+            )
+            
+            # Clean up local file
+            try:
+                os.remove(final_video_path)
+            except:
+                pass
+            
+            logger.info(f"[{session_id}] Final video uploaded to {final_video_s3_key}")
+        else:
+            raise ValueError("Final video file not found after composition")
+        
+        return {
+            "status": "success",
+            "final_video_s3_key": final_video_s3_key,
+            "final_video_url": final_video_url,
+            "video_clips_count": len(video_clips),
+            "total_cost": total_video_cost,
+            "duration": final_video_result.get("duration", 0.0)
+        }

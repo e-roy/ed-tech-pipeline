@@ -1,7 +1,7 @@
 """
 Generation routes - handles all video generation workflow steps.
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -31,6 +31,11 @@ async def test_ping():
 @router.options("/test/save-script")
 async def test_save_script_options():
     """Handle OPTIONS preflight for save-script endpoint."""
+    return {"status": "ok"}
+
+@router.options("/hardcode-upload")
+async def hardcode_upload_options():
+    """Handle OPTIONS preflight for hardcode-upload endpoint."""
     return {"status": "ok"}
 
 # Global WebSocket manager instance (shared with main.py)
@@ -750,7 +755,11 @@ async def save_test_script(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass  # Ignore rollback errors
         logger.exception(f"Error saving test script: {e}")
         # Return detailed error for debugging
         error_detail = f"Failed to save script: {str(e)}"
@@ -805,6 +814,197 @@ def get_websocket_manager() -> WebSocketManager:
 # Track processing state per session (for concurrent request handling)
 _processing_sessions: Dict[str, bool] = {}
 _processing_lock = threading.Lock()
+
+
+class HardcodeUploadResponse(BaseModel):
+    status: str
+    session_id: str
+    s3_path: str
+    message: str
+
+
+@router.post("/hardcode-upload", response_model=HardcodeUploadResponse)
+async def hardcode_upload(
+    session_id: str = Form(...),
+    template_title: str = Form(...),
+    hook_text: str = Form(...),
+    concept_text: str = Form(...),
+    process_text: str = Form(...),
+    conclusion_text: str = Form(...),
+    hook_visual_guidance: str = Form(...),
+    concept_visual_guidance: str = Form(...),
+    process_visual_guidance: str = Form(...),
+    conclusion_visual_guidance: str = Form(...),
+    segments_md: UploadFile = File(...),
+    diagram: Optional[UploadFile] = File(None),
+    num_images: int = Form(2),
+    max_passes: int = Form(5),
+    max_verification_passes: int = Form(3),
+    fast_mode: bool = Form(False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload hardcoded story segments and trigger image generation.
+    
+    This endpoint:
+    1. Creates/verifies session in database
+    2. Uploads segments.md to S3
+    3. Uploads diagram.png to S3 (if provided)
+    4. Triggers process_story_segments asynchronously
+    5. Returns immediately with acceptance message
+    """
+    try:
+        logger.info(f"Received hardcode_upload request for session {session_id}, user {current_user.id}")
+        
+        from app.models.database import Session as SessionModel
+        
+        # Validate storage service is configured
+        if not storage_service.s3_client:
+            logger.error("Storage service not configured - S3 client is None")
+            raise HTTPException(
+                status_code=500,
+                detail="Storage service not configured. Please check AWS credentials."
+            )
+        
+        # Get or create session
+        try:
+            session = db.query(SessionModel).filter(
+                SessionModel.id == session_id,
+                SessionModel.user_id == current_user.id
+            ).first()
+            
+            if not session:
+                # Auto-create session if it doesn't exist
+                session = SessionModel(
+                    id=session_id,
+                    user_id=current_user.id,
+                    status="pending"
+                )
+                db.add(session)
+                db.commit()
+                db.refresh(session)
+                logger.info(f"Auto-created session {session_id} for user {current_user.id}")
+            else:
+                logger.info(f"Found existing session {session_id} for user {current_user.id}")
+        except Exception as db_error:
+            logger.exception(f"Database error in hardcode_upload: {db_error}")
+            if db:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error: {str(db_error)}"
+            )
+        
+        # Prepare S3 paths
+        output_s3_prefix = f"users/{current_user.id}/{session_id}/images/"
+        segments_s3_key = f"{output_s3_prefix}segments.md"
+        
+        # Read segments.md content
+        try:
+            segments_md_content = await segments_md.read()
+            logger.info(f"Read {len(segments_md_content)} bytes from segments_md file")
+        except Exception as read_error:
+            logger.exception(f"Error reading segments_md file: {read_error}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to read segments.md file: {str(read_error)}"
+            )
+        
+        # Upload segments.md to S3
+        try:
+            storage_service.upload_file_direct(
+                segments_md_content,
+                segments_s3_key,
+                content_type="text/markdown"
+            )
+            logger.info(f"Uploaded segments.md to {segments_s3_key}")
+        except Exception as upload_error:
+            logger.exception(f"Error uploading segments.md to S3: {upload_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload segments.md to S3: {str(upload_error)}"
+            )
+        
+        # Upload diagram if provided
+        if diagram:
+            try:
+                diagram_content = await diagram.read()
+                diagram_s3_key = f"{output_s3_prefix}diagram.png"
+                storage_service.upload_file_direct(
+                    diagram_content,
+                    diagram_s3_key,
+                    content_type="image/png"
+                )
+                logger.info(f"Uploaded diagram to {diagram_s3_key}")
+            except Exception as diagram_error:
+                logger.warning(f"Failed to upload diagram: {diagram_error}, continuing without it")
+                # Don't fail the whole request if diagram upload fails
+        
+        # Validate and limit num_images to maximum of 3
+        if num_images > 3:
+            logger.warning(f"num_images ({num_images}) exceeds maximum of 3, limiting to 3")
+            num_images = 3
+        if num_images < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="num_images must be at least 1"
+            )
+        
+        # Prepare options for process_story_segments
+        options = {
+            "num_images": num_images,
+            "max_passes": max_passes,
+            "max_verification_passes": max_verification_passes,
+            "fast_mode": fast_mode
+        }
+        
+        # Start async processing (images and audio in parallel)
+        async def process_async():
+            try:
+                from app.database import SessionLocal
+                background_db = SessionLocal()
+                try:
+                    await orchestrator.process_hardcode_story_with_audio(
+                        db=background_db,
+                        session_id=session_id,
+                        user_id=current_user.id,
+                        hook_text=hook_text,
+                        concept_text=concept_text,
+                        process_text=process_text,
+                        conclusion_text=conclusion_text,
+                        template_title=template_title,
+                        s3_path=segments_s3_key,
+                        image_options=options,
+                        voice="alloy",  # Default voice
+                        audio_option="tts"  # Default audio option
+                    )
+                finally:
+                    background_db.close()
+            except Exception as e:
+                logger.exception(f"Error in async hardcode story processing (images + audio) for session {session_id}: {e}")
+        
+        asyncio.create_task(process_async())
+        
+        logger.info(f"Successfully processed hardcode_upload for session {session_id}")
+        return HardcodeUploadResponse(
+            status="accepted",
+            session_id=session_id,
+            s3_path=segments_s3_key,
+            message="Files uploaded successfully. Image generation started. Listen to WebSocket for updates."
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error in hardcode_upload endpoint: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload failed: {str(e)}"
+        )
 
 
 class ProcessStorySegmentsRequest(BaseModel):
@@ -1159,9 +1359,17 @@ async def generate_story_images(
                         except Exception as e:
                             logger.warning(f"Failed to copy diagram: {e}")
                     
+                    # Validate and limit num_images to maximum of 3
+                    validated_num_images = request.num_images or 2
+                    if validated_num_images > 3:
+                        logger.warning(f"num_images ({validated_num_images}) exceeds maximum of 3, limiting to 3")
+                        validated_num_images = 3
+                    if validated_num_images < 1:
+                        raise ValueError("num_images must be at least 1")
+                    
                     # Call orchestrator
                     options = {
-                        "num_images": request.num_images,
+                        "num_images": validated_num_images,
                         "max_passes": request.max_passes,
                         "max_verification_passes": request.max_verification_passes,
                         "fast_mode": request.fast_mode
@@ -1276,7 +1484,7 @@ async def get_story_images(
         status_data = json.loads(status_content.decode("utf-8"))
         
         # Extract template title from segments directory structure
-        images_prefix = f"users/{current_user.id}/{session_id}/images/"
+        # (images_prefix already defined above)
         template_title = None
         
         # Try to find template directory
@@ -1496,13 +1704,21 @@ async def regenerate_segment(
                         except Exception as e:
                             logger.warning(f"Failed to download diagram: {e}")
                     
+                    # Validate and limit num_images to maximum of 3
+                    validated_num_images = request.num_images or 2
+                    if validated_num_images > 3:
+                        logger.warning(f"num_images ({validated_num_images}) exceeds maximum of 3, limiting to 3")
+                        validated_num_images = 3
+                    if validated_num_images < 1:
+                        raise ValueError("num_images must be at least 1")
+                    
                     # Process single segment
                     segment_result = await agent._process_segment(
                         segment=target_segment,
                         template_title=template_title,
                         diagram_bytes=diagram_bytes,
                         output_s3_prefix=output_s3_prefix,
-                        num_images=request.num_images,
+                        num_images=validated_num_images,
                         max_passes=request.max_passes,
                         max_verification_passes=request.max_verification_passes,
                         fast_mode=request.fast_mode
