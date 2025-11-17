@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronRight, FileText, FolderOpen, History, Plus, HardDrive } from "lucide-react";
+import {
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  History,
+  Plus,
+  HardDrive,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
@@ -39,24 +46,24 @@ const navItems = [
     icon: Plus,
   },
   {
-    title: "Hardcode Create",
-    url: "/dashboard/hardcode-create",
-    icon: FileText,
-  },
-  {
     title: "Assets",
     url: "/dashboard/assets",
     icon: FolderOpen,
   },
   {
-    title: "Hardcode Assets",
-    url: "/dashboard/hardcode-assets",
-    icon: HardDrive,
-  },
-  {
     title: "History",
     icon: History,
     isCollapsible: true,
+  },
+  {
+    title: "Hardcode Create",
+    url: "/dashboard/hardcode-create",
+    icon: FileText,
+  },
+  {
+    title: "Hardcode Assets",
+    url: "/dashboard/hardcode-assets",
+    icon: HardDrive,
   },
 ];
 
