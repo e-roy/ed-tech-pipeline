@@ -32,17 +32,6 @@ class WebSocketManager:
 
         self.active_connections[session_id].append(websocket)
 
-        # Send welcome message
-        await self.send_personal_message(
-            {
-                "type": "connection",
-                "status": "connected",
-                "session_id": session_id,
-                "message": f"Connected to session {session_id}"
-            },
-            websocket
-        )
-
     async def disconnect(self, websocket: WebSocket, session_id: str):
         """
         Remove a WebSocket connection.
@@ -90,7 +79,7 @@ class WebSocketManager:
                     # Connection might be closed, we'll remove it on disconnect
                     print(f"Error sending to WebSocket: {e}")
 
-    async def broadcast_status(self, session_id: str, status: str, progress: int = 0, details: str = ""):
+    async def broadcast_status(self, session_id: str, status: str, progress: int = 0, details: str = "", elapsed_time: float = None, total_cost: float = None, items: list = None):
         """
         Helper method to broadcast a standardized status update.
 
@@ -99,13 +88,25 @@ class WebSocketManager:
             status: Status string (e.g., "generating_images", "completed")
             progress: Progress percentage (0-100)
             details: Additional details about the status
+            elapsed_time: Optional elapsed time in seconds
+            total_cost: Optional total cost in USD
+            items: Optional list of status items showing cumulative progress
+                   Format: [{"id": str, "name": str, "status": "pending"|"processing"|"completed", "type": "image"|"audio"}]
         """
-        await self.send_progress(
-            session_id,
-            {
-                "type": "status_update",
-                "status": status,
-                "progress": progress,
-                "details": details
-            }
-        )
+        message = {
+            "type": "status_update",
+            "status": status,
+            "progress": progress,
+            "details": details
+        }
+
+        if elapsed_time is not None:
+            message["elapsed_time"] = round(elapsed_time, 1)
+
+        if total_cost is not None:
+            message["total_cost"] = round(total_cost, 4)
+
+        if items is not None:
+            message["items"] = items
+
+        await self.send_progress(session_id, message)
