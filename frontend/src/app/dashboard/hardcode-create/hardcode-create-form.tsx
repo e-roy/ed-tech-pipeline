@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,43 +24,39 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface HardcodeCreateFormProps {
   userEmail: string;
+  sessionId: string;
 }
 
-export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
+export function HardcodeCreateForm({
+  userEmail,
+  sessionId,
+}: HardcodeCreateFormProps) {
   const [templateTitle, setTemplateTitle] = useState("Photosynthesis");
   const [hookText, setHookText] = useState(
-    'Have you ever wondered how plants make their own food? Let\'s discover the amazing process of photosynthesis!'
+    "Have you ever wondered how plants make their own food? Let's discover the amazing process of photosynthesis!",
   );
   const [conceptText, setConceptText] = useState(
-    "Plants use a process called photosynthesis. Inside their leaves are tiny structures called chloroplasts that contain chlorophyll - the green pigment that captures sunlight."
+    "Plants use a process called photosynthesis. Inside their leaves are tiny structures called chloroplasts that contain chlorophyll - the green pigment that captures sunlight.",
   );
   const [processText, setProcessText] = useState(
-    "When sunlight hits the chlorophyll, it triggers a chemical reaction. The plant takes in carbon dioxide from the air and water from the soil, and converts them into glucose - that's sugar, the plant's food! The chemical equation is: 6CO₂ + 6H₂O + light energy → C₆H₁₂O₆ + 6O₂"
+    "When sunlight hits the chlorophyll, it triggers a chemical reaction. The plant takes in carbon dioxide from the air and water from the soil, and converts them into glucose - that's sugar, the plant's food! The chemical equation is: 6CO₂ + 6H₂O + light energy → C₆H₁₂O₆ + 6O₂",
   );
   const [conclusionText, setConclusionText] = useState(
-    "As a bonus, plants release oxygen as a byproduct. That's the air we breathe! So next time you see a green plant, remember - it's a tiny food factory powered by the sun."
+    "As a bonus, plants release oxygen as a byproduct. That's the air we breathe! So next time you see a green plant, remember - it's a tiny food factory powered by the sun.",
   );
   const [hookVisualGuidance, setHookVisualGuidance] = useState(
-    "Animated question mark with plant growing time-lapse"
+    "Animated question mark with plant growing time-lapse",
   );
   const [conceptVisualGuidance, setConceptVisualGuidance] = useState(
-    "Diagram of leaf → zoom to chloroplast → highlight chlorophyll"
+    "Diagram of leaf → zoom to chloroplast → highlight chlorophyll",
   );
   const [processVisualGuidance, setProcessVisualGuidance] = useState(
-    "Animated diagram showing CO₂ + H₂O → glucose + O₂ with arrows"
+    "Animated diagram showing CO₂ + H₂O → glucose + O₂ with arrows",
   );
   const [conclusionVisualGuidance, setConclusionVisualGuidance] = useState(
-    "Real-world footage of child near tree, text overlay with key takeaway"
+    "Real-world footage of child near tree, text overlay with key takeaway",
   );
   const [diagramFile, setDiagramFile] = useState<File | null>(null);
-  const [sessionId, setSessionId] = useState<string>(() => {
-    // Generate UUID v4
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  });
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [numImages, setNumImages] = useState(2);
   const [maxPasses, setMaxPasses] = useState(5);
@@ -86,14 +82,17 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
   // Function to fetch final results from API
   const fetchResults = async (sessionIdToFetch: string) => {
     try {
-      console.log("[HardcodeCreate] Fetching final results for session:", sessionIdToFetch);
+      console.log(
+        "[HardcodeCreate] Fetching final results for session:",
+        sessionIdToFetch,
+      );
       const statusResponse = await fetch(
         `${API_URL}/api/story-images/${sessionIdToFetch}`,
         {
           headers: {
             "X-User-Email": userEmail,
           },
-        }
+        },
       );
 
       if (statusResponse.ok) {
@@ -110,7 +109,10 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
           pollIntervalRef.current = null;
         }
       } else {
-        console.error("[HardcodeCreate] Failed to fetch results:", statusResponse.status);
+        console.error(
+          "[HardcodeCreate] Failed to fetch results:",
+          statusResponse.status,
+        );
       }
     } catch (err) {
       console.error("[HardcodeCreate] Error fetching results:", err);
@@ -167,8 +169,14 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       }
 
       // Check if images and audio generation is complete
-      if (status === "images_audio_complete" || status === "images_and_audio_generated") {
-        console.log("[HardcodeCreate] Images and audio complete! Status:", status);
+      if (
+        status === "images_audio_complete" ||
+        status === "images_and_audio_generated"
+      ) {
+        console.log(
+          "[HardcodeCreate] Images and audio complete! Status:",
+          status,
+        );
         setIsLoading(false);
         setSuccess(true);
         setProgress(null);
@@ -286,14 +294,24 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       formData.append("concept_visual_guidance", conceptVisualGuidance);
       formData.append("process_visual_guidance", processVisualGuidance);
       formData.append("conclusion_visual_guidance", conclusionVisualGuidance);
-      formData.append("segments_md", new Blob([segmentsMdContent], { type: "text/markdown" }), "segments.md");
+      formData.append(
+        "segments_md",
+        new Blob([segmentsMdContent], { type: "text/markdown" }),
+        "segments.md",
+      );
       if (diagramFile) {
         formData.append("diagram", diagramFile);
-        console.log("[HardcodeCreate] Diagram file attached:", diagramFile.name);
+        console.log(
+          "[HardcodeCreate] Diagram file attached:",
+          diagramFile.name,
+        );
       }
       formData.append("num_images", numImages.toString());
       formData.append("max_passes", maxPasses.toString());
-      formData.append("max_verification_passes", maxVerificationPasses.toString());
+      formData.append(
+        "max_verification_passes",
+        maxVerificationPasses.toString(),
+      );
       formData.append("fast_mode", fastMode.toString());
 
       console.log("[HardcodeCreate] FormData prepared");
@@ -303,7 +321,9 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       // Upload files and trigger processing
       const uploadUrl = `${API_URL}/api/hardcode-upload`;
       console.log("[HardcodeCreate] POST request to:", uploadUrl);
-      console.log("[HardcodeCreate] Request headers:", { "X-User-Email": userEmail });
+      console.log("[HardcodeCreate] Request headers:", {
+        "X-User-Email": userEmail,
+      });
 
       const response = await fetch(uploadUrl, {
         method: "POST",
@@ -320,7 +340,9 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error("[HardcodeCreate] Upload failed with error:", errorData);
-        throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
+        throw new Error(
+          errorData.detail || `Upload failed: ${response.statusText}`,
+        );
       }
 
       const result = await response.json();
@@ -329,10 +351,16 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
       // Activate WebSocket connection for real-time updates
       setActiveSessionId(sessionId);
-      console.log("[HardcodeCreate] Activated WebSocket for session:", sessionId);
+      console.log(
+        "[HardcodeCreate] Activated WebSocket for session:",
+        sessionId,
+      );
       console.log("[HardcodeCreate] Waiting for WebSocket updates...");
     } catch (err) {
-      console.error("[HardcodeCreate] Fatal error during form submission:", err);
+      console.error(
+        "[HardcodeCreate] Fatal error during form submission:",
+        err,
+      );
       setIsLoading(false);
       setError(err instanceof Error ? err.message : "An error occurred");
       setProgress(null);
@@ -346,7 +374,10 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
     }
 
     try {
-      console.log("[HardcodeCreate] Starting video composition for session:", sessionId);
+      console.log(
+        "[HardcodeCreate] Starting video composition for session:",
+        sessionId,
+      );
       setIsLoading(true);
       setProgress("Starting video composition...");
       setError(null);
@@ -358,12 +389,15 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
           headers: {
             "X-User-Email": userEmail,
           },
-        }
+        },
       );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Video composition failed: ${response.statusText}`);
+        throw new Error(
+          errorData.detail ||
+            `Video composition failed: ${response.statusText}`,
+        );
       }
 
       const result = await response.json();
@@ -372,7 +406,11 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
     } catch (err) {
       console.error("[HardcodeCreate] Error starting video composition:", err);
       setIsLoading(false);
-      setError(err instanceof Error ? err.message : "Failed to start video composition");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to start video composition",
+      );
       setProgress(null);
     }
   };
@@ -384,13 +422,18 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
           <CardTitle>Session Information</CardTitle>
           <CardDescription className="space-y-2">
             <div>
-              Session ID: <code className="text-xs bg-muted px-2 py-1 rounded">{sessionId}</code>
+              Session ID:{" "}
+              <code className="bg-muted rounded px-2 py-1 text-xs">
+                {sessionId}
+              </code>
             </div>
             {activeSessionId && (
               <div className="flex items-center gap-2 text-xs">
-                <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <div
+                  className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-gray-400"}`}
+                />
                 <span>
-                  WebSocket: {isConnected ? 'Connected' : 'Disconnected'}
+                  WebSocket: {isConnected ? "Connected" : "Disconnected"}
                 </span>
               </div>
             )}
@@ -451,7 +494,9 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
           {/* Concept */}
           <div className="space-y-4">
-            <h3 className="font-semibold">Segment 2: Concept Introduction (10-25 seconds)</h3>
+            <h3 className="font-semibold">
+              Segment 2: Concept Introduction (10-25 seconds)
+            </h3>
             <div className="space-y-2">
               <Label htmlFor="concept-text">Narration Text</Label>
               <Textarea
@@ -476,7 +521,9 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
           {/* Process */}
           <div className="space-y-4">
-            <h3 className="font-semibold">Segment 3: Process Explanation (25-45 seconds)</h3>
+            <h3 className="font-semibold">
+              Segment 3: Process Explanation (25-45 seconds)
+            </h3>
             <div className="space-y-2">
               <Label htmlFor="process-text">Narration Text</Label>
               <Textarea
@@ -501,7 +548,9 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
           {/* Conclusion */}
           <div className="space-y-4">
-            <h3 className="font-semibold">Segment 4: Conclusion (45-60 seconds)</h3>
+            <h3 className="font-semibold">
+              Segment 4: Conclusion (45-60 seconds)
+            </h3>
             <div className="space-y-2">
               <Label htmlFor="conclusion-text">Narration Text</Label>
               <Textarea
@@ -544,7 +593,7 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
               onChange={handleFileChange}
             />
             {diagramFile && (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-muted-foreground text-sm">
                 Selected: {diagramFile.name}
               </p>
             )}
@@ -594,14 +643,18 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="max-verification-passes">Max Verification Passes</Label>
+                <Label htmlFor="max-verification-passes">
+                  Max Verification Passes
+                </Label>
                 <Input
                   id="max-verification-passes"
                   type="number"
                   min="1"
                   max="5"
                   value={maxVerificationPasses}
-                  onChange={(e) => setMaxVerificationPasses(parseInt(e.target.value) || 3)}
+                  onChange={(e) =>
+                    setMaxVerificationPasses(parseInt(e.target.value) || 3)
+                  }
                 />
               </div>
               <div className="flex items-center space-x-2">
@@ -632,8 +685,8 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
       {success && (
         <Card className="border-green-500">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-6">
-              <p className="text-green-600 font-medium">
+            <div className="mb-6 flex items-center justify-between">
+              <p className="font-medium text-green-600">
                 Success! Images and audio have been generated.
               </p>
               <Button
@@ -648,18 +701,21 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
             {/* Display generated assets from WebSocket */}
             {(generatedImages.length > 0 || generatedAudio.length > 0) && (
               <div className="mt-6 space-y-6">
-                <div className="flex items-center justify-between text-sm text-muted-foreground border-b pb-3">
+                <div className="text-muted-foreground flex items-center justify-between border-b pb-3 text-sm">
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Total Images:</span> {generatedImages.length}
+                    <span className="font-medium">Total Images:</span>{" "}
+                    {generatedImages.length}
                   </span>
                   {totalCost !== null && (
                     <span className="flex items-center gap-1">
-                      <span className="font-medium">Cost:</span> ${totalCost.toFixed(4)}
+                      <span className="font-medium">Cost:</span> $
+                      {totalCost.toFixed(4)}
                     </span>
                   )}
                   {elapsedTime !== null && (
                     <span className="flex items-center gap-1">
-                      <span className="font-medium">Time:</span> {elapsedTime.toFixed(1)}s
+                      <span className="font-medium">Time:</span>{" "}
+                      {elapsedTime.toFixed(1)}s
                     </span>
                   )}
                 </div>
@@ -672,9 +728,11 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {generatedAudio.map((audio: any, idx: number) => (
-                        <div key={idx} className="border rounded p-3">
-                          <Label className="text-sm font-medium mb-2 block capitalize">
-                            {audio.part} {audio.duration && `(${audio.duration.toFixed(1)}s)`}
+                        <div key={idx} className="rounded border p-3">
+                          <Label className="mb-2 block text-sm font-medium capitalize">
+                            {audio.part}{" "}
+                            {audio.duration &&
+                              `(${audio.duration.toFixed(1)}s)`}
                           </Label>
                           <audio controls className="w-full">
                             <source src={audio.url} type="audio/mpeg" />
@@ -690,18 +748,20 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
                 {generatedImages.length > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">Generated Images</CardTitle>
+                      <CardTitle className="text-lg">
+                        Generated Images
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                         {generatedImages.map((image: any, idx: number) => (
                           <div key={idx} className="relative">
                             <img
                               src={image.url}
                               alt={`${image.segment_title}`}
-                              className="w-full h-auto rounded border"
+                              className="h-auto w-full rounded border"
                             />
-                            <span className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
+                            <span className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
                               {image.segment_title}
                             </span>
                           </div>
@@ -715,63 +775,73 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
             {results && (
               <div className="mt-6 space-y-6">
-                <div className="flex items-center justify-between text-sm text-muted-foreground border-b pb-3">
+                <div className="text-muted-foreground flex items-center justify-between border-b pb-3 text-sm">
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Total Images:</span> {results.total_images_generated}
+                    <span className="font-medium">Total Images:</span>{" "}
+                    {results.total_images_generated}
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Cost:</span> ${results.total_cost_usd?.toFixed(4)}
+                    <span className="font-medium">Cost:</span> $
+                    {results.total_cost_usd?.toFixed(4)}
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Time:</span> {results.total_time_seconds?.toFixed(1)}s
+                    <span className="font-medium">Time:</span>{" "}
+                    {results.total_time_seconds?.toFixed(1)}s
                   </span>
                 </div>
 
                 {/* Display segments with images and audio */}
-                {results.segments && results.segments.map((segment: any) => (
-                  <Card key={segment.segment_number}>
-                    <CardHeader>
-                      <CardTitle className="text-lg">
-                        Segment {segment.segment_number}: {segment.segment_title}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {/* Audio player if available */}
-                      {segment.audio_url && (
-                        <div>
-                          <Label className="text-sm font-medium mb-2 block">Audio</Label>
-                          <audio controls className="w-full">
-                            <source src={segment.audio_url} type="audio/mpeg" />
-                            Your browser does not support the audio element.
-                          </audio>
-                        </div>
-                      )}
-
-                      {/* Images */}
-                      {segment.images && segment.images.length > 0 && (
-                        <div>
-                          <Label className="text-sm font-medium mb-2 block">
-                            Images ({segment.images.length})
-                          </Label>
-                          <div className="grid grid-cols-2 gap-4">
-                            {segment.images.map((image: any) => (
-                              <div key={image.s3_key} className="relative">
-                                <img
-                                  src={image.presigned_url}
-                                  alt={`Image ${image.image_number}`}
-                                  className="w-full h-auto rounded border"
-                                />
-                                <span className="absolute top-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
-                                  #{image.image_number}
-                                </span>
-                              </div>
-                            ))}
+                {results.segments &&
+                  results.segments.map((segment: any) => (
+                    <Card key={segment.segment_number}>
+                      <CardHeader>
+                        <CardTitle className="text-lg">
+                          Segment {segment.segment_number}:{" "}
+                          {segment.segment_title}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Audio player if available */}
+                        {segment.audio_url && (
+                          <div>
+                            <Label className="mb-2 block text-sm font-medium">
+                              Audio
+                            </Label>
+                            <audio controls className="w-full">
+                              <source
+                                src={segment.audio_url}
+                                type="audio/mpeg"
+                              />
+                              Your browser does not support the audio element.
+                            </audio>
                           </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                        )}
+
+                        {/* Images */}
+                        {segment.images && segment.images.length > 0 && (
+                          <div>
+                            <Label className="mb-2 block text-sm font-medium">
+                              Images ({segment.images.length})
+                            </Label>
+                            <div className="grid grid-cols-2 gap-4">
+                              {segment.images.map((image: any) => (
+                                <div key={image.s3_key} className="relative">
+                                  <img
+                                    src={image.presigned_url}
+                                    alt={`Image ${image.image_number}`}
+                                    className="h-auto w-full rounded border"
+                                  />
+                                  <span className="absolute top-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
+                                    #{image.image_number}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
               </div>
             )}
           </CardContent>
@@ -789,18 +859,25 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
 
               {/* Show generated assets WHILE processing */}
               {(generatedImages.length > 0 || generatedAudio.length > 0) && (
-                <div className="mt-4 pt-4 border-t space-y-4">
+                <div className="mt-4 space-y-4 border-t pt-4">
                   {/* Display audio files as they become available */}
                   {generatedAudio.length > 0 && (
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Generated Audio ({generatedAudio.length})</Label>
+                      <Label className="text-sm font-medium">
+                        Generated Audio ({generatedAudio.length})
+                      </Label>
                       <div className="space-y-2">
                         {generatedAudio.map((audio: any, idx: number) => (
-                          <div key={`${audio.part}-${idx}`} className="border rounded p-2 bg-white">
-                            <Label className="text-xs font-medium capitalize block mb-1">
-                              {audio.part} {audio.duration && `(${audio.duration.toFixed(1)}s)`}
+                          <div
+                            key={`${audio.part}-${idx}`}
+                            className="rounded border bg-white p-2"
+                          >
+                            <Label className="mb-1 block text-xs font-medium capitalize">
+                              {audio.part}{" "}
+                              {audio.duration &&
+                                `(${audio.duration.toFixed(1)}s)`}
                             </Label>
-                            <audio controls className="w-full h-8">
+                            <audio controls className="h-8 w-full">
                               <source src={audio.url} type="audio/mpeg" />
                             </audio>
                           </div>
@@ -812,16 +889,18 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
                   {/* Display images as they become available */}
                   {generatedImages.length > 0 && (
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Generated Images ({generatedImages.length})</Label>
-                      <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                      <Label className="text-sm font-medium">
+                        Generated Images ({generatedImages.length})
+                      </Label>
+                      <div className="grid grid-cols-3 gap-2 md:grid-cols-4">
                         {generatedImages.map((image: any, idx: number) => (
                           <div key={`${image.url}-${idx}`} className="relative">
                             <img
                               src={image.url}
                               alt={image.segment_title}
-                              className="w-full h-auto rounded border bg-white"
+                              className="h-auto w-full rounded border bg-white"
                             />
-                            <span className="absolute bottom-1 left-1 bg-black/70 text-white px-1 py-0.5 rounded text-xs">
+                            <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 py-0.5 text-xs text-white">
                               {image.segment_title}
                             </span>
                           </div>
@@ -835,24 +914,52 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
               {/* Cumulative status items */}
               {statusItems && statusItems.length > 0 && (
                 <div className="space-y-2 border-t pt-3">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">Progress Details:</p>
-                  <div className="max-h-48 overflow-y-auto space-y-1">
+                  <p className="text-muted-foreground mb-2 text-xs font-medium">
+                    Progress Details:
+                  </p>
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
                     {statusItems.map((item: any) => (
-                      <div key={item.id} className="flex items-center gap-2 text-xs">
+                      <div
+                        key={item.id}
+                        className="flex items-center gap-2 text-xs"
+                      >
                         {item.status === "completed" && (
-                          <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          <svg
+                            className="h-4 w-4 flex-shrink-0 text-green-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                         )}
                         {item.status === "processing" && (
-                          <Loader2 className="h-4 w-4 text-blue-600 animate-spin flex-shrink-0" />
+                          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-600" />
                         )}
                         {item.status === "pending" && (
-                          <svg className="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg
+                            className="h-4 w-4 flex-shrink-0 text-gray-400"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
                             <circle cx="12" cy="12" r="10" strokeWidth={2} />
                           </svg>
                         )}
-                        <span className={item.status === "completed" ? "text-green-700" : item.status === "processing" ? "text-blue-700 font-medium" : "text-gray-500"}>
+                        <span
+                          className={
+                            item.status === "completed"
+                              ? "text-green-700"
+                              : item.status === "processing"
+                                ? "font-medium text-blue-700"
+                                : "text-gray-500"
+                          }
+                        >
                           {item.name}
                         </span>
                       </div>
@@ -862,15 +969,17 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
               )}
 
               {/* Live stats */}
-              <div className="flex items-center justify-between text-sm text-muted-foreground border-t pt-3">
+              <div className="text-muted-foreground flex items-center justify-between border-t pt-3 text-sm">
                 {elapsedTime !== null && (
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Time:</span> {elapsedTime.toFixed(1)}s
+                    <span className="font-medium">Time:</span>{" "}
+                    {elapsedTime.toFixed(1)}s
                   </span>
                 )}
                 {totalCost !== null && (
                   <span className="flex items-center gap-1">
-                    <span className="font-medium">Cost:</span> ${totalCost.toFixed(4)}
+                    <span className="font-medium">Cost:</span> $
+                    {totalCost.toFixed(4)}
                   </span>
                 )}
               </div>
@@ -892,4 +1001,3 @@ export function HardcodeCreateForm({ userEmail }: HardcodeCreateFormProps) {
     </form>
   );
 }
-
