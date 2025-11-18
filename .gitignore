@@ -106,3 +106,8 @@ infra/aws/.rendered-task-definition.json
 *.key
 *secrets*.json
 *credentials*.json
+backend/pipeline_orchestrator.pem
+deploy_ec2.ps1
+deploy_simple.ps1
+quick_deploy.ps1
+openapi-temp.json
