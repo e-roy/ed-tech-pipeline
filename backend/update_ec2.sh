@@ -55,7 +55,7 @@ cd /opt/pipeline || { echo "Repository not found"; exit 1; }
 # Pull latest changes
 echo "Pulling latest changes from GitHub..."
 sudo git fetch origin
-sudo git reset --hard origin/cisco_stuff
+sudo git reset --hard origin/master
 
 # Navigate to backend
 cd backend
