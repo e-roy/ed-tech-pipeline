@@ -64,6 +64,7 @@ export interface ProgressUpdate {
   timestamp: string;
   data?: unknown;
   error?: string;
+  video_url?: string;
 }
 
 export interface TextOverlay {
