@@ -1,145 +1,154 @@
 """
 Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import List
 from app.config import get_settings
-import os
-
-# Import routes
-from app.routes import generation, sessions, storage
 
 settings = get_settings()
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Gauntlet Pipeline Orchestrator",
-    description="Backend orchestrator for AI video generation pipeline. "
-                "Authentication is handled by frontend (NextAuth) via request headers.",
+    description="Backend orchestrator for AI video generation pipeline.",
     version="1.0.0",
     debug=settings.DEBUG
 )
 
 # Configure CORS for Next.js frontend
-# Restrict to known frontend domains for security
-# Allow "null" origin for local file testing (test_ui.html)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for local file testing
-    allow_credentials=False,  # Set to False when using allow_origins=["*"]
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],  # Allow all headers
+    allow_headers=["*"],
     expose_headers=["*"],
 )
 
-# Get shared WebSocket manager from generation module
-websocket_manager = generation.get_websocket_manager()
 
-# Include routers (auth removed - using header-based auth)
-app.include_router(generation.router, prefix="/api", tags=["Generation"])
-app.include_router(sessions.router, prefix="/api/sessions", tags=["Sessions"])
-app.include_router(storage.router, prefix="/api/storage", tags=["Storage"])
+# Request/Response models
+class ProcessRequest(BaseModel):
+    sessionId: str
+    scriptId: str
+    diagramIds: List[str]
+    templateIds: List[str]
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Handle HTTPException with CORS headers."""
-    from fastapi.responses import JSONResponse
-    from fastapi import HTTPException as FastAPIHTTPException
-    
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        }
+class ProcessResponse(BaseModel):
+    success: bool
+    message: str
+    sessionId: str
+    videoId: str
+    videoUrl: str
+
+
+# Agent 2: Storyboard Generator
+async def agent_2_generate_storyboard(
+    session_id: str,
+    script_id: str,
+    diagram_ids: List[str],
+    template_ids: List[str]
+) -> str:
+    """
+    Agent 2: Generate storyboard from script, diagrams, and templates.
+
+    Returns:
+        storyboardId: ID of the generated storyboard
+    """
+    # TODO: Implement storyboard generation logic
+    storyboard_id = f"storyboard-{session_id}-stub"
+    return storyboard_id
+
+
+# Agent 3: Audio Generator
+async def agent_3_generate_audio(
+    session_id: str,
+    storyboard_id: str
+) -> dict:
+    """
+    Agent 3: Generate narration and music from storyboard.
+
+    Returns:
+        dict with narrationIds and musicId
+    """
+    # TODO: Implement audio generation logic
+    return {
+        "narrationIds": [f"narration-{session_id}-1-stub", f"narration-{session_id}-2-stub"],
+        "musicId": f"music-{session_id}-stub"
+    }
+
+
+# Agent 4: Video Composer
+async def agent_4_compose_video(
+    session_id: str,
+    storyboard_id: str,
+    narration_ids: List[str],
+    music_id: str
+) -> dict:
+    """
+    Agent 4: Compose final video and store in S3 + database.
+
+    Returns:
+        dict with videoId and videoUrl
+    """
+    # TODO: Implement video composition logic
+    # TODO: Upload to S3
+    # TODO: Store reference in database
+    video_id = f"video-{session_id}-stub"
+    video_url = f"https://s3.amazonaws.com/bucket/{video_id}.mp4"
+    return {
+        "videoId": video_id,
+        "videoUrl": video_url
+    }
+
+
+@app.post("/api/process", response_model=ProcessResponse)
+async def process(request: ProcessRequest):
+    """
+    Process endpoint that orchestrates the video generation pipeline.
+
+    Flow:
+    1. Agent 2: Generate storyboard from inputs
+    2. Agent 3: Generate narration and music from storyboard
+    3. Agent 4: Compose video and store in S3/database
+    """
+    # Agent 2: Generate storyboard
+    storyboard_id = await agent_2_generate_storyboard(
+        session_id=request.sessionId,
+        script_id=request.scriptId,
+        diagram_ids=request.diagramIds,
+        template_ids=request.templateIds
     )
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler to catch all unhandled exceptions."""
-    import logging
-    import traceback
-    from fastapi.responses import JSONResponse
-    from fastapi import HTTPException
-    
-    # Don't handle HTTPException here - it's handled above
-    if isinstance(exc, HTTPException):
-        raise exc
-    
-    logger = logging.getLogger(__name__)
-    logger.error(f"Unhandled exception on {request.method} {request.url}")
-    logger.error(f"Exception: {exc}")
-    logger.error(f"Traceback: {''.join(traceback.format_tb(exc.__traceback__))}")
-    
-    # Return JSON response with CORS headers
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": f"Internal server error: {str(exc)}",
-            "type": type(exc).__name__
-        },
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        }
+    # Agent 3: Generate audio
+    audio_result = await agent_3_generate_audio(
+        session_id=request.sessionId,
+        storyboard_id=storyboard_id
     )
+
+    # Agent 4: Compose video
+    video_result = await agent_4_compose_video(
+        session_id=request.sessionId,
+        storyboard_id=storyboard_id,
+        narration_ids=audio_result["narrationIds"],
+        music_id=audio_result["musicId"]
+    )
+
+    return ProcessResponse(
+        success=True,
+        message="Video generation completed",
+        sessionId=request.sessionId,
+        videoId=video_result["videoId"],
+        videoUrl=video_result["videoUrl"]
+    )
+
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "Gauntlet Pipeline Orchestrator",
-        "version": "1.0.0"
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Detailed health check."""
-    return {
-        "status": "healthy",
-        "database": "connected",  # TODO: Add actual DB check
-        "services": {
-            "orchestrator": "ready",
-            "websocket": "ready"
-        }
-    }
-
-
-@app.get("/test_ui.html")
-async def serve_test_ui():
-    """Serve the test UI HTML file."""
-    test_ui_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_ui.html")
-    if os.path.exists(test_ui_path):
-        return FileResponse(test_ui_path)
-    raise HTTPException(status_code=404, detail="test_ui.html not found")
-
-
-@app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    """
-    WebSocket endpoint for real-time progress updates.
-
-    Args:
-        websocket: WebSocket connection
-        session_id: Session ID to track
-    """
-    await websocket_manager.connect(websocket, session_id)
-    try:
-        while True:
-            # Keep connection alive and listen for messages
-            data = await websocket.receive_text()
-            # Echo back for now (can be extended for client commands)
-            await websocket.send_text(f"Message received: {data}")
-    except WebSocketDisconnect:
-        await websocket_manager.disconnect(websocket, session_id)
+    return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
 
 
 if __name__ == "__main__":
