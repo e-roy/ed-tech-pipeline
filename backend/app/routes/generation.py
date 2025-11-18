@@ -903,47 +903,6 @@ async def hardcode_upload(
         output_s3_prefix = storage_service.get_session_prefix(current_user.id, session_id, "images")
         segments_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "segments.md")
         
-        # Read segments.md content
-        try:
-            segments_md_content = await segments_md.read()
-            logger.info(f"Read {len(segments_md_content)} bytes from segments_md file")
-        except Exception as read_error:
-            logger.exception(f"Error reading segments_md file: {read_error}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to read segments.md file: {str(read_error)}"
-            )
-        
-        # Upload segments.md to S3
-        try:
-            storage_service.upload_file_direct(
-                segments_md_content,
-                segments_s3_key,
-                content_type="text/markdown"
-            )
-            logger.info(f"Uploaded segments.md to {segments_s3_key}")
-        except Exception as upload_error:
-            logger.exception(f"Error uploading segments.md to S3: {upload_error}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to upload segments.md to S3: {str(upload_error)}"
-            )
-        
-        # Upload diagram if provided
-        if diagram:
-            try:
-                diagram_content = await diagram.read()
-                diagram_s3_key = storage_service.get_session_path(current_user.id, session_id, "images", "diagram.png")
-                storage_service.upload_file_direct(
-                    diagram_content,
-                    diagram_s3_key,
-                    content_type="image/png"
-                )
-                logger.info(f"Uploaded diagram to {diagram_s3_key}")
-            except Exception as diagram_error:
-                logger.warning(f"Failed to upload diagram: {diagram_error}, continuing without it")
-                # Don't fail the whole request if diagram upload fails
-        
         # Validate and limit num_images to maximum of 3
         if num_images > 3:
             logger.warning(f"num_images ({num_images}) exceeds maximum of 3, limiting to 3")
@@ -962,9 +921,61 @@ async def hardcode_upload(
             "fast_mode": fast_mode
         }
         
-        # Start async processing (images and audio in parallel)
+        # Save user_id and session_id for background task (avoid closure issues)
+        user_id = current_user.id
+        
+        # Read file contents into memory IMMEDIATELY (fast operation, ~1-5ms)
+        # Must happen before background task since UploadFile objects become invalid after request ends
+        try:
+            segments_md_content = await segments_md.read()
+            logger.info(f"Read {len(segments_md_content)} bytes from segments_md file")
+        except Exception as read_error:
+            logger.exception(f"Error reading segments_md file: {read_error}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to read segments.md file: {str(read_error)}"
+            )
+        
+        # Read diagram if provided
+        diagram_content = None
+        if diagram:
+            try:
+                diagram_content = await diagram.read()
+                logger.info(f"Read {len(diagram_content)} bytes from diagram file")
+            except Exception as diagram_error:
+                logger.warning(f"Failed to read diagram: {diagram_error}, continuing without it")
+                diagram_content = None
+        
+        # Start async processing (upload to S3, then process images and audio in parallel)
         async def process_async():
             try:
+                
+                # Upload segments.md to S3
+                try:
+                    storage_service.upload_file_direct(
+                        segments_md_content,
+                        segments_s3_key,
+                        content_type="text/markdown"
+                    )
+                    logger.info(f"[Background] Uploaded segments.md to {segments_s3_key}")
+                except Exception as upload_error:
+                    logger.error(f"[Background] Failed to upload segments.md to S3: {upload_error}")
+                    raise
+                
+                # Upload diagram if provided
+                if diagram_content:
+                    try:
+                        diagram_s3_key = storage_service.get_session_path(user_id, session_id, "images", "diagram.png")
+                        storage_service.upload_file_direct(
+                            diagram_content,
+                            diagram_s3_key,
+                            content_type="image/png"
+                        )
+                        logger.info(f"[Background] Uploaded diagram to {diagram_s3_key}")
+                    except Exception as diagram_error:
+                        logger.warning(f"[Background] Failed to upload diagram: {diagram_error}, continuing without it")
+                
+                # Now process the story
                 from app.database import SessionLocal
                 background_db = SessionLocal()
                 try:
