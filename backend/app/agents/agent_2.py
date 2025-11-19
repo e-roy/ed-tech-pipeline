@@ -39,8 +39,8 @@ async def agent_2_process(
             "status": "starting"
         })
         
-        # Wait 2 seconds
-        await asyncio.sleep(2)
+        # Wait 5 seconds
+        await asyncio.sleep(5)
         
         # TODO: Add initialization/preparation logic here
         
@@ -52,8 +52,8 @@ async def agent_2_process(
             "status": "processing"
         })
         
-        # Wait 2 seconds
-        await asyncio.sleep(2)
+        # Wait 5 seconds
+        await asyncio.sleep(5)
         
         # TODO: Add main agent work here (e.g., image generation, processing)
         
