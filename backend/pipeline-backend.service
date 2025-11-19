@@ -4,7 +4,7 @@ After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=ubuntu
+User=ec2-user
 WorkingDirectory=/opt/pipeline/backend
 Environment="PATH=/opt/pipeline/backend/venv/bin"
 EnvironmentFile=/opt/pipeline/backend/.env
