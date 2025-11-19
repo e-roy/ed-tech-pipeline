@@ -9,12 +9,23 @@ from app.config import get_settings
 settings = get_settings()
 
 # Create SQLAlchemy engine
+# For Neon/SSL connections, configure connect_args to handle SSL without certificate files
+connect_args = {}
+if "neon" in settings.DATABASE_URL.lower() or "sslmode=require" in settings.DATABASE_URL.lower():
+    # For Neon databases, use SSL but don't require certificate files
+    # psycopg will use system defaults or skip certificate verification
+    connect_args = {
+        "sslmode": "require",
+        # Don't specify certificate paths - let psycopg use defaults or skip
+    }
+
 engine = create_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,
-    max_overflow=20
+    max_overflow=20,
+    connect_args=connect_args if connect_args else {}
 )
 
 # Create SessionLocal class for database sessions
