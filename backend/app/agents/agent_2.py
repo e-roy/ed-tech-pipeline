@@ -105,9 +105,29 @@ async def agent_2_process(
         
         # Wait 2 seconds
         await asyncio.sleep(2)
-        
-        # TODO: Add main agent work here (e.g., image generation, processing)
-        
+
+        # TODO: Add main agent work here (e.g., storyboard generation)
+        # For now, create a placeholder script for Agent4 to process
+        # In production, this would be generated based on the input parameters
+        script = {
+            "hook": {
+                "text": "Have you ever wondered how technology is changing the way we work?",
+                "duration": "10"
+            },
+            "concept": {
+                "text": "Automation and AI are revolutionizing industries by streamlining processes and enhancing productivity.",
+                "duration": "15"
+            },
+            "process": {
+                "text": "From data analysis to customer service, these technologies learn from patterns and make intelligent decisions. They help businesses save time, reduce errors, and focus on what matters most.",
+                "duration": "22"
+            },
+            "conclusion": {
+                "text": "Embrace the future of work. Start exploring how AI can transform your workflow today!",
+                "duration": "10"
+            }
+        }
+
         # Report finished status
         status_data = {
             "agentnumber": "Agent2",
@@ -121,10 +141,28 @@ async def agent_2_process(
         await create_status_json("2", "finished", status_data)
         
         # TODO: Add cleanup/finalization logic here
-        
-        # Trigger Agent4 with userID, sessionID, and supersessionid
+
+        # Compile Agent2 data to pass through the pipeline
+        agent2_data = {
+            "template_id": template_id,
+            "chosen_diagram_id": chosen_diagram_id,
+            "script_id": script_id,
+            "supersessionid": supersessionid
+        }
+
+        # Trigger Agent4 with userID, sessionID, supersessionid, script, and agent2 data
         from app.agents.agent_4 import agent_4_process
-        await agent_4_process(websocket_manager, user_id, session_id, supersessionid, storage_service)
+        await agent_4_process(
+            websocket_manager=websocket_manager,
+            user_id=user_id,
+            session_id=session_id,
+            supersessionid=supersessionid,
+            script=script,
+            voice="alloy",
+            audio_option="tts",
+            storage_service=storage_service,
+            agent2_data=agent2_data
+        )
         
     except Exception as e:
         # Report error status and stop pipeline

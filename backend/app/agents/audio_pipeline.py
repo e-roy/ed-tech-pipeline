@@ -16,6 +16,7 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 from .base import AgentInput, AgentOutput
 from .music_agent import MusicSelectionAgent, MusicProcessingService
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,8 @@ class AudioPipelineAgent:
             storage_service: Storage service for music processing
             websocket_manager: Optional WebSocketManager for progress updates
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        settings = get_settings()
+        self.api_key = api_key or settings.OPENAI_API_KEY
         self.db = db
         self.storage_service = storage_service
         self.websocket_manager = websocket_manager

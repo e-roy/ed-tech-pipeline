@@ -579,6 +579,125 @@ async def test_video_agent(request: AgentTestRequest) -> AgentTestResponse:
 
 
 # =============================================================================
+# Local Audio File Serving Endpoint
+# =============================================================================
+
+@app.get("/api/audio/local")
+async def serve_local_audio(path: str):
+    """
+    Serve a local audio file from the temp directory.
+
+    This endpoint is used by the test UI to play generated audio files
+    that haven't been uploaded to S3 yet.
+    """
+    import os
+    import tempfile
+
+    # Security check: only allow files from temp directory
+    temp_dir = tempfile.gettempdir()
+
+    # Normalize the path
+    normalized_path = os.path.normpath(path)
+
+    # Ensure the file is in the temp directory
+    if not normalized_path.startswith(temp_dir):
+        raise HTTPException(status_code=403, detail="Access denied: file must be in temp directory")
+
+    # Check if file exists
+    if not os.path.exists(normalized_path):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    # Return the file
+    return FileResponse(
+        normalized_path,
+        media_type="audio/mpeg",
+        filename=os.path.basename(normalized_path)
+    )
+
+
+# =============================================================================
+# Agent 4 Direct Test Endpoint (Audio Pipeline)
+# =============================================================================
+
+class Agent4TestRequest(BaseModel):
+    """Request model for testing Agent 4 (Audio Pipeline) directly."""
+    session_id: str
+    script: Dict[str, Any]
+    voice: str = "alloy"
+    audio_option: str = "tts"
+    agent2_data: Optional[Dict[str, Any]] = None  # Optional data from Agent2
+
+
+@app.post("/api/agent4/test", response_model=AgentTestResponse)
+async def test_agent4_audio(request: Agent4TestRequest) -> AgentTestResponse:
+    """
+    Test Agent 4 (Audio Pipeline) directly with custom script input.
+
+    This endpoint allows direct testing of the audio generation functionality
+    without going through the full pipeline.
+    """
+    start_time = time.time()
+
+    try:
+        # Import and instantiate the AudioPipelineAgent
+        from app.agents.audio_pipeline import AudioPipelineAgent
+        from app.agents.base import AgentInput
+
+        # Create agent instance
+        audio_agent = AudioPipelineAgent(
+            db=None,  # No DB for direct testing
+            storage_service=storage_service,
+            websocket_manager=websocket_manager
+        )
+
+        # Create agent input
+        agent_input = AgentInput(
+            session_id=request.session_id,
+            data={
+                "script": request.script,
+                "voice": request.voice,
+                "audio_option": request.audio_option
+            }
+        )
+
+        # Process audio generation
+        result = await audio_agent.process(agent_input)
+
+        # Build pipeline_data structure like agent_4 does for agent_5
+        pipeline_data = {
+            "agent2_data": request.agent2_data or {
+                "template_id": "test-template",
+                "chosen_diagram_id": "test-diagram",
+                "script_id": "test-script",
+                "supersessionid": f"{request.session_id}_test"
+            },
+            "script": request.script,
+            "voice": request.voice,
+            "audio_option": request.audio_option,
+            "audio_data": result.data
+        }
+
+        return AgentTestResponse(
+            success=result.success,
+            data=pipeline_data,
+            cost=result.cost,
+            duration=result.duration,
+            error=result.error
+        )
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Agent 4 test failed: {e}\n{traceback.format_exc()}")
+        return AgentTestResponse(
+            success=False,
+            data={},
+            cost=0.0,
+            duration=time.time() - start_time,
+            error=str(e)
+        )
+
+
+# =============================================================================
 # Monitor Endpoints - Pipeline visibility into S3 bucket contents
 # =============================================================================
 
