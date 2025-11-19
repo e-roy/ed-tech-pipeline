@@ -747,22 +747,34 @@
                     
                     if (!videoSessionResponse.ok) {
                         let errorMessage = `Failed to fetch video session: ${videoSessionResponse.status}`;
+                        // Check content type before trying to parse
+                        const contentType = videoSessionResponse.headers.get('content-type') || '';
                         try {
-                            const error = await videoSessionResponse.json();
-                            // Handle both string and object error details
-                            if (typeof error.detail === 'string') {
-                                errorMessage = error.detail;
-                            } else if (error.detail && error.detail.message) {
-                                errorMessage = error.detail.message;
-                            } else if (error.detail && error.detail.error) {
-                                errorMessage = `${error.detail.error}: ${error.detail.message || 'Unknown error'}`;
+                            if (contentType.includes('application/json')) {
+                                const error = await videoSessionResponse.json();
+                                // Handle both string and object error details
+                                if (typeof error.detail === 'string') {
+                                    errorMessage = error.detail;
+                                } else if (error.detail && typeof error.detail === 'object') {
+                                    if (error.detail.message) {
+                                        errorMessage = error.detail.message;
+                                    } else if (error.detail.error) {
+                                        errorMessage = `${error.detail.error}: ${error.detail.message || 'Unknown error'}`;
+                                    } else {
+                                        errorMessage = JSON.stringify(error.detail);
+                                    }
+                                } else {
+                                    errorMessage = JSON.stringify(error);
+                                }
                             } else {
-                                errorMessage = JSON.stringify(error);
+                                // Not JSON, read as text
+                                const text = await videoSessionResponse.text();
+                                errorMessage = text || errorMessage;
                             }
                         } catch (e) {
-                            // If response is not JSON, get text
-                            const text = await videoSessionResponse.text();
-                            errorMessage = text || errorMessage;
+                            // If all parsing fails, use status text
+                            errorMessage = `${videoSessionResponse.status} ${videoSessionResponse.statusText}`;
+                            console.error('Error parsing error response:', e);
                         }
                         throw new Error(errorMessage);
                     }

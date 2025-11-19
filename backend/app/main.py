@@ -324,9 +324,11 @@ async def get_video_session(session_id: str, db: Session = Depends(get_db)):
         # Don't expose full error details in production - sanitize
         if "Permission denied" in error_detail or "certificate" in error_detail.lower():
             error_detail = "Database connection error. Please check server configuration."
-        raise HTTPException(
+        # Use JSONResponse to ensure proper JSON format
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Database error", "message": error_detail}
+            content={"detail": {"error": "Database error", "message": error_detail}}
         )
 
 
