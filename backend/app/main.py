@@ -3,6 +3,8 @@ Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
 import time
 import asyncio
+import json
+import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -12,6 +14,8 @@ from pathlib import Path
 from app.config import get_settings
 from app.services.storage import StorageService
 from app.services.websocket_manager import WebSocketManager
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -220,7 +224,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     Clients connect to this endpoint to receive status updates from agents.
     Messages are filtered by session_id.
     """
-    await websocket_manager.connect(websocket, session_id)
+    import secrets
+    connection_id = f"ws_{secrets.token_urlsafe(16)}"
+    
+    await websocket_manager.connect(websocket, session_id, connection_id)
+    
+    # Send connection confirmation to client
+    try:
+        await websocket.send_text(json.dumps({
+            "type": "connection_ready",
+            "sessionID": session_id,
+            "status": "connected"
+        }))
+    except Exception as e:
+        logger.error(f"Failed to send connection ready message: {e}")
+    
     try:
         while True:
             # Keep connection alive - wait for any message (text or ping/pong)
@@ -228,6 +246,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             try:
                 data = await websocket.receive_text()
                 # Client can send messages if needed, but we primarily use this for receiving
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        # Respond to ping with pong
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
             except WebSocketDisconnect:
                 break
             except Exception:
@@ -239,7 +264,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        await websocket_manager.disconnect(websocket, session_id)
+        await websocket_manager.disconnect(websocket, session_id, connection_id)
 
 
 # =============================================================================
@@ -291,6 +316,21 @@ async def start_processing(
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"Starting Agent2 background task for session {request.sessionID}")
+        
+        # Wait for WebSocket connection to be established (with timeout)
+        # This ensures the connection is ready before we start sending status updates
+        logger.info(f"Waiting for WebSocket connection for session {request.sessionID}...")
+        connection_ready = await websocket_manager.wait_for_connection(
+            request.sessionID,
+            max_wait=10.0,  # Wait up to 10 seconds
+            check_interval=0.2  # Check every 200ms
+        )
+        
+        if connection_ready:
+            logger.info(f"WebSocket connection confirmed for session {request.sessionID}, starting Agent2")
+        else:
+            logger.warning(f"No WebSocket connection found for session {request.sessionID} after waiting, proceeding anyway")
+        
         try:
             await agent_2_process(
                 user_id=request.userID,

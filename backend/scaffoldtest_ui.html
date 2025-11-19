@@ -326,65 +326,109 @@
             }
         }
 
-        // Connect to WebSocket
+        // Connect to WebSocket and return a promise that resolves when ready
         function connectWebSocket(sessionId) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                websocket.close();
-            }
-
-            const wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
-            const wsPath = `${wsUrl}/ws/${sessionId}`;
-            
-            updateConnectionStatus('connecting', 'Connecting...');
-            
-            websocket = new WebSocket(wsPath);
-
-            websocket.onopen = () => {
-                console.log('WebSocket connected');
-                reconnectAttempts = 0;
-                updateConnectionStatus('connected', 'WebSocket: Connected');
-            };
-
-            websocket.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-                    console.log('WebSocket message:', message);
-
-                    // Check if message matches our expected format
-                    if (message.agentnumber && message.userID && message.sessionID && message.status) {
-                        // Verify it matches current session
-                        if (message.sessionID === currentSessionId) {
-                            updateAgentStatus(
-                                message.agentnumber,
-                                message.status,
-                                message.error,
-                                message.reason
-                            );
-                        }
-                    }
-                } catch (e) {
-                    console.error('Error parsing WebSocket message:', e);
+            return new Promise((resolve, reject) => {
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.close();
                 }
-            };
 
-            websocket.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                updateConnectionStatus('disconnected', 'WebSocket: Error');
-            };
-
-            websocket.onclose = () => {
-                console.log('WebSocket closed');
-                updateConnectionStatus('disconnected', 'WebSocket: Disconnected');
+                const wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+                const wsPath = `${wsUrl}/ws/${sessionId}`;
                 
-                // Attempt to reconnect if we have an active session
-                if (currentSessionId && reconnectAttempts < maxReconnectAttempts) {
-                    reconnectAttempts++;
-                    console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
-                    setTimeout(() => {
-                        connectWebSocket(currentSessionId);
-                    }, reconnectDelay);
-                }
-            };
+                updateConnectionStatus('connecting', 'Connecting...');
+                
+                websocket = new WebSocket(wsPath);
+                let connectionReady = false;
+                const timeout = setTimeout(() => {
+                    if (!connectionReady) {
+                        reject(new Error('WebSocket connection timeout'));
+                    }
+                }, 10000); // 10 second timeout
+
+                websocket.onopen = () => {
+                    console.log('WebSocket opened, waiting for ready confirmation...');
+                    reconnectAttempts = 0;
+                    updateConnectionStatus('connecting', 'WebSocket: Waiting for confirmation...');
+                };
+
+                websocket.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        console.log('WebSocket message received:', message);
+
+                        // Handle connection ready confirmation
+                        if (message.type === 'connection_ready' && message.status === 'connected') {
+                            clearTimeout(timeout);
+                            connectionReady = true;
+                            console.log('WebSocket connection confirmed ready');
+                            updateConnectionStatus('connected', 'WebSocket: Connected');
+                            resolve();
+                            return;
+                        }
+
+                        // Handle pong responses
+                        if (message.type === 'pong') {
+                            return;
+                        }
+
+                        // Handle agent status updates
+                        if (message.agentnumber && message.sessionID && message.status) {
+                            // Verify it matches current session
+                            if (message.sessionID === currentSessionId) {
+                                console.log(`Updating status for ${message.agentnumber}: ${message.status}`);
+                                updateAgentStatus(
+                                    message.agentnumber,
+                                    message.status,
+                                    message.error,
+                                    message.reason
+                                );
+                                
+                                // If Agent5 finished and has videoUrl, display it
+                                if (message.agentnumber === 'Agent5' && message.status === 'finished' && message.videoUrl) {
+                                    console.log('Video URL received:', message.videoUrl);
+                                    // You could add UI to display the video URL here
+                                }
+                            } else {
+                                console.warn(`Message sessionID (${message.sessionID}) does not match current session (${currentSessionId})`);
+                            }
+                        } else {
+                            console.log('Received non-agent message:', message);
+                        }
+                    } catch (e) {
+                        console.error('Error parsing WebSocket message:', e, event.data);
+                    }
+                };
+
+                websocket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    clearTimeout(timeout);
+                    if (!connectionReady) {
+                        reject(new Error('WebSocket connection error'));
+                    }
+                    updateConnectionStatus('disconnected', 'WebSocket: Error');
+                };
+
+                websocket.onclose = () => {
+                    console.log('WebSocket closed');
+                    clearTimeout(timeout);
+                    if (!connectionReady) {
+                        reject(new Error('WebSocket closed before ready'));
+                    }
+                    updateConnectionStatus('disconnected', 'WebSocket: Disconnected');
+                    
+                    // Attempt to reconnect if we have an active session
+                    if (currentSessionId && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
+                        setTimeout(() => {
+                            connectWebSocket(currentSessionId).catch(err => {
+                                console.error('Reconnection failed:', err);
+                            });
+                        }, reconnectDelay);
+                    }
+                };
+            });
         }
 
         // Update connection status display
@@ -417,10 +461,16 @@
             submitBtn.textContent = 'Starting...';
 
             try {
-                // Connect to WebSocket first
-                connectWebSocket(formData.sessionID);
+                // Connect to WebSocket first and wait for connection confirmation
+                console.log('Connecting to WebSocket...');
+                await connectWebSocket(formData.sessionID);
+                console.log('WebSocket connected and ready');
+
+                // Small delay to ensure connection is fully established
+                await new Promise(resolve => setTimeout(resolve, 200));
 
                 // Call API endpoint
+                console.log('Calling /api/startprocessing...');
                 const response = await fetch(`${API_BASE_URL}/api/startprocessing`, {
                     method: 'POST',
                     headers: {
@@ -432,7 +482,8 @@
                 const result = await response.json();
 
                 if (response.ok && result.success) {
-                    console.log('Processing started:', result);
+                    console.log('Processing started successfully:', result);
+                    submitBtn.textContent = 'Processing...';
                 } else {
                     throw new Error(result.message || 'Failed to start processing');
                 }
@@ -443,7 +494,6 @@
                     websocket.close();
                 }
                 updateConnectionStatus('disconnected', 'WebSocket: Disconnected');
-            } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Start Processing';
             }
