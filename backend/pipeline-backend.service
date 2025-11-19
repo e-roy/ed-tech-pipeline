@@ -9,8 +9,9 @@ WorkingDirectory=/opt/pipeline/backend
 Environment="PATH=/opt/pipeline/backend/venv/bin"
 EnvironmentFile=/opt/pipeline/backend/.env
 
-# Run uvicorn with 4 workers for production
-ExecStart=/opt/pipeline/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+# Run uvicorn with 1 worker for scaffoldtest (to avoid cross-worker WebSocket messaging issues)
+# TODO: For production, implement Redis pub/sub for cross-worker messaging or use sticky sessions
+ExecStart=/opt/pipeline/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 
 # Restart configuration
 Restart=always
