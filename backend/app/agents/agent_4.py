@@ -144,7 +144,7 @@ async def agent_4_process(
                                 ContentType='audio/mpeg'
                             )
                         # Generate presigned URL
-                        audio_file["url"] = storage_service.generate_presigned_url(s3_key, expires_in=3600)
+                        audio_file["url"] = storage_service.generate_presigned_url(s3_key, expires_in=86400)  # 24 hours for testing
                         logger.info(f"Uploaded audio file to S3: {s3_key}")
                     except Exception as e:
                         logger.warning(f"Failed to upload audio file to S3: {e}")
