@@ -9,23 +9,27 @@ from app.config import get_settings
 settings = get_settings()
 
 # Create SQLAlchemy engine
-# For Neon/SSL connections, configure connect_args to handle SSL without certificate files
-connect_args = {}
-if "neon" in settings.DATABASE_URL.lower() or "sslmode=require" in settings.DATABASE_URL.lower():
-    # For Neon databases, use SSL but don't require certificate files
-    # psycopg will use system defaults or skip certificate verification
-    connect_args = {
-        "sslmode": "require",
-        # Don't specify certificate paths - let psycopg use defaults or skip
-    }
+# For Neon/SSL connections, modify connection string to avoid certificate file requirements
+database_url = settings.DATABASE_URL
+
+# If using Neon or SSL-required connection, modify sslmode to avoid certificate file lookups
+if "neon" in database_url.lower():
+    # Replace sslmode=require with sslmode=prefer (will use SSL if available, but won't fail without certs)
+    # Or use sslmode=require with sslcert='' to disable certificate file lookup
+    import re
+    if "sslmode=require" in database_url:
+        # Replace with prefer to avoid certificate file requirements
+        database_url = re.sub(r"sslmode=require", "sslmode=prefer", database_url, flags=re.IGNORECASE)
+    elif "?" in database_url and "sslmode" not in database_url.lower():
+        # Add sslmode=prefer if not present
+        database_url = database_url + "&sslmode=prefer" if "?" in database_url else database_url + "?sslmode=prefer"
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    database_url,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,
-    max_overflow=20,
-    connect_args=connect_args if connect_args else {}
+    max_overflow=20
 )
 
 # Create SessionLocal class for database sessions
