@@ -226,7 +226,7 @@ async def agent_5_process(
     supersessionid: str,
     storage_service: Optional[StorageService] = None,
     pipeline_data: Optional[Dict[str, Any]] = None
-):
+) -> Optional[str]:
     """
     Agent5: Video generation agent using Remotion.
 
@@ -239,6 +239,9 @@ async def agent_5_process(
         pipeline_data: Pipeline data including:
             - script: Script with visual_prompt for each section
             - audio_data: Audio files and background music
+
+    Returns:
+        The presigned URL of the uploaded video, or None on error
     """
     settings = get_settings()
 
@@ -346,7 +349,7 @@ async def agent_5_process(
 
             # Upload to S3
             s3_key = f"scaffold_test/{user_id}/{supersessionid}/image_{section}.png"
-            storage_service.upload_file_direct(image_path, s3_key, "image/png")
+            storage_service.upload_file_direct(image_data, s3_key, "image/png")
             image_url = storage_service.generate_presigned_url(s3_key, expires_in=3600)
 
             generated_images[section] = image_url
@@ -423,6 +426,8 @@ async def agent_5_process(
         }
         await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("5", "finished", status_data)
+
+        return video_url
 
     except Exception as e:
         # Report error status
