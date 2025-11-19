@@ -14,15 +14,22 @@ database_url = settings.DATABASE_URL
 
 # If using Neon or SSL-required connection, modify sslmode to avoid certificate file lookups
 if "neon" in database_url.lower():
-    # Replace sslmode=require with sslmode=prefer (will use SSL if available, but won't fail without certs)
-    # Or use sslmode=require with sslcert='' to disable certificate file lookup
     import re
+    # For Neon, we need SSL but without certificate files
+    # Use sslmode=require but add empty sslcert/sslkey parameters to prevent file lookups
     if "sslmode=require" in database_url:
-        # Replace with prefer to avoid certificate file requirements
-        database_url = re.sub(r"sslmode=require", "sslmode=prefer", database_url, flags=re.IGNORECASE)
+        # Keep require but add empty cert parameters to prevent file lookups
+        if "sslcert=" not in database_url.lower():
+            # Add empty sslcert and sslkey to prevent psycopg from looking for cert files
+            separator = "&" if "?" in database_url else "?"
+            database_url = database_url + f"{separator}sslcert=&sslkey=&sslrootcert="
     elif "?" in database_url and "sslmode" not in database_url.lower():
-        # Add sslmode=prefer if not present
-        database_url = database_url + "&sslmode=prefer" if "?" in database_url else database_url + "?sslmode=prefer"
+        # Add sslmode=require with empty cert parameters
+        database_url = database_url + "&sslmode=require&sslcert=&sslkey=&sslrootcert="
+    elif "sslmode" not in database_url.lower():
+        # No sslmode at all, add it with empty cert parameters
+        separator = "?" if "?" not in database_url else "&"
+        database_url = database_url + f"{separator}sslmode=require&sslcert=&sslkey=&sslrootcert="
 
 engine = create_engine(
     database_url,
