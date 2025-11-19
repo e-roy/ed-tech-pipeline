@@ -290,6 +290,7 @@ async def start_processing(
         """Wrapper to catch and log errors in background task."""
         import logging
         logger = logging.getLogger(__name__)
+        logger.info(f"Starting Agent2 background task for session {request.sessionID}")
         try:
             await agent_2_process(
                 user_id=request.userID,
@@ -298,6 +299,7 @@ async def start_processing(
                 chosen_diagram_id=request.chosenDiagramID,
                 script_id=request.scriptID
             )
+            logger.info(f"Agent2 background task completed for session {request.sessionID}")
         except Exception as e:
             # Log error and send error status via WebSocket
             logger.exception(f"Error in agent_2_process for session {request.sessionID}: {e}")
@@ -315,8 +317,15 @@ async def start_processing(
             except Exception as ws_error:
                 logger.error(f"Failed to send error status via WebSocket: {ws_error}")
     
-    # Use asyncio.create_task for async background tasks (BackgroundTasks doesn't handle async well)
-    asyncio.create_task(run_agent_2_with_error_handling())
+    # Use asyncio.create_task for async background tasks
+    # Get the current event loop to ensure task is scheduled properly
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(run_agent_2_with_error_handling())
+    # Store task reference to prevent garbage collection
+    if not hasattr(app.state, 'background_tasks'):
+        app.state.background_tasks = set()
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
     
     # Return immediately with success message
     return StartProcessingResponse(

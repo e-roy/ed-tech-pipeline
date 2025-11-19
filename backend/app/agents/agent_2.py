@@ -6,11 +6,14 @@ Functionality will be added between status states.
 """
 import asyncio
 import json
+import logging
 import secrets
 import time
 from typing import Optional
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
+
+logger = logging.getLogger(__name__)
 
 
 async def agent_2_process(
@@ -67,6 +70,8 @@ async def agent_2_process(
             print(f"Failed to create status JSON file: {e}")
     
     try:
+        logger.info(f"Agent2 starting for session {session_id}, supersessionid: {supersessionid}")
+        
         # Report starting status
         status_data = {
             "agentnumber": "Agent2",
@@ -76,8 +81,10 @@ async def agent_2_process(
             "status": "starting",
             "timestamp": int(time.time() * 1000)
         }
+        logger.info(f"Agent2 sending starting status for session {session_id}")
         await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("2", "starting", status_data)
+        logger.info(f"Agent2 starting status sent for session {session_id}")
         
         # Wait 2 seconds
         await asyncio.sleep(2)
