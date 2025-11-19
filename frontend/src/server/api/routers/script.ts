@@ -3,10 +3,36 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { videoSessions, videoAssets } from "@/server/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { createSessionWithScript, generateScript } from "@/server/utils/generate-script";
 
 export const scriptRouter = createTRPCRouter({
+  getSession: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .query(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      const [session] = await db
+        .select()
+        .from(videoSessions)
+        .where(eq(videoSessions.id, input.sessionId))
+        .limit(1);
+
+      if (!session || session.userId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Session not found",
+        });
+      }
+
+      return session;
+    }),
+
   get: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .query(async ({ input, ctx }) => {
@@ -58,6 +84,27 @@ export const scriptRouter = createTRPCRouter({
         duration: metadata?.duration,
       };
     }),
+
+  list: protectedProcedure.query(async ({ ctx }) => {
+    if (!ctx.session?.user?.id) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "User not authenticated",
+      });
+    }
+
+    const sessions = await db
+      .select({
+        id: videoSessions.id,
+        topic: videoSessions.topic,
+        createdAt: videoSessions.createdAt,
+      })
+      .from(videoSessions)
+      .where(eq(videoSessions.userId, ctx.session.user.id))
+      .orderBy(desc(videoSessions.createdAt));
+
+    return sessions;
+  }),
 
   getLatestSession: protectedProcedure.query(async ({ ctx }) => {
     if (!ctx.session?.user?.id) {
