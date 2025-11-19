@@ -746,8 +746,25 @@
                     const videoSessionResponse = await fetch(`${API_BASE_URL}/api/get-video-session/${fullTestSessionId}`);
                     
                     if (!videoSessionResponse.ok) {
-                        const error = await videoSessionResponse.json();
-                        throw new Error(error.detail || `Failed to fetch video session: ${videoSessionResponse.status}`);
+                        let errorMessage = `Failed to fetch video session: ${videoSessionResponse.status}`;
+                        try {
+                            const error = await videoSessionResponse.json();
+                            // Handle both string and object error details
+                            if (typeof error.detail === 'string') {
+                                errorMessage = error.detail;
+                            } else if (error.detail && error.detail.message) {
+                                errorMessage = error.detail.message;
+                            } else if (error.detail && error.detail.error) {
+                                errorMessage = `${error.detail.error}: ${error.detail.message || 'Unknown error'}`;
+                            } else {
+                                errorMessage = JSON.stringify(error);
+                            }
+                        } catch (e) {
+                            // If response is not JSON, get text
+                            const text = await videoSessionResponse.text();
+                            errorMessage = text || errorMessage;
+                        }
+                        throw new Error(errorMessage);
                     }
                     
                     const videoSessionData = await videoSessionResponse.json();

@@ -319,7 +319,15 @@ async def get_video_session(session_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.exception(f"Database error querying video_session: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        # Return JSON error response
+        error_detail = str(e)
+        # Don't expose full error details in production - sanitize
+        if "Permission denied" in error_detail or "certificate" in error_detail.lower():
+            error_detail = "Database connection error. Please check server configuration."
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "Database error", "message": error_detail}
+        )
 
 
 # =============================================================================
