@@ -312,6 +312,13 @@
             color: #666;
             margin-bottom: 8px;
         }
+
+        .video-player {
+            width: 100%;
+            max-width: 100%;
+            border-radius: 6px;
+            background: #000;
+        }
     </style>
 </head>
 <body>
@@ -380,6 +387,13 @@
 
             <div class="connection-status disconnected" id="connectionStatus">
                 WebSocket: Disconnected
+            </div>
+
+            <div class="result-section" id="video-result" style="display: none;">
+                <h3>Generated Video</h3>
+                <video id="video-player" controls class="video-player">
+                    Your browser does not support video playback.
+                </video>
             </div>
         </div>
         </div>
@@ -480,6 +494,11 @@
                 status.error.textContent = '';
                 status.error.classList.remove('show');
             });
+            // Hide video result
+            const videoResult = document.getElementById('video-result');
+            if (videoResult) {
+                videoResult.style.display = 'none';
+            }
         }
 
         // Update agent status based on WebSocket message
@@ -591,7 +610,12 @@
                                 // If Agent5 finished and has videoUrl, display it
                                 if (message.agentnumber === 'Agent5' && message.status === 'finished' && message.videoUrl) {
                                     console.log('Video URL received:', message.videoUrl);
-                                    // You could add UI to display the video URL here
+                                    const videoResult = document.getElementById('video-result');
+                                    const videoPlayer = document.getElementById('video-player');
+                                    videoPlayer.src = message.videoUrl;
+                                    videoResult.style.display = 'block';
+                                    submitBtn.disabled = false;
+                                    submitBtn.textContent = 'Start Processing';
                                 }
                             } else {
                                 console.warn(`Message sessionID (${message.sessionID}) does not match current session (${currentSessionId})`);
