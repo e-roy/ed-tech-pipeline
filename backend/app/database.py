@@ -21,10 +21,11 @@ if "neon" in database_url.lower():
     # Remove any trailing & or ? if they become empty
     database_url = re.sub(r"[&?]$", "", database_url)
     
-    # Configure SSL via connect_args - this bypasses psycopg's certificate file lookup
-    # For Neon, we need SSL but don't need client certificates
+    # Use sslmode=prefer instead of require - this will use SSL if available
+    # but won't fail if certificate files aren't found (workaround for psycopg certificate lookup)
+    # Neon supports SSL without client certificates, so prefer mode works fine
     connect_args = {
-        "sslmode": "require",
+        "sslmode": "prefer",
         # Don't specify sslcert/sslkey - psycopg will use SSL without client certs
     }
 
