@@ -84,3 +84,23 @@ export interface Fact {
   details: string;
   confidence: number;
 }
+
+// agent-chat types
+
+export interface NarrationSegment {
+  id: string;
+  type: string;
+  start_time: number;
+  duration: number;
+  narration: string;
+  visual_guidance: string;
+  key_concepts: string[];
+  educational_purpose: string;
+}
+
+export interface Narration {
+  total_duration: number;
+  reading_level: string;
+  key_terms_count: number;
+  segments: NarrationSegment[];
+}

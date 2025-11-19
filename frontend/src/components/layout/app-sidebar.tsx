@@ -46,6 +46,11 @@ const navItems = [
     icon: Plus,
   },
   {
+    title: "Create Agent",
+    url: "/dashboard/agent-create",
+    icon: Plus,
+  },
+  {
     title: "Assets",
     url: "/dashboard/assets",
     icon: FolderOpen,
@@ -55,11 +60,11 @@ const navItems = [
     icon: History,
     isCollapsible: true,
   },
-  {
-    title: "Hardcode Create",
-    url: "/dashboard/hardcode-create",
-    icon: FileText,
-  },
+  // {
+  //   title: "Hardcode Create",
+  //   url: "/dashboard/hardcode-create",
+  //   icon: FileText,
+  // },
   {
     title: "Hardcode Assets",
     url: "/dashboard/hardcode-assets",
