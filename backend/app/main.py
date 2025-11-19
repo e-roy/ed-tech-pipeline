@@ -184,6 +184,22 @@ async def scaffoldtest_ui():
     return FileResponse(html_file)
 
 
+@app.get("/videotest", response_class=HTMLResponse)
+async def video_test_ui():
+    """
+    Serve the video test HTML page.
+
+    Access at: http://localhost:8000/videotest
+    """
+    backend_dir = Path(__file__).parent.parent
+    html_file = backend_dir / "video_test.html"
+
+    if not html_file.exists():
+        raise HTTPException(status_code=404, detail="video_test.html not found")
+
+    return FileResponse(html_file)
+
+
 # =============================================================================
 # Agent Processing Functions (Scaffolding)
 # Import agents from agents folder
@@ -868,6 +884,33 @@ async def serve_local_audio(path: str):
     )
 
 
+@app.get("/api/video/proxy")
+async def proxy_video(url: str):
+    """
+    Proxy a video from S3 to avoid CORS issues.
+
+    This endpoint fetches the video from the given URL and streams it
+    to the browser with proper headers for video playback.
+    """
+    import httpx
+    from starlette.responses import StreamingResponse
+
+    async def stream_video():
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream("GET", url) as response:
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+    return StreamingResponse(
+        stream_video(),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": "inline"
+        }
+    )
+
+
 # =============================================================================
 # Agent 4 Direct Test Endpoint (Audio Pipeline)
 # =============================================================================
@@ -941,6 +984,83 @@ async def test_agent4_audio(request: Agent4TestRequest) -> AgentTestResponse:
     except Exception as e:
         import traceback
         logger.error(f"Agent 4 test failed: {e}\n{traceback.format_exc()}")
+        return AgentTestResponse(
+            success=False,
+            data={},
+            cost=0.0,
+            duration=time.time() - start_time,
+            error=str(e)
+        )
+
+
+# =============================================================================
+# Agent 5 Direct Test Endpoint (Video Generator)
+# =============================================================================
+
+class Agent5TestRequest(BaseModel):
+    """Request model for testing Agent 5 (Video Generator) directly."""
+    session_id: str
+    pipeline_data: Dict[str, Any]
+
+
+@app.post("/api/agent5/test", response_model=AgentTestResponse)
+async def test_agent5_video(request: Agent5TestRequest) -> AgentTestResponse:
+    """
+    Test Agent 5 (Video Generator) directly with pipeline data.
+
+    This endpoint allows direct testing of the video generation functionality
+    without going through the full pipeline.
+
+    Expected pipeline_data structure:
+    {
+        "script": {
+            "hook": {"text": "...", "duration": "12", "visual_prompt": "..."},
+            "concept": {"text": "...", "duration": "15", "visual_prompt": "..."},
+            "process": {"text": "...", "duration": "22", "visual_prompt": "..."},
+            "conclusion": {"text": "...", "duration": "11", "visual_prompt": "..."}
+        },
+        "audio_data": {
+            "audio_files": [
+                {"part": "hook", "url": "...", "duration": 4.4, ...},
+                ...
+            ],
+            "background_music": {"url": "...", "duration": 60}
+        }
+    }
+    """
+    start_time = time.time()
+
+    try:
+        # Import the agent
+        from app.agents.agent_5 import agent_5_process
+
+        # Generate a supersession ID for this test
+        supersessionid = f"{request.session_id}_test"
+
+        # Use real WebSocket manager so UI can receive progress updates
+        # Run agent 5 and get the video URL directly
+        video_url = await agent_5_process(
+            websocket_manager=websocket_manager,
+            user_id="test_user",
+            session_id=request.session_id,
+            supersessionid=supersessionid,
+            storage_service=storage_service,
+            pipeline_data=request.pipeline_data
+        )
+
+        return AgentTestResponse(
+            success=True,
+            data={
+                "videoUrl": video_url,
+                "supersessionId": supersessionid
+            },
+            cost=0.0,  # TODO: Track DALL-E costs
+            duration=time.time() - start_time
+        )
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Agent 5 test failed: {e}\n{traceback.format_exc()}")
         return AgentTestResponse(
             success=False,
             data={},

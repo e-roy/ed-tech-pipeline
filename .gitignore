@@ -114,3 +114,5 @@ openapi-temp.json
 
 # Deployment guides with sensitive info
 backend/DEPLOY_SCAFFOLD_TEST_UI.md
+# Remotion dependencies
+remotion/node_modules/
