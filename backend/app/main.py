@@ -317,19 +317,21 @@ async def start_processing(
         logger = logging.getLogger(__name__)
         logger.info(f"Starting Agent2 background task for session {request.sessionID}")
         
-        # Wait for WebSocket connection to be established (with timeout)
+        # Wait for WebSocket connection to be established (with shorter timeout)
         # This ensures the connection is ready before we start sending status updates
+        # Note: Due to multi-worker setup, connection might be on different worker
+        # We'll proceed anyway and try to send messages
         logger.info(f"Waiting for WebSocket connection for session {request.sessionID}...")
         connection_ready = await websocket_manager.wait_for_connection(
             request.sessionID,
-            max_wait=10.0,  # Wait up to 10 seconds
-            check_interval=0.2  # Check every 200ms
+            max_wait=3.0,  # Wait up to 3 seconds (reduced from 10)
+            check_interval=0.1  # Check every 100ms (more frequent)
         )
         
         if connection_ready:
             logger.info(f"WebSocket connection confirmed for session {request.sessionID}, starting Agent2")
         else:
-            logger.warning(f"No WebSocket connection found for session {request.sessionID} after waiting, proceeding anyway")
+            logger.warning(f"No WebSocket connection found for session {request.sessionID} after waiting. This may be due to multi-worker setup. Proceeding anyway - messages will be sent if connection exists on this worker.")
         
         try:
             await agent_2_process(

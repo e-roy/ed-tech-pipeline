@@ -363,6 +363,27 @@
                             connectionReady = true;
                             console.log('WebSocket connection confirmed ready');
                             updateConnectionStatus('connected', 'WebSocket: Connected');
+                            
+                            // Start ping interval to keep connection alive
+                            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                                // Send ping every 30 seconds to keep connection alive
+                                const pingInterval = setInterval(() => {
+                                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                                        try {
+                                            websocket.send(JSON.stringify({ type: 'ping' }));
+                                        } catch (e) {
+                                            console.error('Failed to send ping:', e);
+                                            clearInterval(pingInterval);
+                                        }
+                                    } else {
+                                        clearInterval(pingInterval);
+                                    }
+                                }, 30000);
+                                
+                                // Store interval ID so we can clear it on disconnect
+                                websocket._pingInterval = pingInterval;
+                            }
+                            
                             resolve();
                             return;
                         }
@@ -412,13 +433,21 @@
                 websocket.onclose = () => {
                     console.log('WebSocket closed');
                     clearTimeout(timeout);
+                    
+                    // Clear ping interval if it exists
+                    if (websocket._pingInterval) {
+                        clearInterval(websocket._pingInterval);
+                        websocket._pingInterval = null;
+                    }
+                    
                     if (!connectionReady) {
                         reject(new Error('WebSocket closed before ready'));
                     }
                     updateConnectionStatus('disconnected', 'WebSocket: Disconnected');
                     
-                    // Attempt to reconnect if we have an active session
-                    if (currentSessionId && reconnectAttempts < maxReconnectAttempts) {
+                    // Only attempt to reconnect if we have an active session AND we're not in the middle of form submission
+                    // This prevents infinite reconnect loops
+                    if (currentSessionId && reconnectAttempts < maxReconnectAttempts && connectionReady) {
                         reconnectAttempts++;
                         console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
                         setTimeout(() => {
