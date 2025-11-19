@@ -66,18 +66,27 @@ class WebSocketManager:
             session_id: The session ID to broadcast to
             message: Dictionary message to broadcast (will be converted to JSON)
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if session_id in self.active_connections:
             # Add session_id to message if not present
             if "session_id" not in message:
                 message["session_id"] = session_id
 
+            connections = self.active_connections[session_id]
+            logger.info(f"Sending WebSocket message to {len(connections)} connection(s) for session {session_id}: {message.get('agentnumber', 'unknown')} - {message.get('status', 'unknown')}")
+            
             # Broadcast to all connections for this session
-            for connection in self.active_connections[session_id]:
+            for connection in connections:
                 try:
                     await connection.send_text(json.dumps(message))
+                    logger.debug(f"Successfully sent WebSocket message to session {session_id}")
                 except Exception as e:
                     # Connection might be closed, we'll remove it on disconnect
-                    print(f"Error sending to WebSocket: {e}")
+                    logger.error(f"Error sending to WebSocket for session {session_id}: {e}")
+        else:
+            logger.warning(f"No active WebSocket connections for session {session_id}. Message not sent: {message.get('agentnumber', 'unknown')} - {message.get('status', 'unknown')}")
 
     async def broadcast_status(self, session_id: str, status: str, progress: int = 0, details: str = "", elapsed_time: float = None, total_cost: float = None, items: list = None):
         """
