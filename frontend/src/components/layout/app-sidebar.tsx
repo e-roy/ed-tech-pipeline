@@ -2,7 +2,6 @@
 
 import {
   ChevronRight,
-  FileText,
   FolderOpen,
   History,
   Plus,
@@ -31,13 +30,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { NavUser } from "./nav-user";
-
-// Dummy history IDs - replace with real data later
-const dummyHistoryIds = [
-  { id: "1", label: "Session 1" },
-  { id: "2", label: "Session 2" },
-  { id: "3", label: "Session 3" },
-];
+import { api } from "@/trpc/react";
 
 const navItems = [
   {
@@ -78,11 +71,29 @@ type User = {
   image: string | null;
 };
 
+type SessionListItem = {
+  id: string;
+  topic: string | null;
+  createdAt: Date | null;
+};
+
 export function AppSidebar({
   user,
   ...props
 }: React.ComponentProps<typeof Sidebar> & { user: User }) {
   const pathname = usePathname();
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+  const queryResult = api.script.list.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const sessions = queryResult.data as SessionListItem[] | undefined;
+
+  // Limit to 20 most recent sessions for sidebar
+  const recentSessions = React.useMemo(() => {
+    if (!sessions || !Array.isArray(sessions)) return [];
+    return sessions.slice(0, 20);
+  }, [sessions]);
 
   return (
     <Sidebar
@@ -111,9 +122,9 @@ export function AppSidebar({
             <SidebarMenu>
               {navItems.map((item) => {
                 if (item.isCollapsible) {
-                  const isHistoryActive = pathname.startsWith(
-                    "/dashboard/history/",
-                  );
+                  const isHistoryActive =
+                    pathname.startsWith("/dashboard/history/") ||
+                    pathname === "/dashboard/history";
                   return (
                     <Collapsible
                       key={item.title}
@@ -133,25 +144,31 @@ export function AppSidebar({
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <ul className="mt-1 ml-4 space-y-1">
-                            {dummyHistoryIds.map((historyItem) => {
-                              const isActive =
-                                pathname ===
-                                `/dashboard/history/${historyItem.id}`;
-                              return (
-                                <SidebarMenuSubItem key={historyItem.id}>
-                                  <SidebarMenuSubButton
-                                    asChild
-                                    isActive={isActive}
-                                  >
-                                    <Link
-                                      href={`/dashboard/history/${historyItem.id}`}
+                            {recentSessions.length === 0 ? (
+                              <li className="text-muted-foreground px-2 py-1 text-xs">
+                                No sessions
+                              </li>
+                            ) : (
+                              recentSessions.map((session) => {
+                                const isActive =
+                                  pathname ===
+                                  `/dashboard/history/${session.id}`;
+                                return (
+                                  <SidebarMenuSubItem key={session.id}>
+                                    <SidebarMenuSubButton
+                                      asChild
+                                      isActive={isActive}
                                     >
-                                      {historyItem.label}
-                                    </Link>
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              );
-                            })}
+                                      <Link
+                                        href={`/dashboard/history/${session.id}`}
+                                      >
+                                        {session.topic ?? "Untitled"}
+                                      </Link>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                );
+                              })
+                            )}
                           </ul>
                         </CollapsibleContent>
                       </SidebarMenuItem>
