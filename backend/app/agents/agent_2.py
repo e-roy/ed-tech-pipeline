@@ -23,7 +23,8 @@ async def agent_2_process(
     template_id: str,
     chosen_diagram_id: str,
     script_id: str,
-    storage_service: Optional[StorageService] = None
+    storage_service: Optional[StorageService] = None,
+    video_session_data: Optional[dict] = None
 ):
     """
     Agent2: First agent in the processing pipeline.
@@ -38,6 +39,7 @@ async def agent_2_process(
         chosen_diagram_id: Chosen diagram identifier
         script_id: Script identifier
         storage_service: Storage service for S3 operations
+        video_session_data: Optional dict with video_session row data (for Full Test mode)
     """
     # Initialize storage service if not provided
     if storage_service is None:
@@ -46,6 +48,28 @@ async def agent_2_process(
     # Generate supersessionid: original_session_id + 16 character random string
     random_suffix = secrets.token_urlsafe(12)[:16]  # Generate 16 char random string
     supersessionid = f"{session_id}_{random_suffix}"
+    
+    # Extract data from video_session if provided
+    topic = None
+    confirmed_facts = None
+    generation_script = None
+    generated_fields = []
+    
+    if video_session_data:
+        topic = video_session_data.get("topic")
+        confirmed_facts = video_session_data.get("confirmed_facts")
+        generation_script = video_session_data.get("generated_script")
+        
+        # Track what needs to be generated
+        if not topic:
+            generated_fields.append("topic")
+            topic = f"Generated topic for session {session_id}"
+        if not confirmed_facts:
+            generated_fields.append("confirmed_facts")
+            confirmed_facts = [{"concept": "Example concept", "details": "Example details"}]
+        if not generation_script:
+            generated_fields.append("generation_script")
+            generation_script = {}
     
     # Helper function to create JSON status file in S3
     async def create_status_json(agent_number: str, status: str, status_data: dict):
@@ -91,6 +115,17 @@ async def agent_2_process(
         
         # TODO: Add initialization/preparation logic here
         
+        # Extract script from generation_script or generate it
+        script = extract_script_from_generated_script(generation_script)
+        script_was_generated = False
+        
+        if not script or not all(key in script for key in ["hook", "concept", "process", "conclusion"]):
+            # Generate script if missing or incomplete
+            script_was_generated = True
+            if video_session_data and "generation_script" not in generated_fields:
+                generated_fields.append("generation_script")
+            script = generate_script_structure()
+        
         # Report processing status
         status_data = {
             "agentnumber": "Agent2",
@@ -100,6 +135,15 @@ async def agent_2_process(
             "status": "processing",
             "timestamp": int(time.time() * 1000)
         }
+        
+        # Include video_session data in WebSocket messages ONLY when video_session_data is provided
+        if video_session_data:
+            status_data["topic"] = topic
+            status_data["confirmed_facts"] = confirmed_facts
+            status_data["generation_script"] = generation_script
+            if generated_fields:
+                status_data["generated_fields"] = generated_fields
+        
         await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("2", "processing", status_data)
         
@@ -107,26 +151,6 @@ async def agent_2_process(
         await asyncio.sleep(2)
 
         # TODO: Add main agent work here (e.g., storyboard generation)
-        # For now, create a placeholder script for Agent4 to process
-        # In production, this would be generated based on the input parameters
-        script = {
-            "hook": {
-                "text": "Have you ever wondered how technology is changing the way we work?",
-                "duration": "10"
-            },
-            "concept": {
-                "text": "Automation and AI are revolutionizing industries by streamlining processes and enhancing productivity.",
-                "duration": "15"
-            },
-            "process": {
-                "text": "From data analysis to customer service, these technologies learn from patterns and make intelligent decisions. They help businesses save time, reduce errors, and focus on what matters most.",
-                "duration": "22"
-            },
-            "conclusion": {
-                "text": "Embrace the future of work. Start exploring how AI can transform your workflow today!",
-                "duration": "10"
-            }
-        }
 
         # Report finished status
         status_data = {
@@ -137,20 +161,22 @@ async def agent_2_process(
             "status": "finished",
             "timestamp": int(time.time() * 1000)
         }
+        
+        # Include video_session data in WebSocket messages ONLY when video_session_data is provided
+        if video_session_data:
+            status_data["topic"] = topic
+            status_data["confirmed_facts"] = confirmed_facts
+            status_data["generation_script"] = generation_script
+            if generated_fields:
+                status_data["generated_fields"] = generated_fields
+        
         await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("2", "finished", status_data)
         
         # TODO: Add cleanup/finalization logic here
 
-        # Compile Agent2 data to pass through the pipeline
-        agent2_data = {
-            "template_id": template_id,
-            "chosen_diagram_id": chosen_diagram_id,
-            "script_id": script_id,
-            "supersessionid": supersessionid
-        }
-
-        # Trigger Agent4 with userID, sessionID, supersessionid, script, and agent2 data
+        # Trigger Agent4 with script, voice, audio_option (matching Agent4's current signature)
+        # Remove agent2_data (deprecated - Agent4 is more specific for its needs)
         from app.agents.agent_4 import agent_4_process
         await agent_4_process(
             websocket_manager=websocket_manager,
@@ -161,7 +187,7 @@ async def agent_2_process(
             voice="alloy",
             audio_option="tts",
             storage_service=storage_service,
-            agent2_data=agent2_data
+            agent2_data=None  # Deprecated
         )
         
     except Exception as e:
@@ -179,4 +205,81 @@ async def agent_2_process(
         await websocket_manager.send_progress(session_id, error_data)
         await create_status_json("2", "error", error_data)
         raise  # Stop pipeline on error
+
+
+def extract_script_from_generated_script(generated_script: Optional[dict]) -> Optional[dict]:
+    """
+    Extract script structure from generated_script JSONB field.
+    Handles different formats: direct hook/concept/process/conclusion, nested under "script", or "segments" array.
+    
+    Returns:
+        Dict with hook, concept, process, conclusion keys, or None if not found
+    """
+    if not generated_script or not isinstance(generated_script, dict):
+        return None
+    
+    script_parts = {}
+    
+    # Check if it has hook/concept/process/conclusion directly
+    if "hook" in generated_script:
+        script_parts = {
+            "hook": generated_script.get("hook", {}),
+            "concept": generated_script.get("concept", {}),
+            "process": generated_script.get("process", {}),
+            "conclusion": generated_script.get("conclusion", {})
+        }
+    # Check if it's nested under "script" key
+    elif "script" in generated_script and isinstance(generated_script["script"], dict):
+        script_parts = generated_script["script"]
+    # Check if it has segments (alternative format)
+    elif "segments" in generated_script:
+        segments = generated_script["segments"]
+        if isinstance(segments, list) and len(segments) >= 4:
+            script_parts = {
+                "hook": segments[0] if isinstance(segments[0], dict) else {},
+                "concept": segments[1] if isinstance(segments[1], dict) else {},
+                "process": segments[2] if isinstance(segments[2], dict) else {},
+                "conclusion": segments[3] if isinstance(segments[3], dict) else {}
+            }
+    
+    # Validate that we have all required parts
+    if script_parts and all(key in script_parts for key in ["hook", "concept", "process", "conclusion"]):
+        return script_parts
+    
+    return None
+
+
+def generate_script_structure() -> dict:
+    """
+    Generate a placeholder script structure with hook, concept, process, conclusion.
+    
+    Returns:
+        Dict with hook, concept, process, conclusion parts
+    """
+    return {
+        "hook": {
+            "text": "Have you ever wondered how technology is changing the way we work?",
+            "duration": "10",
+            "key_concepts": [],
+            "visual_guidance": "Visual guidance for hook"
+        },
+        "concept": {
+            "text": "Automation and AI are revolutionizing industries by streamlining processes and enhancing productivity.",
+            "duration": "15",
+            "key_concepts": [],
+            "visual_guidance": "Visual guidance for concept"
+        },
+        "process": {
+            "text": "From data analysis to customer service, these technologies learn from patterns and make intelligent decisions. They help businesses save time, reduce errors, and focus on what matters most.",
+            "duration": "22",
+            "key_concepts": [],
+            "visual_guidance": "Visual guidance for process"
+        },
+        "conclusion": {
+            "text": "Embrace the future of work. Start exploring how AI can transform your workflow today!",
+            "duration": "10",
+            "key_concepts": [],
+            "visual_guidance": "Visual guidance for conclusion"
+        }
+    }
 

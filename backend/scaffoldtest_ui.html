@@ -325,37 +325,82 @@
     <div class="container">
         <h1>Agent Processing Test</h1>
 
-        <div class="tabs">
-            <button type="button" class="tab-btn active" data-tab="pipeline">Full Pipeline</button>
-            <button type="button" class="tab-btn" data-tab="agent4">Test Agent 4</button>
-        </div>
-
-        <!-- Full Pipeline Tab -->
-        <div id="pipeline-tab" class="tab-content active">
         <form id="processingForm">
             <div class="form-group">
-                <label for="userID">User ID:</label>
-                <input type="text" id="userID" name="userID" required>
+                <label for="agentSelection">Select Agent:</label>
+                <select id="agentSelection" name="agentSelection" required>
+                    <option value="Full Test">Full Test</option>
+                    <option value="Agent2">Agent2</option>
+                    <option value="Agent4">Agent4</option>
+                    <option value="Agent5">Agent5</option>
+                </select>
             </div>
-            
-            <div class="form-group">
-                <label for="sessionID">Session ID:</label>
-                <input type="text" id="sessionID" name="sessionID" required>
+
+            <!-- Full Test fields -->
+            <div class="form-group" id="fullTestGroup">
+                <label for="fullTestSessionID">Session ID:</label>
+                <input type="text" id="fullTestSessionID" name="fullTestSessionID" value="3oyCVhHND75RwUKhdLpy0">
             </div>
-            
-            <div class="form-group">
-                <label for="templateID">Template ID:</label>
-                <input type="text" id="templateID" name="templateID" required>
+
+            <!-- Agent2 fields -->
+            <div class="form-group" id="agent2Group" style="display: none;">
+                <label for="agent2UserID">User ID:</label>
+                <input type="text" id="agent2UserID" name="agent2UserID">
+                <label for="agent2SessionID">Session ID:</label>
+                <input type="text" id="agent2SessionID" name="agent2SessionID">
             </div>
-            
-            <div class="form-group">
-                <label for="chosenDiagramID">Chosen Diagram ID:</label>
-                <input type="text" id="chosenDiagramID" name="chosenDiagramID" required>
+
+            <!-- Agent4 fields -->
+            <div class="form-group" id="agent4Group" style="display: none;">
+                <label for="agent4UserID">User ID:</label>
+                <input type="text" id="agent4UserID" name="agent4UserID">
+                <label for="agent4SessionID">Session ID:</label>
+                <input type="text" id="agent4SessionID" name="agent4SessionID">
+                <label for="agent4Voice">Voice:</label>
+                <select id="agent4Voice" name="agent4Voice">
+                    <option value="alloy">Alloy</option>
+                    <option value="echo">Echo</option>
+                    <option value="fable">Fable</option>
+                    <option value="onyx">Onyx</option>
+                    <option value="nova">Nova</option>
+                    <option value="shimmer">Shimmer</option>
+                </select>
+                <label for="agent4AudioOption">Audio Option:</label>
+                <select id="agent4AudioOption" name="agent4AudioOption">
+                    <option value="tts">TTS</option>
+                    <option value="upload">Upload</option>
+                    <option value="none">None</option>
+                    <option value="instrumental">Instrumental</option>
+                </select>
+                <label for="agent4Script">Script (JSON):</label>
+                <textarea id="agent4Script" name="agent4Script" rows="15">{
+  "hook": {
+    "text": "Example hook text",
+    "duration": "10"
+  },
+  "concept": {
+    "text": "Example concept text",
+    "duration": "15"
+  },
+  "process": {
+    "text": "Example process text",
+    "duration": "22"
+  },
+  "conclusion": {
+    "text": "Example conclusion text",
+    "duration": "10"
+  }
+}</textarea>
             </div>
-            
-            <div class="form-group">
-                <label for="scriptID">Script ID:</label>
-                <input type="text" id="scriptID" name="scriptID" required>
+
+            <!-- Agent5 fields -->
+            <div class="form-group" id="agent5Group" style="display: none;">
+                <label for="agent5UserID">User ID:</label>
+                <input type="text" id="agent5UserID" name="agent5UserID">
+                <label for="agent5SessionID">Session ID:</label>
+                <input type="text" id="agent5SessionID" name="agent5SessionID">
+                <label for="agent5SupersessionID">Super Session ID:</label>
+                <input type="text" id="agent5SupersessionID" name="agent5SupersessionID">
             </div>
             
             <button type="submit" class="submit-btn" id="submitBtn">Start Processing</button>
@@ -398,60 +443,10 @@
         </div>
         </div>
 
-        <!-- Agent 4 Test Tab -->
-        <div id="agent4-tab" class="tab-content">
-            <form id="agent4Form">
-                <div class="form-group">
-                    <label for="a4-sessionID">Session ID:</label>
-                    <input type="text" id="a4-sessionID" name="sessionID" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="a4-voice">Voice:</label>
-                    <select id="a4-voice" name="voice">
-                        <option value="alloy">Alloy (Neutral, balanced)</option>
-                        <option value="echo">Echo (Male, clear)</option>
-                        <option value="fable">Fable (British, expressive)</option>
-                        <option value="onyx">Onyx (Deep, authoritative)</option>
-                        <option value="nova">Nova (Female, energetic)</option>
-                        <option value="shimmer">Shimmer (Warm, friendly)</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="a4-script">Script (JSON):</label>
-                    <textarea id="a4-script" name="script" rows="15" required>{
-  "hook": {
-    "text": "Have you ever wondered how artificial intelligence can understand human language?",
-    "duration": "12"
-  },
-  "concept": {
-    "text": "Large language models are neural networks trained on vast amounts of text data to predict and generate human-like text.",
-    "duration": "15"
-  },
-  "process": {
-    "text": "These models learn patterns in language by analyzing billions of sentences, understanding context, grammar, and even nuance. They use attention mechanisms to focus on relevant parts of the input.",
-    "duration": "22"
-  },
-  "conclusion": {
-    "text": "Understanding LLMs helps us better leverage AI tools in our work and daily lives. Start exploring what these models can do for you today!",
-    "duration": "11"
-  }
-}</textarea>
-                </div>
-
-                <button type="submit" class="submit-btn" id="a4-submitBtn">Generate Audio</button>
-            </form>
-
-            <div class="result-section" id="a4-results" style="display: none;">
-                <h3>Results</h3>
-                <div id="a4-audio-files"></div>
-                <div class="result-content" id="a4-result-json"></div>
-            </div>
-
-            <div class="connection-status disconnected" id="a4-status">
-                Ready
-            </div>
+        <!-- Video Session Data Display (for Full Test) -->
+        <div class="result-section" id="videoSessionData" style="display: none;">
+            <h3>Video Session Data</h3>
+            <div class="result-content" id="videoSessionDataContent"></div>
         </div>
     </div>
 
@@ -607,6 +602,23 @@
                                     message.reason
                                 );
                                 
+                                // Display video_session data if present (topic, confirmed_facts, generation_script)
+                                // Check if any of these fields exist (including empty objects/arrays)
+                                if (message.hasOwnProperty('topic') || message.hasOwnProperty('confirmed_facts') || message.hasOwnProperty('generation_script')) {
+                                    const videoSessionDataDiv = document.getElementById('videoSessionData');
+                                    const videoSessionDataContent = document.getElementById('videoSessionDataContent');
+                                    
+                                    const displayData = {
+                                        topic: message.topic,
+                                        confirmed_facts: message.confirmed_facts,
+                                        generation_script: message.generation_script,
+                                        generated_fields: message.generated_fields || []
+                                    };
+                                    
+                                    videoSessionDataContent.textContent = JSON.stringify(displayData, null, 2);
+                                    videoSessionDataDiv.style.display = 'block';
+                                }
+                                
                                 // If Agent5 finished and has videoUrl, display it
                                 if (message.agentnumber === 'Agent5' && message.status === 'finished' && message.videoUrl) {
                                     console.log('Video URL received:', message.videoUrl);
@@ -673,46 +685,157 @@
             connectionStatus.textContent = text;
         }
 
+        // Show/hide fields based on agent selection
+        document.getElementById('agentSelection').addEventListener('change', (e) => {
+            const selection = e.target.value;
+            
+            // Hide all groups
+            document.getElementById('fullTestGroup').style.display = 'none';
+            document.getElementById('agent2Group').style.display = 'none';
+            document.getElementById('agent4Group').style.display = 'none';
+            document.getElementById('agent5Group').style.display = 'none';
+            
+            // Show relevant group
+            if (selection === 'Full Test') {
+                document.getElementById('fullTestGroup').style.display = 'block';
+            } else if (selection === 'Agent2') {
+                document.getElementById('agent2Group').style.display = 'block';
+            } else if (selection === 'Agent4') {
+                document.getElementById('agent4Group').style.display = 'block';
+            } else if (selection === 'Agent5') {
+                document.getElementById('agent5Group').style.display = 'block';
+            }
+        });
+        
+        // Trigger initial display
+        document.getElementById('agentSelection').dispatchEvent(new Event('change'));
+
         // Handle form submission
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const formData = {
-                userID: document.getElementById('userID').value.trim(),
-                sessionID: document.getElementById('sessionID').value.trim(),
-                templateID: document.getElementById('templateID').value.trim(),
-                chosenDiagramID: document.getElementById('chosenDiagramID').value.trim(),
-                scriptID: document.getElementById('scriptID').value.trim()
-            };
-
+            const agentSelection = document.getElementById('agentSelection').value;
+            
             // Reset status lights
             resetAgentStatuses();
             
-            // Set current session ID
-            currentSessionId = formData.sessionID;
-            reconnectAttempts = 0;
-
+            // Hide video session data display
+            document.getElementById('videoSessionData').style.display = 'none';
+            
             // Disable submit button
             submitBtn.disabled = true;
             submitBtn.textContent = 'Starting...';
 
             try {
+                let sessionId;
+                let requestData = {
+                    agent_selection: agentSelection
+                };
+
+                // Handle Full Test mode
+                if (agentSelection === 'Full Test') {
+                    const fullTestSessionId = document.getElementById('fullTestSessionID').value.trim();
+                    if (!fullTestSessionId) {
+                        throw new Error('Session ID is required for Full Test');
+                    }
+                    
+                    sessionId = fullTestSessionId;
+                    
+                    // Fetch video_session data
+                    console.log(`Fetching video_session data for ${fullTestSessionId}...`);
+                    const videoSessionResponse = await fetch(`${API_BASE_URL}/api/get-video-session/${fullTestSessionId}`);
+                    
+                    if (!videoSessionResponse.ok) {
+                        const error = await videoSessionResponse.json();
+                        throw new Error(error.detail || `Failed to fetch video session: ${videoSessionResponse.status}`);
+                    }
+                    
+                    const videoSessionData = await videoSessionResponse.json();
+                    console.log('Video session data:', videoSessionData);
+                    
+                    // Display video session data
+                    document.getElementById('videoSessionDataContent').textContent = JSON.stringify(videoSessionData, null, 2);
+                    document.getElementById('videoSessionData').style.display = 'block';
+                    
+                    requestData.video_session_data = videoSessionData;
+                }
+                // Handle Agent2 mode
+                else if (agentSelection === 'Agent2') {
+                    const userID = document.getElementById('agent2UserID').value.trim();
+                    const sessionID = document.getElementById('agent2SessionID').value.trim();
+                    
+                    if (!userID || !sessionID) {
+                        throw new Error('User ID and Session ID are required for Agent2');
+                    }
+                    
+                    sessionId = sessionID;
+                    requestData.userID = userID;
+                    requestData.sessionID = sessionID;
+                }
+                // Handle Agent4 mode
+                else if (agentSelection === 'Agent4') {
+                    const userID = document.getElementById('agent4UserID').value.trim();
+                    const sessionID = document.getElementById('agent4SessionID').value.trim();
+                    const scriptText = document.getElementById('agent4Script').value.trim();
+                    const voice = document.getElementById('agent4Voice').value;
+                    const audioOption = document.getElementById('agent4AudioOption').value;
+                    
+                    if (!userID || !sessionID || !scriptText) {
+                        throw new Error('User ID, Session ID, and Script are required for Agent4');
+                    }
+                    
+                    sessionId = sessionID;
+                    
+                    // Parse script JSON
+                    let script;
+                    try {
+                        script = JSON.parse(scriptText);
+                    } catch (e) {
+                        throw new Error(`Invalid script JSON: ${e.message}`);
+                    }
+                    
+                    requestData.userID = userID;
+                    requestData.sessionID = sessionID;
+                    requestData.script = script;
+                    requestData.voice = voice;
+                    requestData.audio_option = audioOption;
+                }
+                // Handle Agent5 mode
+                else if (agentSelection === 'Agent5') {
+                    const userID = document.getElementById('agent5UserID').value.trim();
+                    const sessionID = document.getElementById('agent5SessionID').value.trim();
+                    const supersessionid = document.getElementById('agent5SupersessionID').value.trim();
+                    
+                    if (!userID || !sessionID || !supersessionid) {
+                        throw new Error('User ID, Session ID, and Super Session ID are required for Agent5');
+                    }
+                    
+                    sessionId = sessionID;
+                    requestData.userID = userID;
+                    requestData.sessionID = sessionID;
+                    requestData.supersessionid = supersessionid;
+                }
+                
+                // Set current session ID
+                currentSessionId = sessionId;
+                reconnectAttempts = 0;
+
                 // Connect to WebSocket first and wait for connection confirmation
                 console.log('Connecting to WebSocket...');
-                await connectWebSocket(formData.sessionID);
+                await connectWebSocket(sessionId);
                 console.log('WebSocket connected and ready');
 
                 // Small delay to ensure connection is fully established
                 await new Promise(resolve => setTimeout(resolve, 200));
 
                 // Call API endpoint
-                console.log('Calling /api/startprocessing...');
+                console.log('Calling /api/startprocessing...', requestData);
                 const response = await fetch(`${API_BASE_URL}/api/startprocessing`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(formData)
+                    body: JSON.stringify(requestData)
                 });
 
                 const result = await response.json();
@@ -721,7 +844,7 @@
                     console.log('Processing started successfully:', result);
                     submitBtn.textContent = 'Processing...';
                 } else {
-                    throw new Error(result.message || 'Failed to start processing');
+                    throw new Error(result.message || result.detail || 'Failed to start processing');
                 }
             } catch (error) {
                 console.error('Error starting processing:', error);
@@ -735,120 +858,7 @@
             }
         });
 
-        // Tab switching functionality
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                // Update tab buttons
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-
-                // Update tab content
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                const tabId = btn.getAttribute('data-tab');
-                document.getElementById(`${tabId}-tab`).classList.add('active');
-            });
-        });
-
-        // Agent 4 Form Submission
-        const agent4Form = document.getElementById('agent4Form');
-        const a4SubmitBtn = document.getElementById('a4-submitBtn');
-        const a4Status = document.getElementById('a4-status');
-        const a4Results = document.getElementById('a4-results');
-        const a4AudioFiles = document.getElementById('a4-audio-files');
-        const a4ResultJson = document.getElementById('a4-result-json');
-
-        agent4Form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const sessionId = document.getElementById('a4-sessionID').value.trim();
-            const voice = document.getElementById('a4-voice').value;
-            const scriptText = document.getElementById('a4-script').value.trim();
-
-            // Parse and validate script JSON
-            let script;
-            try {
-                script = JSON.parse(scriptText);
-            } catch (err) {
-                alert('Invalid JSON in script field: ' + err.message);
-                return;
-            }
-
-            // Disable button and show processing state
-            a4SubmitBtn.disabled = true;
-            a4SubmitBtn.textContent = 'Generating Audio...';
-            a4Status.className = 'connection-status connecting';
-            a4Status.textContent = 'Processing...';
-            a4Results.style.display = 'none';
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/agent4/test`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        script: script,
-                        voice: voice,
-                        audio_option: 'tts'
-                    })
-                });
-
-                const result = await response.json();
-
-                if (response.ok && result.success) {
-                    // Display success results
-                    a4Status.className = 'connection-status connected';
-                    a4Status.textContent = 'Complete!';
-                    a4Results.style.display = 'block';
-
-                    // Display audio files
-                    a4AudioFiles.innerHTML = '';
-                    if (result.data && result.data.audio_files) {
-                        result.data.audio_files.forEach(file => {
-                            const fileItem = document.createElement('div');
-                            fileItem.className = 'audio-file-item';
-
-                            // Build audio player HTML if we have a URL or filepath
-                            let audioPlayerHtml = '';
-                            if (file.url) {
-                                audioPlayerHtml = `<audio controls class="audio-player"><source src="${file.url}" type="audio/mpeg">Your browser does not support audio.</audio>`;
-                            } else if (file.filepath) {
-                                // For local files, we need to serve them through an endpoint
-                                const encodedPath = encodeURIComponent(file.filepath);
-                                audioPlayerHtml = `<audio controls class="audio-player"><source src="${API_BASE_URL}/api/audio/local?path=${encodedPath}" type="audio/mpeg">Your browser does not support audio.</audio>`;
-                            }
-
-                            fileItem.innerHTML = `
-                                <h4>${file.part.charAt(0).toUpperCase() + file.part.slice(1)}</h4>
-                                <div class="audio-file-meta">
-                                    Duration: ${file.duration}s |
-                                    Cost: $${file.cost?.toFixed(4) || '0.0000'} |
-                                    Characters: ${file.character_count || 'N/A'}
-                                </div>
-                                ${audioPlayerHtml}
-                            `;
-                            a4AudioFiles.appendChild(fileItem);
-                        });
-                    }
-
-                    // Display full JSON result
-                    a4ResultJson.textContent = JSON.stringify(result, null, 2);
-                } else {
-                    throw new Error(result.error || result.detail || 'Agent 4 processing failed');
-                }
-            } catch (error) {
-                console.error('Agent 4 error:', error);
-                a4Status.className = 'connection-status disconnected';
-                a4Status.textContent = `Error: ${error.message}`;
-                a4Results.style.display = 'block';
-                a4ResultJson.textContent = `Error: ${error.message}`;
-                a4AudioFiles.innerHTML = '';
-            } finally {
-                a4SubmitBtn.disabled = false;
-                a4SubmitBtn.textContent = 'Generate Audio';
-            }
-        });
+        // Agent 4 Form Submission (deprecated - now handled in main form above)
     </script>
 </body>
 </html>
