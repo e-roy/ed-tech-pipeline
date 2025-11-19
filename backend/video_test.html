@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Player Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #fff;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .video-container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        video {
+            width: 100%;
+            max-width: 800px;
+            background: #000;
+        }
+        .url-display {
+            background: #0f3460;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        a {
+            color: #4CAF50;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #0f3460;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #video-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #0f3460;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Player Test</h1>
+
+    <div class="test-section">
+        <h3>Custom URL Test</h3>
+        <input type="text" id="custom-url" placeholder="Paste S3 URL here...">
+        <button onclick="loadCustomVideo()">Load Video</button>
+    </div>
+
+    <div class="video-container">
+        <h3>Hardcoded Test Video</h3>
+        <video id="test-video" controls preload="auto">
+            Your browser does not support video playback.
+        </video>
+        <div class="url-display" id="current-url">No video loaded</div>
+        <div id="video-info">Video info will appear here...</div>
+        <p>
+            <a id="download-link" href="#" download="test_video.mp4">Download Video</a>
+        </p>
+    </div>
+
+    <script>
+        // Hardcoded S3 URL - latest generated video
+        const hardcodedUrl = 'https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/test_user/1_test/final_video_b96d092e.mp4?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=XCL5YmUaqcP0Mb2cIjXTdQapjCc%3D&Expires=1763576838';
+
+        const video = document.getElementById('test-video');
+        const urlDisplay = document.getElementById('current-url');
+        const downloadLink = document.getElementById('download-link');
+        const videoInfo = document.getElementById('video-info');
+        const customUrlInput = document.getElementById('custom-url');
+
+        // Set up video event listeners
+        video.addEventListener('loadedmetadata', function() {
+            videoInfo.innerHTML = `
+                <strong>Video Metadata Loaded:</strong><br>
+                Duration: ${video.duration.toFixed(2)} seconds<br>
+                Width: ${video.videoWidth}px<br>
+                Height: ${video.videoHeight}px<br>
+                Ready State: ${video.readyState}
+            `;
+        });
+
+        video.addEventListener('error', function(e) {
+            videoInfo.innerHTML = `
+                <strong style="color: red;">Error loading video:</strong><br>
+                Error code: ${video.error ? video.error.code : 'unknown'}<br>
+                Error message: ${video.error ? video.error.message : 'unknown'}
+            `;
+        });
+
+        video.addEventListener('canplay', function() {
+            videoInfo.innerHTML += '<br><strong style="color: #4CAF50;">Video can play!</strong>';
+        });
+
+        function loadVideo(url) {
+            video.src = url;
+            urlDisplay.textContent = url;
+            downloadLink.href = url;
+            video.load();
+            videoInfo.textContent = 'Loading video...';
+        }
+
+        function loadCustomVideo() {
+            const url = customUrlInput.value.trim();
+            if (url) {
+                loadVideo(url);
+            }
+        }
+
+        // Load hardcoded video on page load
+        window.onload = function() {
+            customUrlInput.value = hardcodedUrl;
+            loadVideo(hardcodedUrl);
+        };
+    </script>
+</body>
+</html>
