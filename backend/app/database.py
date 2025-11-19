@@ -9,34 +9,32 @@ from app.config import get_settings
 settings = get_settings()
 
 # Create SQLAlchemy engine
-# For Neon/SSL connections, modify connection string to avoid certificate file requirements
+# For Neon/SSL connections, configure SSL via connect_args to avoid certificate file requirements
 database_url = settings.DATABASE_URL
+connect_args = {}
 
-# If using Neon or SSL-required connection, modify sslmode to avoid certificate file lookups
+# If using Neon database, configure SSL without requiring certificate files
 if "neon" in database_url.lower():
     import re
-    # For Neon, we need SSL but without certificate files
-    # Use sslmode=require but add empty sslcert/sslkey parameters to prevent file lookups
-    if "sslmode=require" in database_url:
-        # Keep require but add empty cert parameters to prevent file lookups
-        if "sslcert=" not in database_url.lower():
-            # Add empty sslcert and sslkey to prevent psycopg from looking for cert files
-            separator = "&" if "?" in database_url else "?"
-            database_url = database_url + f"{separator}sslcert=&sslkey=&sslrootcert="
-    elif "?" in database_url and "sslmode" not in database_url.lower():
-        # Add sslmode=require with empty cert parameters
-        database_url = database_url + "&sslmode=require&sslcert=&sslkey=&sslrootcert="
-    elif "sslmode" not in database_url.lower():
-        # No sslmode at all, add it with empty cert parameters
-        separator = "?" if "?" not in database_url else "&"
-        database_url = database_url + f"{separator}sslmode=require&sslcert=&sslkey=&sslrootcert="
+    # Remove sslmode from URL if present (we'll set it via connect_args)
+    database_url = re.sub(r"[&?]sslmode=[^&]*", "", database_url, flags=re.IGNORECASE)
+    # Remove any trailing & or ? if they become empty
+    database_url = re.sub(r"[&?]$", "", database_url)
+    
+    # Configure SSL via connect_args - this bypasses psycopg's certificate file lookup
+    # For Neon, we need SSL but don't need client certificates
+    connect_args = {
+        "sslmode": "require",
+        # Don't specify sslcert/sslkey - psycopg will use SSL without client certs
+    }
 
 engine = create_engine(
     database_url,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,
-    max_overflow=20
+    max_overflow=20,
+    connect_args=connect_args
 )
 
 # Create SessionLocal class for database sessions
