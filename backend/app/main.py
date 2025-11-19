@@ -203,7 +203,8 @@ async def agent_2_process(
         session_id=session_id,
         template_id=template_id,
         chosen_diagram_id=chosen_diagram_id,
-        script_id=script_id
+        script_id=script_id,
+        storage_service=storage_service
     )
 
 

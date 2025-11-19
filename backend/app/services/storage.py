@@ -922,3 +922,40 @@ class StorageService:
         except ClientError as e:
             logger.error(f"Failed to list directory structure: {e}")
             raise Exception(f"Directory listing failed: {e}")
+
+    def copy_file(self, source_key: str, dest_key: str) -> str:
+        """
+        Copy a file within the same S3 bucket.
+
+        Args:
+            source_key: Source S3 object key
+            dest_key: Destination S3 object key
+
+        Returns:
+            S3 URL of copied file
+
+        Raises:
+            ValueError: If storage service not configured
+            Exception: If copy fails
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        try:
+            copy_source = {
+                'Bucket': self.bucket_name,
+                'Key': source_key
+            }
+            self.s3_client.copy_object(
+                CopySource=copy_source,
+                Bucket=self.bucket_name,
+                Key=dest_key
+            )
+
+            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{dest_key}"
+            logger.info(f"Copied file from {source_key} to {dest_key}")
+            return s3_url
+
+        except ClientError as e:
+            logger.error(f"File copy failed: {e}")
+            raise Exception(f"Copy failed: {e}")
