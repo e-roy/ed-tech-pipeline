@@ -34,10 +34,8 @@ export function DashboardLayoutClient({
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
-        <div className="p-2">
-          <div className="flex h-full flex-col rounded-xl border">
-            {children}
-          </div>
+        <div className="">
+          <div className="flex h-full flex-col">{children}</div>
         </div>
       )}
     </SidebarInset>
