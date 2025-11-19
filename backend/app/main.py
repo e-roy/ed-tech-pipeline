@@ -5,15 +5,18 @@ import time
 import asyncio
 import json
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.config import get_settings
 from app.services.storage import StorageService
 from app.services.websocket_manager import WebSocketManager
+from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -268,16 +271,77 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 
 # =============================================================================
+# Video Session API Endpoint
+# =============================================================================
+
+@app.get("/api/get-video-session/{session_id}")
+async def get_video_session(session_id: str, db: Session = Depends(get_db)):
+    """
+    Get video_session row by session_id.
+    
+    Returns full row data including topic, confirmed_facts, generated_script, etc.
+    """
+    try:
+        result = db.execute(
+            text("SELECT * FROM video_session WHERE id = :session_id"),
+            {"session_id": session_id}
+        ).fetchone()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Video session {session_id} not found")
+        
+        # Convert row to dict
+        # SQLAlchemy 2.0+ Row objects support _mapping attribute for dict conversion
+        if hasattr(result, '_mapping'):
+            row_dict = dict(result._mapping)
+        else:
+            # Fallback: try attribute access (SQLAlchemy 1.4 style)
+            row_dict = {
+                "id": getattr(result, 'id', None),
+                "user_id": getattr(result, 'user_id', None),
+                "status": getattr(result, 'status', None),
+                "topic": getattr(result, 'topic', None),
+                "learning_objective": getattr(result, 'learning_objective', None),
+                "confirmed_facts": getattr(result, 'confirmed_facts', None),
+                "generated_script": getattr(result, 'generated_script', None),
+                "created_at": getattr(result, 'created_at', None),
+                "updated_at": getattr(result, 'updated_at', None)
+            }
+        
+        # Convert datetime objects to ISO format strings
+        if row_dict.get('created_at'):
+            row_dict['created_at'] = row_dict['created_at'].isoformat()
+        if row_dict.get('updated_at'):
+            row_dict['updated_at'] = row_dict['updated_at'].isoformat()
+        
+        return row_dict
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Database error querying video_session: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# =============================================================================
 # Start Processing API Endpoint
 # =============================================================================
 
 class StartProcessingRequest(BaseModel):
     """Request model for starting the agent processing pipeline."""
-    userID: str
-    sessionID: str
-    templateID: str
-    chosenDiagramID: str
-    scriptID: str
+    agent_selection: Optional[str] = "Full Test"  # "Full Test", "Agent2", "Agent4", "Agent5"
+    video_session_data: Optional[dict] = None  # For Full Test mode
+    # Individual agent fields (optional, required for individual agents)
+    userID: Optional[str] = None
+    sessionID: Optional[str] = None
+    templateID: Optional[str] = None
+    chosenDiagramID: Optional[str] = None
+    scriptID: Optional[str] = None
+    # Agent4 specific fields
+    script: Optional[dict] = None  # For Agent4
+    voice: Optional[str] = None  # For Agent4
+    audio_option: Optional[str] = None  # For Agent4
+    # Agent5 specific fields
+    supersessionid: Optional[str] = None  # For Agent5
 
 
 class StartProcessingResponse(BaseModel):
@@ -295,86 +359,265 @@ async def start_processing(
     """
     Start the agent processing pipeline.
     
-    Accepts a JSON object with userID, sessionID, templateID, chosenDiagramID, and scriptID.
-    Returns immediately with success message and triggers Agent2 in the background.
+    Supports multiple modes:
+    - Full Test: Uses video_session_data from database
+    - Agent2: Minimal inputs (userID, sessionID)
+    - Agent4: Requires script, voice, audio_option
+    - Agent5: Requires userID, sessionID, supersessionid
     """
-    # Input validation
-    if not request.userID or not request.userID.strip():
-        raise HTTPException(status_code=400, detail="userID is required and cannot be empty")
-    if not request.sessionID or not request.sessionID.strip():
-        raise HTTPException(status_code=400, detail="sessionID is required and cannot be empty")
-    if not request.templateID or not request.templateID.strip():
-        raise HTTPException(status_code=400, detail="templateID is required and cannot be empty")
-    if not request.chosenDiagramID or not request.chosenDiagramID.strip():
-        raise HTTPException(status_code=400, detail="chosenDiagramID is required and cannot be empty")
-    if not request.scriptID or not request.scriptID.strip():
-        raise HTTPException(status_code=400, detail="scriptID is required and cannot be empty")
+    agent_selection = request.agent_selection or "Full Test"
     
-    # Start Agent2 in background with error handling
-    async def run_agent_2_with_error_handling():
-        """Wrapper to catch and log errors in background task."""
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Starting Agent2 background task for session {request.sessionID}")
+    # Handle Full Test mode
+    if agent_selection == "Full Test":
+        if not request.video_session_data:
+            raise HTTPException(status_code=400, detail="video_session_data is required for Full Test")
+        if not request.video_session_data.get("id"):
+            raise HTTPException(status_code=400, detail="video_session_data must contain 'id'")
         
-        # Wait for WebSocket connection to be established (with shorter timeout)
-        # This ensures the connection is ready before we start sending status updates
-        # Note: Due to multi-worker setup, connection might be on different worker
-        # We'll proceed anyway and try to send messages
-        logger.info(f"Waiting for WebSocket connection for session {request.sessionID}...")
-        connection_ready = await websocket_manager.wait_for_connection(
-            request.sessionID,
-            max_wait=3.0,  # Wait up to 3 seconds (reduced from 10)
-            check_interval=0.1  # Check every 100ms (more frequent)
-        )
+        session_id = request.video_session_data["id"]
         
-        if connection_ready:
-            logger.info(f"WebSocket connection confirmed for session {request.sessionID}, starting Agent2")
-        else:
-            logger.warning(f"No WebSocket connection found for session {request.sessionID} after waiting. This may be due to multi-worker setup. Proceeding anyway - messages will be sent if connection exists on this worker.")
-        
-        try:
-            await agent_2_process(
-                user_id=request.userID,
-                session_id=request.sessionID,
-                template_id=request.templateID,
-                chosen_diagram_id=request.chosenDiagramID,
-                script_id=request.scriptID
-            )
-            logger.info(f"Agent2 background task completed for session {request.sessionID}")
-        except Exception as e:
-            # Log error and send error status via WebSocket
-            logger.exception(f"Error in agent_2_process for session {request.sessionID}: {e}")
+        # Start Agent2 with video_session_data
+        async def run_agent_2_with_error_handling():
+            """Wrapper to catch and log errors in background task."""
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting Agent2 background task for Full Test, session {session_id}")
             
-            # Try to send error status via WebSocket
+            # Wait for WebSocket connection
+            logger.info(f"Waiting for WebSocket connection for session {session_id}...")
+            connection_ready = await websocket_manager.wait_for_connection(
+                session_id,
+                max_wait=3.0,
+                check_interval=0.1
+            )
+            
+            if connection_ready:
+                logger.info(f"WebSocket connection confirmed for session {session_id}, starting Agent2")
+            else:
+                logger.warning(f"No WebSocket connection found for session {session_id} after waiting. Proceeding anyway.")
+            
             try:
-                await websocket_manager.send_progress(request.sessionID, {
-                    "agentnumber": "Agent2",
-                    "userID": request.userID,
-                    "sessionID": request.sessionID,
-                    "status": "error",
-                    "error": str(e),
-                    "reason": f"Agent2 failed: {type(e).__name__}"
-                })
-            except Exception as ws_error:
-                logger.error(f"Failed to send error status via WebSocket: {ws_error}")
+                # Get user_id from video_session_data, handle None case
+                user_id = request.video_session_data.get("user_id") or ""
+                if not user_id:
+                    logger.warning(f"user_id is missing or None in video_session_data for session {session_id}")
+                
+                await agent_2_process_impl(
+                    websocket_manager=websocket_manager,
+                    user_id=user_id,
+                    session_id=session_id,
+                    template_id="",  # Not used in Full Test
+                    chosen_diagram_id="",  # Not used in Full Test
+                    script_id="",  # Not used in Full Test
+                    storage_service=storage_service,
+                    video_session_data=request.video_session_data
+                )
+                logger.info(f"Agent2 background task completed for session {session_id}")
+            except Exception as e:
+                logger.exception(f"Error in agent_2_process for session {session_id}: {e}")
+                try:
+                    user_id = request.video_session_data.get("user_id") or ""
+                    await websocket_manager.send_progress(session_id, {
+                        "agentnumber": "Agent2",
+                        "userID": user_id,
+                        "sessionID": session_id,
+                        "status": "error",
+                        "error": str(e),
+                        "reason": f"Agent2 failed: {type(e).__name__}"
+                    })
+                except Exception as ws_error:
+                    logger.error(f"Failed to send error status via WebSocket: {ws_error}")
+        
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run_agent_2_with_error_handling())
+        if not hasattr(app.state, 'background_tasks'):
+            app.state.background_tasks = set()
+        app.state.background_tasks.add(task)
+        task.add_done_callback(app.state.background_tasks.discard)
+        
+        return StartProcessingResponse(
+            success=True,
+            message="Full Test processing started successfully",
+            sessionID=session_id
+        )
     
-    # Use asyncio.create_task for async background tasks
-    # Get the current event loop to ensure task is scheduled properly
-    loop = asyncio.get_event_loop()
-    task = loop.create_task(run_agent_2_with_error_handling())
-    # Store task reference to prevent garbage collection
-    if not hasattr(app.state, 'background_tasks'):
-        app.state.background_tasks = set()
-    app.state.background_tasks.add(task)
-    task.add_done_callback(app.state.background_tasks.discard)
+    # Handle individual agent modes
+    elif agent_selection == "Agent2":
+        if not request.userID or not request.userID.strip():
+            raise HTTPException(status_code=400, detail="userID is required for Agent2")
+        if not request.sessionID or not request.sessionID.strip():
+            raise HTTPException(status_code=400, detail="sessionID is required for Agent2")
+        
+        # Start Agent2 with minimal inputs
+        async def run_agent_2_with_error_handling():
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting Agent2 for session {request.sessionID}")
+            
+            connection_ready = await websocket_manager.wait_for_connection(
+                request.sessionID,
+                max_wait=3.0,
+                check_interval=0.1
+            )
+            
+            try:
+                await agent_2_process_impl(
+                    websocket_manager=websocket_manager,
+                    user_id=request.userID,
+                    session_id=request.sessionID,
+                    template_id="",  # Stub
+                    chosen_diagram_id="",  # Stub
+                    script_id="",  # Stub
+                    storage_service=storage_service,
+                    video_session_data=None
+                )
+            except Exception as e:
+                logger.exception(f"Error in agent_2_process: {e}")
+                try:
+                    await websocket_manager.send_progress(request.sessionID, {
+                        "agentnumber": "Agent2",
+                        "userID": request.userID,
+                        "sessionID": request.sessionID,
+                        "status": "error",
+                        "error": str(e),
+                        "reason": f"Agent2 failed: {type(e).__name__}"
+                    })
+                except Exception:
+                    pass
+        
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run_agent_2_with_error_handling())
+        if not hasattr(app.state, 'background_tasks'):
+            app.state.background_tasks = set()
+        app.state.background_tasks.add(task)
+        task.add_done_callback(app.state.background_tasks.discard)
+        
+        return StartProcessingResponse(
+            success=True,
+            message="Agent2 started successfully",
+            sessionID=request.sessionID
+        )
     
-    # Return immediately with success message
-    return StartProcessingResponse(
-        success=True,
-        message="Processing started successfully",
-        sessionID=request.sessionID
-    )
+    elif agent_selection == "Agent4":
+        if not request.userID or not request.userID.strip():
+            raise HTTPException(status_code=400, detail="userID is required for Agent4")
+        if not request.sessionID or not request.sessionID.strip():
+            raise HTTPException(status_code=400, detail="sessionID is required for Agent4")
+        if not request.script:
+            raise HTTPException(status_code=400, detail="script is required for Agent4")
+        
+        # Start Agent4 directly
+        async def run_agent_4_with_error_handling():
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting Agent4 for session {request.sessionID}")
+            
+            connection_ready = await websocket_manager.wait_for_connection(
+                request.sessionID,
+                max_wait=3.0,
+                check_interval=0.1
+            )
+            
+            try:
+                from app.agents.agent_4 import agent_4_process
+                # Generate a supersessionid for Agent4
+                import secrets
+                supersessionid = f"{request.sessionID}_{secrets.token_urlsafe(12)[:16]}"
+                
+                await agent_4_process(
+                    websocket_manager=websocket_manager,
+                    user_id=request.userID,
+                    session_id=request.sessionID,
+                    supersessionid=supersessionid,
+                    script=request.script,
+                    voice=request.voice or "alloy",
+                    audio_option=request.audio_option or "tts",
+                    storage_service=storage_service,
+                    agent2_data=None  # Deprecated
+                )
+            except Exception as e:
+                logger.exception(f"Error in agent_4_process: {e}")
+                try:
+                    await websocket_manager.send_progress(request.sessionID, {
+                        "agentnumber": "Agent4",
+                        "userID": request.userID,
+                        "sessionID": request.sessionID,
+                        "status": "error",
+                        "error": str(e),
+                        "reason": f"Agent4 failed: {type(e).__name__}"
+                    })
+                except Exception:
+                    pass
+        
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run_agent_4_with_error_handling())
+        if not hasattr(app.state, 'background_tasks'):
+            app.state.background_tasks = set()
+        app.state.background_tasks.add(task)
+        task.add_done_callback(app.state.background_tasks.discard)
+        
+        return StartProcessingResponse(
+            success=True,
+            message="Agent4 started successfully",
+            sessionID=request.sessionID
+        )
+    
+    elif agent_selection == "Agent5":
+        if not request.userID or not request.userID.strip():
+            raise HTTPException(status_code=400, detail="userID is required for Agent5")
+        if not request.sessionID or not request.sessionID.strip():
+            raise HTTPException(status_code=400, detail="sessionID is required for Agent5")
+        if not request.supersessionid or not request.supersessionid.strip():
+            raise HTTPException(status_code=400, detail="supersessionid is required for Agent5")
+        
+        # Start Agent5 directly
+        async def run_agent_5_with_error_handling():
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting Agent5 for session {request.sessionID}")
+            
+            connection_ready = await websocket_manager.wait_for_connection(
+                request.sessionID,
+                max_wait=3.0,
+                check_interval=0.1
+            )
+            
+            try:
+                from app.agents.agent_5 import agent_5_process
+                await agent_5_process(
+                    websocket_manager=websocket_manager,
+                    user_id=request.userID,
+                    session_id=request.sessionID,
+                    supersessionid=request.supersessionid,
+                    storage_service=storage_service,
+                    pipeline_data=None  # Optional
+                )
+            except Exception as e:
+                logger.exception(f"Error in agent_5_process: {e}")
+                try:
+                    await websocket_manager.send_progress(request.sessionID, {
+                        "agentnumber": "Agent5",
+                        "userID": request.userID,
+                        "sessionID": request.sessionID,
+                        "status": "error",
+                        "error": str(e),
+                        "reason": f"Agent5 failed: {type(e).__name__}"
+                    })
+                except Exception:
+                    pass
+        
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run_agent_5_with_error_handling())
+        if not hasattr(app.state, 'background_tasks'):
+            app.state.background_tasks = set()
+        app.state.background_tasks.add(task)
+        task.add_done_callback(app.state.background_tasks.discard)
+        
+        return StartProcessingResponse(
+            success=True,
+            message="Agent5 started successfully",
+            sessionID=request.sessionID
+        )
+    
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_selection: {agent_selection}. Must be 'Full Test', 'Agent2', 'Agent4', or 'Agent5'")
 
 
 # =============================================================================
