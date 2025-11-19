@@ -1,5 +1,5 @@
 """
-Scaffold Agent 5 - Test Agent for Processing Pipeline
+Agent 5 - Test Agent for Processing Pipeline
 
 This is a scaffolding agent for testing the agent processing pipeline.
 Functionality will be added between status states.

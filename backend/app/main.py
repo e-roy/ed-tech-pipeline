@@ -182,7 +182,7 @@ async def scaffoldtest_ui():
 # Import agents from agents folder
 # =============================================================================
 
-from app.agents.scaffold_agent_2 import agent_2_process as agent_2_process_impl
+from app.agents.agent_2 import agent_2_process as agent_2_process_impl
 
 
 async def agent_2_process(

@@ -1,5 +1,5 @@
 """
-Scaffold Agent 4 - Test Agent for Processing Pipeline
+Agent 4 - Test Agent for Processing Pipeline
 
 This is a scaffolding agent for testing the agent processing pipeline.
 Functionality will be added between status states.
@@ -61,7 +61,7 @@ async def agent_4_process(
         # TODO: Add cleanup/finalization logic here
         
         # Trigger Agent5 with userID and sessionID
-        from app.agents.scaffold_agent_5 import agent_5_process
+        from app.agents.agent_5 import agent_5_process
         await agent_5_process(websocket_manager, user_id, session_id)
         
     except Exception as e:
