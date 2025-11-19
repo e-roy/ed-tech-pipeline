@@ -1038,8 +1038,8 @@ async def test_agent5_video(request: Agent5TestRequest) -> AgentTestResponse:
         supersessionid = f"{request.session_id}_test"
 
         # Use real WebSocket manager so UI can receive progress updates
-        # Run agent 5
-        await agent_5_process(
+        # Run agent 5 and get the video URL directly
+        video_url = await agent_5_process(
             websocket_manager=websocket_manager,
             user_id="test_user",
             session_id=request.session_id,
@@ -1047,28 +1047,6 @@ async def test_agent5_video(request: Agent5TestRequest) -> AgentTestResponse:
             storage_service=storage_service,
             pipeline_data=request.pipeline_data
         )
-
-        # Get the video URL from S3
-        # Find the most recent video file for this session
-        prefix = f"scaffold_test/test_user/{supersessionid}/"
-
-        # List files to find the video
-        if storage_service.s3_client:
-            response = storage_service.s3_client.list_objects_v2(
-                Bucket=storage_service.bucket_name,
-                Prefix=prefix,
-                MaxKeys=100
-            )
-
-            video_url = None
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    if obj['Key'].endswith('.mp4'):
-                        # Generate URL with 24-hour expiry for testing
-                        video_url = storage_service.generate_presigned_url(obj['Key'], expires_in=86400)
-                        break
-        else:
-            video_url = None
 
         return AgentTestResponse(
             success=True,
