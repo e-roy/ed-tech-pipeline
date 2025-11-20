@@ -527,23 +527,22 @@ async def agent_5_process(
                     consistency_parts.append(f"Students: {students_desc}")
                 consistency_anchor = " | ".join(consistency_parts) + " | "
 
-            # Generate prompts for each clip with extended context
+            # Generate progressive prompts for each clip position
             clip_prompts = []
             for i in range(clips_needed):
-                camera_movements = [
-                    "smooth camera movement",
-                    "gentle dynamic motion",
-                    "fluid camera flow",
-                    "steady cinematic movement"
-                ]
-                camera = camera_movements[i % len(camera_movements)]
-
-                if i == 0:
-                    # First clip: Use full prompt with consistency anchor
-                    clip_prompt = f"{consistency_anchor}{prompt}, {camera}, maintaining consistent visual style throughout"
+                # Create clip-specific temporal and action cues based on position
+                if clips_needed == 1:
+                    # Single clip: use full prompt as-is
+                    clip_prompt = f"{consistency_anchor}{prompt}, smooth cinematic movement, maintaining consistent visual style throughout"
+                elif i == 0:
+                    # First clip: Opening/beginning of action
+                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt}, camera slowly pushes in, characters beginning action, establishing shot with clear framing"
+                elif i == clips_needed - 1:
+                    # Final clip: Conclusion of action
+                    clip_prompt = f"{consistency_anchor}CONTINUING FINAL SHOT: {prompt}, camera holds steady from previous angle, characters completing action, maintaining exact same composition and lighting as previous clip"
                 else:
-                    # Subsequent clips: Reference previous clip for continuity
-                    clip_prompt = f"{consistency_anchor}Continuing seamlessly from previous moment, {prompt}, same characters and setting as before, {camera}, maintaining exact same visual style and appearance"
+                    # Middle clips: Progression of action
+                    clip_prompt = f"{consistency_anchor}MID-SEQUENCE SHOT {i+1}: {prompt}, camera maintains previous angle and framing, characters mid-action, same positioning and lighting"
 
                 clip_prompts.append(clip_prompt)
 
