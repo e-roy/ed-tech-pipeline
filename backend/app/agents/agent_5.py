@@ -145,7 +145,11 @@ async def render_video_with_remotion(
     scenes: List[Dict],
     background_music_url: str,
     output_path: str,
-    temp_dir: str
+    temp_dir: str,
+    websocket_manager: Optional[WebSocketManager] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    supersessionid: Optional[str] = None
 ) -> str:
     """
     Render video using Remotion CLI.
@@ -155,6 +159,10 @@ async def render_video_with_remotion(
         background_music_url: URL or path to background music
         output_path: Path for output video file
         temp_dir: Temp directory containing local image files
+        websocket_manager: Optional WebSocket manager for progress updates
+        session_id: Optional session ID for progress updates
+        user_id: Optional user ID for progress updates
+        supersessionid: Optional supersession ID for progress updates
 
     Returns:
         Path to rendered video
@@ -205,8 +213,8 @@ async def render_video_with_remotion(
 
     try:
         # Run Remotion render
-        # Use subprocess.run with asyncio.to_thread to avoid uvloop subprocess issues
         import subprocess
+        import re
 
         # Log the props for debugging
         print(f"Remotion props: {json.dumps(props, indent=2)}")
@@ -215,24 +223,70 @@ async def render_video_with_remotion(
 
         cmd = f"bunx remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
 
-        result = await asyncio.to_thread(
-            subprocess.run,
+        # Use Popen to stream output and send progress updates
+        process = subprocess.Popen(
             cmd,
             cwd=str(REMOTION_DIR),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             shell=True,
-            env={**os.environ, "PATH": f"/Users/mfuechec/.bun/bin:{os.environ.get('PATH', '')}"}
+            env={**os.environ, "PATH": f"/Users/mfuechec/.bun/bin:{os.environ.get('PATH', '')}"},
+            bufsize=1
         )
 
-        # Log stdout/stderr for debugging
-        if result.stdout:
-            print(f"Remotion stdout: {result.stdout}")
-        if result.stderr:
-            print(f"Remotion stderr: {result.stderr}")
+        output_lines = []
+        last_progress_update = 0
 
-        if result.returncode != 0:
-            raise RuntimeError(f"Remotion render failed: {result.stderr}\n{result.stdout}")
+        # Stream output and parse progress
+        def read_output():
+            nonlocal last_progress_update
+            for line in iter(process.stdout.readline, ''):
+                output_lines.append(line)
+                print(line, end='')
+
+                # Parse rendering progress: "Rendered 100/1800"
+                match = re.search(r'Rendered (\d+)/(\d+)', line)
+                if match and websocket_manager and session_id:
+                    current = int(match.group(1))
+                    total = int(match.group(2))
+                    percent = int((current / total) * 100)
+
+                    # Only send updates every 5% to avoid flooding
+                    if percent >= last_progress_update + 5 or current == total:
+                        last_progress_update = percent
+                        # Schedule the async send in the event loop
+                        import asyncio
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.run_coroutine_threadsafe(
+                                    websocket_manager.send_progress(session_id, {
+                                        "agentnumber": "Agent5",
+                                        "userID": user_id or "",
+                                        "sessionID": session_id,
+                                        "supersessionID": supersessionid or "",
+                                        "status": "processing",
+                                        "message": f"Rendering video: {percent}% ({current}/{total} frames)",
+                                        "timestamp": int(time.time() * 1000),
+                                        "progress": {
+                                            "stage": "rendering",
+                                            "current": current,
+                                            "total": total,
+                                            "percent": percent
+                                        }
+                                    }),
+                                    loop
+                                )
+                        except Exception as e:
+                            print(f"Failed to send render progress: {e}")
+
+        # Run the output reading in a thread
+        await asyncio.to_thread(read_output)
+        process.wait()
+
+        if process.returncode != 0:
+            raise RuntimeError(f"Remotion render failed:\n{''.join(output_lines)}")
 
         # Check output file size
         if os.path.exists(output_path):
@@ -404,6 +458,9 @@ async def agent_5_process(
         await create_status_json("5", "processing", status_data)
 
         # Generate all 4 videos in parallel using asyncio.gather
+        # Track completion for progress updates
+        completed_videos = []
+
         async def generate_section_video(section: str) -> tuple[str, str]:
             """Generate video for a section and return (section, url)"""
             prompt = visual_prompts[section]
@@ -412,6 +469,26 @@ async def agent_5_process(
                 settings.REPLICATE_API_KEY,
                 model="minimax"
             )
+
+            # Send progress update when this video completes
+            completed_videos.append(section)
+            status_data = {
+                "agentnumber": "Agent5",
+                "userID": user_id,
+                "sessionID": session_id,
+                "supersessionID": supersessionid,
+                "status": "processing",
+                "message": f"Generated video {len(completed_videos)}/4 ({section})",
+                "timestamp": int(time.time() * 1000),
+                "progress": {
+                    "stage": "video_generation",
+                    "completed": len(completed_videos),
+                    "total": 4,
+                    "section": section
+                }
+            }
+            await websocket_manager.send_progress(session_id, status_data)
+
             return (section, video_url)
 
         # Run all 4 video generations in parallel
@@ -447,7 +524,16 @@ async def agent_5_process(
 
         # Render video
         output_path = os.path.join(temp_dir, "output.mp4")
-        await render_video_with_remotion(scenes, background_music_url, output_path, temp_dir)
+        await render_video_with_remotion(
+            scenes,
+            background_music_url,
+            output_path,
+            temp_dir,
+            websocket_manager=websocket_manager,
+            session_id=session_id,
+            user_id=user_id,
+            supersessionid=supersessionid
+        )
 
         # Upload video to S3
         import uuid

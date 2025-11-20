@@ -1299,13 +1299,45 @@
                 wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
                 wsPath = `${wsUrl}/ws/${sessionId}`;
             }
+            // Wait for WebSocket to be ready before making API call
+            let connectionReady = false;
+            let wsResolve, wsReject;
+            const wsPromise = new Promise((resolve, reject) => {
+                wsResolve = resolve;
+                wsReject = reject;
+            });
+
+            const timeout = setTimeout(() => {
+                wsReject(new Error('WebSocket connection timeout'));
+            }, 10000);
+
             a5Websocket = new WebSocket(wsPath);
 
-            // Set up message handler for progress updates
+            a5Websocket.onerror = (err) => {
+                console.error('WebSocket error:', err);
+            };
+
+            a5Websocket.onopen = () => {
+                console.log('WebSocket opened');
+                a5Status.textContent = 'WebSocket opened, waiting for confirmation...';
+            };
+
+            // Set up message handler that handles both connection_ready and progress updates
             a5Websocket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
+                    console.log('WebSocket message:', data);
 
+                    // Handle connection ready confirmation
+                    if (data.type === 'connection_ready' && data.status === 'connected') {
+                        clearTimeout(timeout);
+                        connectionReady = true;
+                        a5Status.textContent = 'Connected. Generating AI Videos in parallel... This may take 2-5 minutes.';
+                        wsResolve();
+                        return;
+                    }
+
+                    // Handle Agent5 progress updates
                     if (data.agentnumber === 'Agent5') {
                         const msg = data.message || data.status;
                         a5Status.textContent = `${data.status}: ${msg}`;
@@ -1323,47 +1355,11 @@
                         }
                     }
                 } catch (err) {
-                    console.log('WebSocket message:', event.data);
+                    console.log('WebSocket message (raw):', event.data);
                 }
             };
 
-            a5Websocket.onerror = (err) => {
-                console.error('WebSocket error:', err);
-            };
-
-            // Wait for WebSocket to be ready before making API call
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('WebSocket connection timeout'));
-                }, 10000);
-
-                a5Websocket.onopen = () => {
-                    a5Status.textContent = 'WebSocket opened, waiting for confirmation...';
-                };
-
-                // Override onmessage temporarily to catch connection_ready
-                const originalOnMessage = a5Websocket.onmessage;
-                a5Websocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-
-                        // Handle connection ready confirmation
-                        if (data.type === 'connection_ready' && data.status === 'connected') {
-                            clearTimeout(timeout);
-                            a5Status.textContent = 'Connected. Generating AI Videos in parallel... This may take 2-5 minutes.';
-                            // Restore original message handler
-                            a5Websocket.onmessage = originalOnMessage;
-                            resolve();
-                            return;
-                        }
-
-                        // Forward to original handler
-                        originalOnMessage(event);
-                    } catch (err) {
-                        console.log('WebSocket message:', event.data);
-                    }
-                };
-            });
+            await wsPromise;
 
             try {
                 const response = await fetch(`${API_BASE_URL}/api/agent5/test`, {
