@@ -16,24 +16,21 @@ connect_args = {}
 # If using Neon database, configure SSL without requiring certificate files
 if "neon" in database_url.lower():
     import re
+
     # Remove sslmode from URL if present (we'll set it via connect_args)
     database_url = re.sub(r"[&?]sslmode=[^&]*", "", database_url, flags=re.IGNORECASE)
-    # Remove any trailing & or ? if they become empty
     database_url = re.sub(r"[&?]$", "", database_url)
-    
-    # Use sslmode=prefer instead of require - this will use SSL if available
-    # but won't fail if certificate files aren't found (workaround for psycopg certificate lookup)
-    # Neon supports SSL without client certificates, so prefer mode works fine
+
     connect_args = {
-        "sslmode": "prefer",
-        # Don't specify sslcert/sslkey - psycopg will use SSL without client certs
+        "sslmode": "require",
+        "sslrootcert": "/etc/pki/tls/certs/ca-bundle.crt",
+        # Disable attempts to read ~/.postgresql certificates (blocked by ProtectHome)
+        "sslcert": "",
+        "sslkey": "",
     }
 
-# Fallback: ensure sslmode=prefer for any PostgreSQL connection unless explicitly overridden
-if (
-    database_url.startswith("postgresql")
-    and "sslmode" not in connect_args
-):
+# Fallback: ensure SSL is at least preferred for PostgreSQL connections
+if database_url.startswith("postgresql") and "sslmode" not in connect_args:
     connect_args["sslmode"] = "prefer"
 
 engine = create_engine(
