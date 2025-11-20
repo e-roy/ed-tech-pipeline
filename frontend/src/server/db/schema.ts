@@ -19,3 +19,6 @@ export { videoSessions, videoAssets } from "./video-generation/schema";
 
 // Re-export webhook tables
 export { webhookLogs } from "./webhooks/schema";
+
+// Re-export error report tables
+export { errorReports } from "./error-reports/schema";
