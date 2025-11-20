@@ -488,23 +488,44 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
 
-            # Generate prompts for each clip with progressive camera movements
+            # Extract base_scene parameters if present for consistency
+            base_scene = pipeline_data.get("base_scene", {})
+            style = base_scene.get("style", "")
+            setting = base_scene.get("setting", "")
+            teacher_desc = base_scene.get("teacher", "")
+            students_desc = base_scene.get("students", "")
+
+            # Build consistency anchor
+            consistency_anchor = ""
+            if style or setting or teacher_desc or students_desc:
+                consistency_parts = []
+                if style:
+                    consistency_parts.append(style)
+                if setting:
+                    consistency_parts.append(f"Setting: {setting}")
+                if teacher_desc:
+                    consistency_parts.append(f"Teacher: {teacher_desc}")
+                if students_desc:
+                    consistency_parts.append(f"Students: {students_desc}")
+                consistency_anchor = " | ".join(consistency_parts) + " | "
+
+            # Generate prompts for each clip with extended context
             clip_prompts = []
             for i in range(clips_needed):
                 camera_movements = [
-                    "slow zoom in, focusing on key details",
-                    "gentle pan across the scene",
-                    "smooth tracking shot",
-                    "gradual zoom out to show context"
+                    "smooth camera movement",
+                    "gentle dynamic motion",
+                    "fluid camera flow",
+                    "steady cinematic movement"
                 ]
                 camera = camera_movements[i % len(camera_movements)]
 
                 if i == 0:
-                    clip_prompt = f"Opening: {prompt}. {camera}."
-                elif i == clips_needed - 1:
-                    clip_prompt = f"Conclusion: {prompt}. {camera}."
+                    # First clip: Use full prompt with consistency anchor
+                    clip_prompt = f"{consistency_anchor}{prompt}, {camera}, maintaining consistent visual style throughout"
                 else:
-                    clip_prompt = f"Continuation: {prompt}. {camera}."
+                    # Subsequent clips: Reference previous clip for continuity
+                    clip_prompt = f"{consistency_anchor}Continuing seamlessly from previous moment, {prompt}, same characters and setting as before, {camera}, maintaining exact same visual style and appearance"
 
                 clip_prompts.append(clip_prompt)
 
