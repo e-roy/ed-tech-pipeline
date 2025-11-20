@@ -36,14 +36,6 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
-
-@app.get("/health")
-@app.get("/api/health")
-def health_check():
-    """Simple health endpoint for load balancers and monitoring."""
-    return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
-
-
 # Configure CORS for Next.js frontend
 # Allow Vercel frontend and local development
 frontend_url = settings.FRONTEND_URL
@@ -322,29 +314,31 @@ async def websocket_endpoint_query(websocket: WebSocket):
             except:
                 pass
     
+    # If still no session_id, reject connection
+    if not session_id:
+        logger.warning(f"WebSocket connection rejected: no session_id found in query string or headers. URL: {websocket.url}")
+        await websocket.close(code=1008, reason="session_id required in query string or headers")
+        return
+    
     connection_id = f"ws_{secrets.token_urlsafe(16)}"
     
     await websocket_manager.connect(websocket, session_id, connection_id)
-
-    if session_id:
-        # Send connection confirmation to client immediately
-        try:
-            await websocket.send_text(json.dumps({
-                "type": "connection_ready",
-                "sessionID": session_id,
-                "status": "connected"
-            }))
-        except Exception as e:
-            logger.error(f"Failed to send connection ready message: {e}")
-    else:
-        logger.info("WebSocket connected without session_id. Waiting for register message.")
+    
+    # Send connection confirmation to client
+    try:
+        await websocket.send_text(json.dumps({
+            "type": "connection_ready",
+            "sessionID": session_id,
+            "status": "connected"
+        }))
+    except Exception as e:
+        logger.error(f"Failed to send connection ready message: {e}")
     
     # Shared connection handling logic
     await _handle_websocket_connection(websocket, session_id, connection_id)
 
-async def _handle_websocket_connection(websocket: WebSocket, session_id: Optional[str], connection_id: str):
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
     """Shared WebSocket connection handling logic."""
-    active_session_id = session_id
     try:
         while True:
             # Keep connection alive - wait for any message (text or ping/pong)
@@ -354,56 +348,9 @@ async def _handle_websocket_connection(websocket: WebSocket, session_id: Optiona
                 # Client can send messages if needed, but we primarily use this for receiving
                 try:
                     message = json.loads(data)
-                    msg_type = message.get("type")
-
-                    if msg_type == "ping":
+                    if message.get("type") == "ping":
+                        # Respond to ping with pong
                         await websocket.send_text(json.dumps({"type": "pong"}))
-                        continue
-
-                    if msg_type == "register":
-                        requested_session_id = message.get("sessionID") or message.get("session_id")
-                        if not requested_session_id:
-                            await websocket.send_text(json.dumps({
-                                "type": "error",
-                                "message": "sessionID required for register"
-                            }))
-                            continue
-
-                        if not active_session_id:
-                            registered_socket = await websocket_manager.complete_registration(
-                                connection_id,
-                                requested_session_id
-                            )
-                            if registered_socket is None:
-                                await websocket.send_text(json.dumps({
-                                    "type": "error",
-                                    "message": "registration_failed"
-                                }))
-                                continue
-
-                            active_session_id = requested_session_id
-                            await websocket.send_text(json.dumps({
-                                "type": "connection_ready",
-                                "sessionID": requested_session_id,
-                                "status": "connected"
-                            }))
-                            continue
-
-                        # Already registered connection (e.g., direct path). Confirm status.
-                        if requested_session_id != active_session_id:
-                            await websocket.send_text(json.dumps({
-                                "type": "error",
-                                "message": "session_id_mismatch",
-                                "expected": active_session_id
-                            }))
-                            continue
-
-                        await websocket.send_text(json.dumps({
-                            "type": "connection_ready",
-                            "sessionID": active_session_id,
-                            "status": "connected"
-                        }))
-                        continue
                 except json.JSONDecodeError:
                     pass
             except WebSocketDisconnect:
@@ -416,8 +363,8 @@ async def _handle_websocket_connection(websocket: WebSocket, session_id: Optiona
                     break
     except WebSocketDisconnect:
         pass
-        finally:
-            await websocket_manager.disconnect(websocket, active_session_id, connection_id)
+    finally:
+        await websocket_manager.disconnect(websocket, session_id, connection_id)
 
 async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
     """Shared WebSocket connection handling logic."""
