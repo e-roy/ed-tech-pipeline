@@ -932,6 +932,40 @@
             
             const agentSelection = document.getElementById('agentSelection').value;
             
+            // Collect form data based on agent selection
+            let formData = {};
+            
+            if (agentSelection === 'Full Test') {
+                formData = {
+                    sessionID: document.getElementById('fullTestSessionID').value
+                };
+            } else if (agentSelection === 'Agent2') {
+                formData = {
+                    userID: document.getElementById('agent2UserID').value,
+                    sessionID: document.getElementById('agent2SessionID').value
+                };
+            } else if (agentSelection === 'Agent4') {
+                formData = {
+                    userID: document.getElementById('agent4UserID').value,
+                    sessionID: document.getElementById('agent4SessionID').value,
+                    voice: document.getElementById('agent4Voice').value,
+                    audioOption: document.getElementById('agent4AudioOption').value,
+                    script: document.getElementById('agent4Script').value
+                };
+            } else if (agentSelection === 'Agent5') {
+                formData = {
+                    userID: document.getElementById('agent5UserID').value,
+                    sessionID: document.getElementById('agent5SessionID').value,
+                    supersessionID: document.getElementById('agent5SupersessionID').value
+                };
+            }
+            
+            // Validate required fields
+            if (!formData.sessionID) {
+                alert('Session ID is required');
+                return;
+            }
+            
             // Reset status lights
             resetAgentStatuses();
             
