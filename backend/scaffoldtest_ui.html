@@ -349,6 +349,8 @@
             <div class="form-group" id="fullTestGroup">
                 <label for="fullTestSessionID">Session ID:</label>
                 <input type="text" id="fullTestSessionID" name="fullTestSessionID" value="3oyCVhHND75RwUKhdLpy0">
+                <label for="fullTestUserID">User ID:</label>
+                <input type="text" id="fullTestUserID" name="fullTestUserID" value="test-user">
             </div>
 
             <!-- Agent2 fields -->
@@ -938,7 +940,8 @@
             
             if (agentSelection === 'Full Test') {
                 formData = {
-                    sessionID: document.getElementById('fullTestSessionID').value
+                    sessionID: document.getElementById('fullTestSessionID').value,
+                    userID: document.getElementById('fullTestUserID').value
                 };
             } else if (agentSelection === 'Agent2') {
                 formData = {
@@ -960,6 +963,8 @@
                     supersessionID: document.getElementById('agent5SupersessionID').value
                 };
             }
+            
+            formData.agent_selection = agentSelection;
             
             // Validate required fields
             if (!formData.sessionID) {
