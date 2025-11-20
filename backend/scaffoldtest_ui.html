@@ -449,6 +449,11 @@
                     Your browser does not support video playback.
                 </video>
             </div>
+
+            <div class="result-section" id="videoSessionData" style="display: none;">
+                <h3>Video Session Data</h3>
+                <pre id="videoSessionDataContent" class="result-content"></pre>
+            </div>
         </div>
         </div>
 
@@ -815,15 +820,17 @@
                                     const videoSessionDataDiv = document.getElementById('videoSessionData');
                                     const videoSessionDataContent = document.getElementById('videoSessionDataContent');
                                     
-                                    const displayData = {
-                                        topic: message.topic,
-                                        confirmed_facts: message.confirmed_facts,
-                                        generation_script: message.generation_script,
-                                        generated_fields: message.generated_fields || []
-                                    };
-                                    
-                                    videoSessionDataContent.textContent = JSON.stringify(displayData, null, 2);
-                                    videoSessionDataDiv.style.display = 'block';
+                                    if (videoSessionDataDiv && videoSessionDataContent) {
+                                        const displayData = {
+                                            topic: message.topic,
+                                            confirmed_facts: message.confirmed_facts,
+                                            generation_script: message.generation_script,
+                                            generated_fields: message.generated_fields || []
+                                        };
+                                        
+                                        videoSessionDataContent.textContent = JSON.stringify(displayData, null, 2);
+                                        videoSessionDataDiv.style.display = 'block';
+                                    }
                                 }
                                 
                                 // If Agent5 finished and has videoUrl, display it
@@ -928,8 +935,11 @@
             // Reset status lights
             resetAgentStatuses();
             
-            // Hide video session data display
-            document.getElementById('videoSessionData').style.display = 'none';
+            // Hide video session data display (if it exists)
+            const videoSessionDataEl = document.getElementById('videoSessionData');
+            if (videoSessionDataEl) {
+                videoSessionDataEl.style.display = 'none';
+            }
             
             // Disable submit button
             submitBtn.disabled = true;
