@@ -29,6 +29,13 @@ if "neon" in database_url.lower():
         # Don't specify sslcert/sslkey - psycopg will use SSL without client certs
     }
 
+# Fallback: ensure sslmode=prefer for any PostgreSQL connection unless explicitly overridden
+if (
+    database_url.startswith("postgresql")
+    and "sslmode" not in connect_args
+):
+    connect_args["sslmode"] = "prefer"
+
 engine = create_engine(
     database_url,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
