@@ -498,8 +498,9 @@ class StartProcessingResponse(BaseModel):
 @app.post("/api/startprocessing", response_model=StartProcessingResponse)
 async def start_processing(
     request: StartProcessingRequest,
-    background_tasks: BackgroundTasks
-):
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> StartProcessingResponse:
     """
     Start the agent processing pipeline.
     
@@ -513,20 +514,76 @@ async def start_processing(
     
     # Handle Full Test mode
     if agent_selection == "Full Test":
-        if not request.video_session_data:
-            raise HTTPException(status_code=400, detail="video_session_data is required for Full Test")
-        if not request.video_session_data.get("id"):
-            raise HTTPException(status_code=400, detail="video_session_data must contain 'id'")
-        
-        session_id = request.video_session_data["id"]
-        
+        video_session_data = request.video_session_data
+        session_id: Optional[str] = None
+        user_id: Optional[str] = None
+
+        if video_session_data:
+            session_id = video_session_data.get("id") or request.sessionID
+            user_id = video_session_data.get("user_id") or request.userID
+        else:
+            if not request.sessionID or not request.userID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="sessionID and userID are required for Full Test when video_session_data is not provided",
+                )
+            session_id = request.sessionID.strip()
+            user_id = request.userID.strip()
+            try:
+                result = db.execute(
+                    text(
+                        "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                    ),
+                    {"session_id": session_id, "user_id": user_id},
+                ).fetchone()
+            except Exception as e:
+                logger.exception("Error querying video_session: %s", e)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to load video_session data. Please try again.",
+                )
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Video session not found for session_id={session_id} and user_id={user_id}",
+                )
+
+            if hasattr(result, "_mapping"):
+                video_session_data = dict(result._mapping)
+            else:
+                # Fallback for older SQLAlchemy versions
+                video_session_data = {
+                    "id": getattr(result, "id", None),
+                    "user_id": getattr(result, "user_id", None),
+                    "generated_script": getattr(result, "generated_script", None),
+                }
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Missing session ID for Full Test")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Missing user ID for Full Test")
+        if not video_session_data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to resolve video_session_data for Full Test",
+            )
+
         # Start Agent2 with video_session_data
         async def run_agent_2_with_error_handling():
             """Wrapper to catch and log errors in background task."""
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"Starting Agent2 background task for Full Test, session {session_id}")
-            
+            logger.info(
+                "Starting Agent2 background task for Full Test, session %s, user %s",
+                session_id,
+                user_id,
+            )
+
+            # Copy data into task scope
+            local_video_session_data = video_session_data
+            local_user_id = user_id
+
             # Wait for WebSocket connection
             logger.info(f"Waiting for WebSocket connection for session {session_id}...")
             connection_ready = await websocket_manager.wait_for_connection(
@@ -536,34 +593,48 @@ async def start_processing(
             )
             
             if connection_ready:
-                logger.info(f"WebSocket connection confirmed for session {session_id}, starting Agent2")
+                logger.info("WebSocket connection confirmed for session %s", session_id)
+                try:
+                    await websocket_manager.send_progress(
+                        session_id,
+                        {
+                            "type": "video_session_loaded",
+                            "sessionID": session_id,
+                            "userID": local_user_id,
+                            "generated_script": local_video_session_data.get("generated_script"),
+                            "videoSession": local_video_session_data,
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send video_session data for session %s: %s",
+                        session_id,
+                        e,
+                    )
             else:
-                logger.warning(f"No WebSocket connection found for session {session_id} after waiting. Proceeding anyway.")
+                logger.warning(
+                    "No WebSocket connection found for session %s after waiting. Proceeding anyway.",
+                    session_id,
+                )
             
             try:
-                # Get user_id from video_session_data, handle None case
-                user_id = request.video_session_data.get("user_id") or ""
-                if not user_id:
-                    logger.warning(f"user_id is missing or None in video_session_data for session {session_id}")
-                
                 await agent_2_process_impl(
                     websocket_manager=websocket_manager,
-                    user_id=user_id,
+                    user_id=local_user_id,
                     session_id=session_id,
                     template_id="",  # Not used in Full Test
                     chosen_diagram_id="",  # Not used in Full Test
                     script_id="",  # Not used in Full Test
                     storage_service=storage_service,
-                    video_session_data=request.video_session_data
+                    video_session_data=local_video_session_data
                 )
                 logger.info(f"Agent2 background task completed for session {session_id}")
             except Exception as e:
                 logger.exception(f"Error in agent_2_process for session {session_id}: {e}")
                 try:
-                    user_id = request.video_session_data.get("user_id") or ""
                     await websocket_manager.send_progress(session_id, {
                         "agentnumber": "Agent2",
-                        "userID": user_id,
+                        "userID": local_user_id,
                         "sessionID": session_id,
                         "status": "error",
                         "error": str(e),
