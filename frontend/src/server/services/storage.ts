@@ -12,6 +12,9 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "@/env";
+import { db } from "@/server/db";
+import { videoAssets, videoSessions } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
 
 // Initialize S3 client (only if credentials are provided)
 let s3Client: S3Client | null = null;
@@ -33,6 +36,44 @@ function getS3Client(): S3Client {
     });
   }
   return s3Client;
+}
+
+/**
+ * Infer content type from file extension.
+ */
+function getContentTypeFromKey(key: string): string {
+  const ext = key.split(".").pop()?.toLowerCase();
+  const contentTypes: Record<string, string> = {
+    // Images
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    // Videos
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    avi: "video/x-msvideo",
+    // Audio
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    // Documents
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    // Text
+    txt: "text/plain",
+    md: "text/markdown",
+    json: "application/json",
+    // Other
+    zip: "application/zip",
+  };
+  return ext
+    ? (contentTypes[ext] ?? "application/octet-stream")
+    : "application/octet-stream";
 }
 
 /**
@@ -101,19 +142,19 @@ export async function listUserFiles(
   } else {
     // For output folder, list both traditional output and session image folders
     const prefixes: string[] = [];
-    
+
     // Add traditional output prefix
     if (asset_type) {
       prefixes.push(`users/${userId}/output/${asset_type}/`);
     } else {
       prefixes.push(`users/${userId}/output/`);
     }
-    
+
     // Also search for session image folders: users/{userId}/*/images/**
     // List all session folders under user prefix
     const userPrefix = `users/${userId}/`;
     const sessionFolders: string[] = [];
-    
+
     // List all session folders (users/{userId}/{session_id}/)
     let continuationToken: string | undefined;
     do {
@@ -126,24 +167,25 @@ export async function listUserFiles(
       });
 
       const response = await client.send(command);
-      
+
       // Collect session folder prefixes
       if (response.CommonPrefixes) {
         for (const prefix of response.CommonPrefixes) {
           if (prefix.Prefix) {
             // Check if this session folder has an images subfolder
             // We'll list it directly: users/{userId}/{session_id}/images/
-            const sessionIdMatch = prefix.Prefix.match(/^users\/\d+\/([^/]+)\/$/);
+            const sessionIdRegex = /^users\/\d+\/([^/]+)\/$/;
+            const sessionIdMatch = sessionIdRegex.exec(prefix.Prefix);
             if (sessionIdMatch) {
               sessionFolders.push(`${prefix.Prefix}images/`);
             }
           }
         }
       }
-      
+
       continuationToken = response.NextContinuationToken;
     } while (continuationToken);
-    
+
     // Now list files from each session's images folder
     for (const sessionImagesPrefix of sessionFolders) {
       let sessionContinuationToken: string | undefined;
@@ -157,14 +199,19 @@ export async function listUserFiles(
 
         const response = await client.send(command);
         if (response.Contents) {
-        const validObjects = response.Contents.filter(
-          (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-        )
+          const validObjects = response.Contents.filter(
+            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+          )
             .filter((obj) => {
               // Only include image files, exclude segments.md, status.json, and diagram.png
               const key = obj.Key;
               const isImage = /\.(png|jpg|jpeg|gif|webp)$/i.test(key);
-              return isImage && !key.endsWith("segments.md") && !key.endsWith("status.json") && !key.endsWith("diagram.png");
+              return (
+                isImage &&
+                !key.endsWith("segments.md") &&
+                !key.endsWith("status.json") &&
+                !key.endsWith("diagram.png")
+              );
             })
             .map((obj) => ({
               Key: obj.Key,
@@ -177,7 +224,7 @@ export async function listUserFiles(
         sessionContinuationToken = response.NextContinuationToken;
       } while (sessionContinuationToken);
     }
-    
+
     // Also list traditional output folder files
     for (const prefix of prefixes) {
       let continuationToken: string | undefined;
@@ -191,14 +238,14 @@ export async function listUserFiles(
 
         const response = await client.send(command);
         if (response.Contents) {
-        const validObjects = response.Contents.filter(
-          (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-        ).map((obj) => ({
-          Key: obj.Key,
-          Size: obj.Size ?? 0,
-          LastModified: obj.LastModified,
-          ContentType: undefined, // ListObjectsV2 doesn't return ContentType
-        }));
+          const validObjects = response.Contents.filter(
+            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
+          ).map((obj) => ({
+            Key: obj.Key,
+            Size: obj.Size ?? 0,
+            LastModified: obj.LastModified,
+            ContentType: undefined, // ListObjectsV2 doesn't return ContentType
+          }));
           allObjects.push(...validObjects);
         }
         continuationToken = response.NextContinuationToken;
@@ -228,7 +275,7 @@ export async function listUserFiles(
         key,
         size: obj.Size ?? 0,
         last_modified: obj.LastModified?.toISOString() ?? null,
-        content_type: obj.ContentType ?? "application/octet-stream",
+        content_type: getContentTypeFromKey(key),
         presigned_url: presignedUrl,
       };
     }),
@@ -307,4 +354,230 @@ export async function getPresignedUrl(
     presigned_url: presignedUrl,
     expires_in: expiresIn,
   };
+}
+
+/**
+ * List directory structure under users/{userId}/ with folders and files.
+ * Uses S3 delimiter to get folder structure.
+ */
+export async function listDirectoryStructure(
+  userId: string,
+  prefix?: string,
+): Promise<{
+  folders: Array<{ name: string; path: string }>;
+  files: Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }>;
+  prefix: string;
+}> {
+  if (!env.S3_BUCKET_NAME) {
+    throw new Error("S3_BUCKET_NAME not configured");
+  }
+
+  const basePrefix = `users/${userId}/`;
+  const fullPrefix = prefix
+    ? `${basePrefix}${prefix}${prefix.endsWith("/") ? "" : "/"}`
+    : basePrefix;
+
+  const client = getS3Client();
+  const folders: Array<{ name: string; path: string }> = [];
+  const files: Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }> = [];
+
+  let continuationToken: string | undefined;
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: env.S3_BUCKET_NAME,
+      Prefix: fullPrefix,
+      Delimiter: "/",
+      ContinuationToken: continuationToken,
+    });
+
+    const response = await client.send(command);
+
+    // Get folders (CommonPrefixes)
+    if (response.CommonPrefixes) {
+      for (const commonPrefix of response.CommonPrefixes) {
+        if (commonPrefix.Prefix) {
+          const folderPath = commonPrefix.Prefix;
+          const folderName = folderPath
+            .slice(fullPrefix.length)
+            .replace(/\/$/, "");
+          folders.push({
+            name: folderName,
+            path: folderPath,
+          });
+        }
+      }
+    }
+
+    // Get files (Contents)
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (!obj.Key) continue;
+        const s3Key = obj.Key;
+
+        // Skip directory markers
+        if (s3Key.endsWith("/")) {
+          continue;
+        }
+
+        // Generate presigned URL
+        const presignedUrl = await getSignedUrl(
+          client,
+          new GetObjectCommand({
+            Bucket: env.S3_BUCKET_NAME,
+            Key: s3Key,
+          }),
+          { expiresIn: 3600 }, // 1 hour
+        );
+
+        // Extract file name
+        const fileName = s3Key.slice(fullPrefix.length);
+
+        files.push({
+          key: s3Key,
+          name: fileName,
+          size: obj.Size ?? 0,
+          last_modified: obj.LastModified?.toISOString() ?? null,
+          content_type: getContentTypeFromKey(s3Key),
+          presigned_url: presignedUrl,
+        });
+      }
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return {
+    folders,
+    files,
+    prefix: fullPrefix,
+  };
+}
+
+/**
+ * List all files recursively from S3 for a user (no delimiter, flat list).
+ * This returns all files under users/{userId}/ regardless of folder structure.
+ */
+export async function listAllS3Files(userId: string): Promise<
+  Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }>
+> {
+  if (!env.S3_BUCKET_NAME) {
+    throw new Error("S3_BUCKET_NAME not configured");
+  }
+
+  const prefix = `users/${userId}/`;
+  const client = getS3Client();
+  const allFiles: Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }> = [];
+
+  let continuationToken: string | undefined;
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: env.S3_BUCKET_NAME,
+      Prefix: prefix,
+      // No delimiter - this lists all files recursively
+      ContinuationToken: continuationToken,
+    });
+
+    const response = await client.send(command);
+
+    if (response.Contents) {
+      // Generate presigned URLs for all files in this batch
+      const filesWithUrls = await Promise.all(
+        response.Contents.map(async (obj) => {
+          if (!obj.Key || obj.Key.endsWith("/")) {
+            return null; // Skip directory markers
+          }
+
+          const presignedUrl = await getSignedUrl(
+            client,
+            new GetObjectCommand({
+              Bucket: env.S3_BUCKET_NAME,
+              Key: obj.Key,
+            }),
+            { expiresIn: 3600 }, // 1 hour
+          );
+
+          // Extract file name (everything after the prefix)
+          const fileName = obj.Key.slice(prefix.length);
+
+          return {
+            key: obj.Key,
+            name: fileName,
+            size: obj.Size ?? 0,
+            last_modified: obj.LastModified?.toISOString() ?? null,
+            content_type: getContentTypeFromKey(obj.Key),
+            presigned_url: presignedUrl,
+          };
+        }),
+      );
+
+      // Filter out nulls and add to allFiles
+      for (const file of filesWithUrls) {
+        if (file) {
+          allFiles.push(file);
+        }
+      }
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return allFiles;
+}
+
+/**
+ * Get all assets for a user from the database.
+ * Queries videoAssets table filtered by userId via videoSessions join.
+ */
+export async function getUserAssets(userId: string): Promise<
+  Array<{
+    id: string;
+    assetType: string;
+    url: string | null;
+    sessionId: string;
+    metadata: unknown;
+    createdAt: Date;
+  }>
+> {
+  const assets = await db
+    .select({
+      id: videoAssets.id,
+      assetType: videoAssets.assetType,
+      url: videoAssets.url,
+      sessionId: videoAssets.sessionId,
+      metadata: videoAssets.metadata,
+      createdAt: videoAssets.createdAt,
+    })
+    .from(videoAssets)
+    .innerJoin(videoSessions, eq(videoAssets.sessionId, videoSessions.id))
+    .where(eq(videoSessions.userId, userId));
+
+  return assets;
 }
