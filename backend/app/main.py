@@ -37,11 +37,30 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
+
+@app.get("/health")
+@app.get("/api/health")
+def health_check():
+    """Health endpoint for load balancers and monitoring."""
+    return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
+
+
 # Configure CORS for Next.js frontend
+# Allow Vercel frontend and local development
+frontend_url = settings.FRONTEND_URL
+cors_origins = [
+    frontend_url,
+    "http://localhost:3000",  # Local development
+    "http://localhost:3001",  # Alternative local port
+]
+
+# Add API Gateway domain if using (optional, for direct API Gateway access)
+# cors_origins.append("https://*.execute-api.us-east-2.amazonaws.com")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=cors_origins,
+    allow_credentials=True,  # Enable credentials for auth cookies/tokens
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -243,6 +262,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     Clients connect to this endpoint to receive status updates from agents.
     Messages are filtered by session_id.
+    
+    Path parameter format: `/ws/{session_id}` (for direct connections)
     """
     import secrets
     connection_id = f"ws_{secrets.token_urlsafe(16)}"
@@ -259,6 +280,103 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except Exception as e:
         logger.error(f"Failed to send connection ready message: {e}")
     
+    # Shared connection handling logic
+    await _handle_websocket_connection(websocket, session_id, connection_id)
+
+@app.websocket("/ws")
+async def websocket_endpoint_query(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time agent status updates (query parameter version).
+    
+    This endpoint supports API Gateway which passes session_id as query parameter.
+    Format: `/ws?session_id=xxx`
+    
+    Also supports API Gateway WebSocket where query params may be in the request URL.
+    """
+    import secrets
+    from urllib.parse import parse_qs
+    
+    # Extract session_id from query params (API Gateway compatibility)
+    query_string = websocket.url.query
+    
+    # Try to get session_id from query string
+    session_id = None
+    if query_string:
+        query_params = parse_qs(query_string)
+        session_id = query_params.get('session_id', [None])[0]
+    
+    # If not in query string, try to get from headers (API Gateway may pass it there)
+    if not session_id:
+        # Check for session_id in headers (some API Gateway configurations pass it here)
+        session_id = websocket.headers.get('x-session-id') or websocket.headers.get('session-id')
+    
+    # If still not found, try to extract from URL path (fallback)
+    if not session_id:
+        # Check if URL path contains session_id (e.g., /ws?session_id=xxx but parsed differently)
+        url_str = str(websocket.url)
+        if 'session_id=' in url_str:
+            try:
+                # Extract from URL string directly
+                parts = url_str.split('session_id=')
+                if len(parts) > 1:
+                    session_id = parts[1].split('&')[0].split('/')[0]
+            except:
+                pass
+    
+    # If still no session_id, reject connection
+    if not session_id:
+        logger.warning(f"WebSocket connection rejected: no session_id found in query string or headers. URL: {websocket.url}")
+        await websocket.close(code=1008, reason="session_id required in query string or headers")
+        return
+    
+    connection_id = f"ws_{secrets.token_urlsafe(16)}"
+    
+    await websocket_manager.connect(websocket, session_id, connection_id)
+    
+    # Send connection confirmation to client
+    try:
+        await websocket.send_text(json.dumps({
+            "type": "connection_ready",
+            "sessionID": session_id,
+            "status": "connected"
+        }))
+    except Exception as e:
+        logger.error(f"Failed to send connection ready message: {e}")
+    
+    # Shared connection handling logic
+    await _handle_websocket_connection(websocket, session_id, connection_id)
+
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
+    """Shared WebSocket connection handling logic."""
+    try:
+        while True:
+            # Keep connection alive - wait for any message (text or ping/pong)
+            # This keeps the connection open to receive agent status updates
+            try:
+                data = await websocket.receive_text()
+                # Client can send messages if needed, but we primarily use this for receiving
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        # Respond to ping with pong
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                # Handle ping/pong or other WebSocket frames, but check if still connected
+                try:
+                    await websocket.receive()
+                except (WebSocketDisconnect, RuntimeError):
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await websocket_manager.disconnect(websocket, session_id, connection_id)
+
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
+    """Shared WebSocket connection handling logic."""
     try:
         while True:
             # Keep connection alive - wait for any message (text or ping/pong)
@@ -381,8 +499,9 @@ class StartProcessingResponse(BaseModel):
 @app.post("/api/startprocessing", response_model=StartProcessingResponse)
 async def start_processing(
     request: StartProcessingRequest,
-    background_tasks: BackgroundTasks
-):
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> StartProcessingResponse:
     """
     Start the agent processing pipeline.
     
@@ -396,20 +515,76 @@ async def start_processing(
     
     # Handle Full Test mode
     if agent_selection == "Full Test":
-        if not request.video_session_data:
-            raise HTTPException(status_code=400, detail="video_session_data is required for Full Test")
-        if not request.video_session_data.get("id"):
-            raise HTTPException(status_code=400, detail="video_session_data must contain 'id'")
-        
-        session_id = request.video_session_data["id"]
-        
+        video_session_data = request.video_session_data
+        session_id: Optional[str] = None
+        user_id: Optional[str] = None
+
+        if video_session_data:
+            session_id = video_session_data.get("id") or request.sessionID
+            user_id = video_session_data.get("user_id") or request.userID
+        else:
+            if not request.sessionID or not request.userID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="sessionID and userID are required for Full Test when video_session_data is not provided",
+                )
+            session_id = request.sessionID.strip()
+            user_id = request.userID.strip()
+            try:
+                result = db.execute(
+                    text(
+                        "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                    ),
+                    {"session_id": session_id, "user_id": user_id},
+                ).fetchone()
+            except Exception as e:
+                logger.exception("Error querying video_session: %s", e)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to load video_session data. Please try again.",
+                )
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Video session not found for session_id={session_id} and user_id={user_id}",
+                )
+
+            if hasattr(result, "_mapping"):
+                video_session_data = dict(result._mapping)
+            else:
+                # Fallback for older SQLAlchemy versions
+                video_session_data = {
+                    "id": getattr(result, "id", None),
+                    "user_id": getattr(result, "user_id", None),
+                    "generated_script": getattr(result, "generated_script", None),
+                }
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Missing session ID for Full Test")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Missing user ID for Full Test")
+        if not video_session_data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to resolve video_session_data for Full Test",
+            )
+
         # Start Agent2 with video_session_data
         async def run_agent_2_with_error_handling():
             """Wrapper to catch and log errors in background task."""
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"Starting Agent2 background task for Full Test, session {session_id}")
-            
+            logger.info(
+                "Starting Agent2 background task for Full Test, session %s, user %s",
+                session_id,
+                user_id,
+            )
+
+            # Copy data into task scope
+            local_video_session_data = video_session_data
+            local_user_id = user_id
+
             # Wait for WebSocket connection
             logger.info(f"Waiting for WebSocket connection for session {session_id}...")
             connection_ready = await websocket_manager.wait_for_connection(
@@ -419,34 +594,48 @@ async def start_processing(
             )
             
             if connection_ready:
-                logger.info(f"WebSocket connection confirmed for session {session_id}, starting Agent2")
+                logger.info("WebSocket connection confirmed for session %s", session_id)
+                try:
+                    await websocket_manager.send_progress(
+                        session_id,
+                        {
+                            "type": "video_session_loaded",
+                            "sessionID": session_id,
+                            "userID": local_user_id,
+                            "generated_script": local_video_session_data.get("generated_script"),
+                            "videoSession": local_video_session_data,
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send video_session data for session %s: %s",
+                        session_id,
+                        e,
+                    )
             else:
-                logger.warning(f"No WebSocket connection found for session {session_id} after waiting. Proceeding anyway.")
+                logger.warning(
+                    "No WebSocket connection found for session %s after waiting. Proceeding anyway.",
+                    session_id,
+                )
             
             try:
-                # Get user_id from video_session_data, handle None case
-                user_id = request.video_session_data.get("user_id") or ""
-                if not user_id:
-                    logger.warning(f"user_id is missing or None in video_session_data for session {session_id}")
-                
                 await agent_2_process_impl(
                     websocket_manager=websocket_manager,
-                    user_id=user_id,
+                    user_id=local_user_id,
                     session_id=session_id,
                     template_id="",  # Not used in Full Test
                     chosen_diagram_id="",  # Not used in Full Test
                     script_id="",  # Not used in Full Test
                     storage_service=storage_service,
-                    video_session_data=request.video_session_data
+                    video_session_data=local_video_session_data
                 )
                 logger.info(f"Agent2 background task completed for session {session_id}")
             except Exception as e:
                 logger.exception(f"Error in agent_2_process for session {session_id}: {e}")
                 try:
-                    user_id = request.video_session_data.get("user_id") or ""
                     await websocket_manager.send_progress(session_id, {
                         "agentnumber": "Agent2",
-                        "userID": user_id,
+                        "userID": local_user_id,
                         "sessionID": session_id,
                         "status": "error",
                         "error": str(e),
