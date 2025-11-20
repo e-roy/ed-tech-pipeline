@@ -416,8 +416,38 @@ async def _handle_websocket_connection(websocket: WebSocket, session_id: Optiona
                     break
     except WebSocketDisconnect:
         pass
+        finally:
+            await websocket_manager.disconnect(websocket, active_session_id, connection_id)
+
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
+    """Shared WebSocket connection handling logic."""
+    try:
+        while True:
+            # Keep connection alive - wait for any message (text or ping/pong)
+            # This keeps the connection open to receive agent status updates
+            try:
+                data = await websocket.receive_text()
+                # Client can send messages if needed, but we primarily use this for receiving
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        # Respond to ping with pong
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                # Handle ping/pong or other WebSocket frames, but check if still connected
+                try:
+                    await websocket.receive()
+                except (WebSocketDisconnect, RuntimeError):
+                    break
+    except WebSocketDisconnect:
+        pass
     finally:
-        await websocket_manager.disconnect(websocket, active_session_id, connection_id)
+        await websocket_manager.disconnect(websocket, session_id, connection_id)
+
 
 # =============================================================================
 # Video Session API Endpoint
