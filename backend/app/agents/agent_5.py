@@ -39,7 +39,8 @@ async def generate_video_replicate(
     prompt: str,
     api_key: str,
     model: str = "minimax",
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[callable] = None,
+    seed: Optional[int] = None
 ) -> str:
     """
     Generate a video using Replicate (Minimax video-01 by default).
@@ -49,6 +50,7 @@ async def generate_video_replicate(
         api_key: Replicate API key
         model: Model to use ("minimax", "kling", "luma")
         progress_callback: Optional callback for progress updates
+        seed: Optional random seed for reproducibility
 
     Returns:
         URL of the generated video
@@ -56,7 +58,8 @@ async def generate_video_replicate(
     service = ReplicateVideoService(api_key)
     return await service.generate_video(
         prompt=prompt,
-        model=model
+        model=model,
+        seed=seed
     )
 
 
@@ -544,13 +547,22 @@ async def agent_5_process(
 
                 clip_prompts.append(clip_prompt)
 
-            # Generate all clips for this section
+            # Generate deterministic seed for this section
+            # Use hash of section name to get consistent seed per section
+            import hashlib
+            section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
+            section_seed = section_hash % 100000  # Keep seed in reasonable range
+
+            logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
+
+            # Generate all clips for this section with same seed
             generated_clips = []
             for clip_idx, clip_prompt in enumerate(clip_prompts):
                 video_url = await generate_video_replicate(
                     clip_prompt,
                     settings.REPLICATE_API_KEY,
-                    model="minimax"
+                    model="minimax",
+                    seed=section_seed  # Same seed for all clips in this section
                 )
                 generated_clips.append(video_url)
 
