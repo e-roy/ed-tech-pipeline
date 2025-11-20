@@ -21,7 +21,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable, Awaitable
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
 from app.services.replicate_video import ReplicateVideoService
@@ -316,19 +318,21 @@ async def render_video_with_remotion(
 
 
 async def agent_5_process(
-    websocket_manager: WebSocketManager,
+    websocket_manager: Optional[WebSocketManager],
     user_id: str,
     session_id: str,
     supersessionid: str,
     storage_service: Optional[StorageService] = None,
     pipeline_data: Optional[Dict[str, Any]] = None,
-    generation_mode: str = "video"  # Kept for backwards compatibility, always uses video
+    generation_mode: str = "video",  # Kept for backwards compatibility, always uses video
+    db: Optional[Session] = None,
+    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
 ) -> Optional[str]:
     """
     Agent5: Video generation agent using Remotion.
 
     Args:
-        websocket_manager: WebSocket manager for status updates
+        websocket_manager: WebSocket manager for status updates (deprecated, use status_callback)
         user_id: User identifier
         session_id: Session identifier
         supersessionid: Super session identifier
@@ -337,6 +341,8 @@ async def agent_5_process(
             - script: Script with visual_prompt for each section
             - audio_data: Audio files and background music
         generation_mode: Deprecated - always uses AI video generation
+        db: Database session for querying video_session table
+        status_callback: Callback function for sending status updates to orchestrator
 
     Returns:
         The presigned URL of the uploaded video, or None on error
@@ -347,6 +353,33 @@ async def agent_5_process(
     if storage_service is None:
         storage_service = StorageService()
 
+    # Helper function to send status (via callback or websocket_manager)
+    async def send_status(agentnumber: str, status: str, **kwargs):
+        """Send status update via callback or websocket_manager."""
+        timestamp = int(time.time() * 1000)
+        
+        if status_callback:
+            # Use callback (preferred - goes through orchestrator)
+            await status_callback(
+                agentnumber=agentnumber,
+                status=status,
+                userID=user_id,
+                sessionID=session_id,
+                timestamp=timestamp,
+                **kwargs
+            )
+        elif websocket_manager:
+            # Fallback to direct websocket (for backwards compatibility)
+            status_data = {
+                "agentnumber": agentnumber,
+                "userID": user_id,
+                "sessionID": session_id,
+                "status": status,
+                "timestamp": timestamp,
+                **kwargs
+            }
+            await websocket_manager.send_progress(session_id, status_data)
+    
     # Helper function to create JSON status file in S3
     async def create_status_json(agent_number: str, status: str, status_data: dict):
         """Create a JSON file in S3 with status data."""
@@ -355,7 +388,8 @@ async def agent_5_process(
 
         timestamp = int(time.time() * 1000)
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        s3_key = f"scaffold_test/{user_id}/{supersessionid}/{filename}"
+        # Use scaffold_test/{userId}/{sessionId}/agent5/ path
+        s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{filename}"
 
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -366,13 +400,14 @@ async def agent_5_process(
                 ContentType='application/json'
             )
         except Exception as e:
-            print(f"Failed to create status JSON file: {e}")
+            logger.warning(f"Failed to create status JSON file: {e}")
 
     video_url = None
     temp_dir = None
 
     try:
         # Report starting status
+        await send_status("Agent5", "starting", supersessionID=supersessionid)
         status_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
@@ -381,31 +416,122 @@ async def agent_5_process(
             "status": "starting",
             "timestamp": int(time.time() * 1000)
         }
-        await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("5", "starting", status_data)
 
-        # Validate pipeline data
-        if not pipeline_data:
-            raise ValueError("No pipeline data provided")
-
-        # Support both old format and new agent-organized format
-        agent_2_data = pipeline_data.get("agent_2_data", {})
-        agent_4_data = pipeline_data.get("agent_4_data", {})
-
-        # If using new format, extract from agent data
-        if agent_2_data or agent_4_data:
-            script = agent_2_data.get("script", {})
-            audio_files = agent_4_data.get("audio_files", [])
-            background_music = agent_4_data.get("background_music", {})
-        else:
-            # Fallback to old format
-            script = pipeline_data.get("script", {})
-            audio_data = pipeline_data.get("audio_data", {})
-            audio_files = audio_data.get("audio_files", [])
-            background_music = audio_data.get("background_music", {})
-
-        if not script:
-            raise ValueError("No script data in pipeline")
+        # Scan S3 folders for Agent2 and Agent4 content
+        agent2_prefix = f"scaffold_test/{user_id}/{session_id}/agent2/"
+        agent4_prefix = f"scaffold_test/{user_id}/{session_id}/agent4/"
+        
+        script = {}
+        audio_files = []
+        background_music = {}
+        
+        try:
+            # Scan Agent2 folder for script/data files
+            agent2_files = storage_service.list_files_by_prefix(agent2_prefix, limit=1000)
+            logger.info(f"Found {len(agent2_files)} files in Agent2 folder")
+            
+            # Look for script JSON files or status files that might contain script data
+            for file_info in agent2_files:
+                key = file_info.get("key", file_info.get("Key", ""))
+                if "script" in key.lower() or "finished" in key.lower():
+                    # Try to download and parse
+                    try:
+                        obj = storage_service.s3_client.get_object(
+                            Bucket=storage_service.bucket_name,
+                            Key=key
+                        )
+                        content = obj["Body"].read().decode('utf-8')
+                        data = json.loads(content)
+                        if "generation_script" in data:
+                            script = data["generation_script"]
+                        elif "script" in data:
+                            script = data["script"]
+                    except Exception as e:
+                        logger.debug(f"Failed to parse file {key}: {e}")
+                        pass
+            
+            # Scan Agent4 folder for audio files
+            agent4_files = storage_service.list_files_by_prefix(agent4_prefix, limit=1000)
+            logger.info(f"Found {len(agent4_files)} files in Agent4 folder")
+            
+            for file_info in agent4_files:
+                key = file_info.get("key", file_info.get("Key", ""))
+                if key.endswith(".mp3"):
+                    # Extract part name from filename (e.g., audio_hook.mp3 -> hook)
+                    filename = key.split("/")[-1]
+                    if filename.startswith("audio_"):
+                        part = filename.replace("audio_", "").replace(".mp3", "")
+                        audio_url = storage_service.generate_presigned_url(key, expires_in=86400)
+                        audio_files.append({
+                            "part": part,
+                            "url": audio_url,
+                            "duration": 5.0  # Default duration, could be extracted from metadata
+                        })
+                elif "background_music" in key.lower() or "music" in key.lower():
+                    background_music_url = storage_service.generate_presigned_url(key, expires_in=86400)
+                    background_music = {
+                        "url": background_music_url,
+                        "duration": 60  # Default duration
+                    }
+            
+            # If no pipeline_data provided and we couldn't find files, try querying database
+            if not pipeline_data and not script and not audio_files:
+                if db is not None:
+                    try:
+                        result = db.execute(
+                            text(
+                                "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                            ),
+                            {"session_id": session_id, "user_id": user_id},
+                        ).fetchone()
+                        
+                        if result:
+                            if hasattr(result, "_mapping"):
+                                video_session_data = dict(result._mapping)
+                            else:
+                                video_session_data = {
+                                    "id": getattr(result, "id", None),
+                                    "user_id": getattr(result, "user_id", None),
+                                    "generated_script": getattr(result, "generated_script", None),
+                                }
+                            
+                            # Extract script from video_session
+                            if video_session_data.get("generated_script"):
+                                from app.agents.agent_2 import extract_script_from_generated_script
+                                extracted_script = extract_script_from_generated_script(video_session_data.get("generated_script"))
+                                if extracted_script:
+                                    script = extracted_script
+                    except Exception as db_error:
+                        logger.warning(f"Agent5 failed to query video_session as fallback: {db_error}")
+                
+                # If still no script or audio files, raise error
+                if not script and not audio_files:
+                    raise ValueError(f"No content found in S3 folders or database. Agent2: {len(agent2_files)} files, Agent4: {len(agent4_files)} files")
+            
+            # If pipeline_data is provided, use it (for backwards compatibility)
+            if pipeline_data:
+                agent_2_data = pipeline_data.get("agent_2_data", {})
+                agent_4_data = pipeline_data.get("agent_4_data", {})
+                
+                if agent_2_data or agent_4_data:
+                    script = agent_2_data.get("script", script)
+                    audio_files = agent_4_data.get("audio_files", audio_files)
+                    background_music = agent_4_data.get("background_music", background_music)
+                else:
+                    script = pipeline_data.get("script", script)
+                    audio_data = pipeline_data.get("audio_data", {})
+                    audio_files = audio_data.get("audio_files", audio_files)
+                    background_music = audio_data.get("background_music", background_music)
+            
+            if not script:
+                raise ValueError("No script data found in S3 or pipeline_data")
+            if not audio_files:
+                raise ValueError("No audio files found in S3 or pipeline_data")
+                
+        except Exception as e:
+            logger.error(f"Agent5 failed to scan S3 folders: {e}")
+            raise ValueError(f"Failed to discover Agent2/Agent4 content from S3: {str(e)}")
 
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
@@ -458,6 +584,16 @@ async def agent_5_process(
             scenes.append(scene)
 
         # Send the unified JSON structure that will be used for generation
+        await send_status(
+            "Agent5", "processing",
+            supersessionID=supersessionid,
+            message="Generating all 4 AI videos in parallel...",
+            generationPayload={
+                "scenes": scenes,
+                "backgroundMusicUrl": background_music.get("url", ""),
+                "backgroundMusicVolume": 0.3
+            }
+        )
         status_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
@@ -472,7 +608,6 @@ async def agent_5_process(
                 "backgroundMusicVolume": 0.3
             }
         }
-        await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("5", "processing", status_data)
 
         # Generate all videos in parallel using asyncio.gather
@@ -627,7 +762,8 @@ async def agent_5_process(
             with open(output_path, 'rb') as f:
                 concat_content = f.read()
 
-            concat_s3_key = f"scaffold_test/{user_id}/{supersessionid}/{section}_concat.mp4"
+            # Use scaffold_test/{userId}/{sessionId}/agent5/ path
+            concat_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_concat.mp4"
             storage_service.upload_file_direct(concat_content, concat_s3_key, "video/mp4")
             concat_url = storage_service.generate_presigned_url(concat_s3_key, expires_in=3600)
 
@@ -652,6 +788,11 @@ async def agent_5_process(
                 del scene["visualPrompt"]
 
         # Update status for rendering
+        await send_status(
+            "Agent5", "processing",
+            supersessionID=supersessionid,
+            message="Rendering video with Remotion (this may take 2-4 minutes)..."
+        )
         status_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
@@ -661,7 +802,6 @@ async def agent_5_process(
             "message": "Rendering video with Remotion (this may take 2-4 minutes)...",
             "timestamp": int(time.time() * 1000)
         }
-        await websocket_manager.send_progress(session_id, status_data)
 
         # Get background music URL
         background_music_url = background_music.get("url", "")
@@ -673,16 +813,16 @@ async def agent_5_process(
             background_music_url,
             output_path,
             temp_dir,
-            websocket_manager=websocket_manager,
+            websocket_manager=websocket_manager,  # render_video_with_remotion may still use it
             session_id=session_id,
             user_id=user_id,
             supersessionid=supersessionid
         )
 
-        # Upload video to S3
+        # Upload video to S3 - use scaffold_test/{userId}/{sessionId}/agent5/ path
         import uuid
         video_filename = f"final_video_{uuid.uuid4().hex[:8]}.mp4"
-        video_s3_key = f"scaffold_test/{user_id}/{supersessionid}/{video_filename}"
+        video_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{video_filename}"
 
         # Debug: Check file before upload
         if os.path.exists(output_path):
@@ -699,7 +839,13 @@ async def agent_5_process(
         video_url = storage_service.generate_presigned_url(video_s3_key, expires_in=86400)  # 24 hours for testing
         print(f"Video uploaded successfully: {video_url}")
 
-        # Report finished status
+        # Report finished status with video link
+        await send_status(
+            "Agent5", "finished",
+            supersessionID=supersessionid,
+            videoUrl=video_url,
+            progress=100
+        )
         status_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
@@ -709,24 +855,26 @@ async def agent_5_process(
             "timestamp": int(time.time() * 1000),
             "videoUrl": video_url
         }
-        await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("5", "finished", status_data)
 
         return video_url
 
     except Exception as e:
         # Report error status
+        error_kwargs = {
+            "error": str(e),
+            "reason": f"Agent5 failed: {type(e).__name__}",
+            "supersessionID": supersessionid if 'supersessionid' in locals() else None
+        }
+        await send_status("Agent5", "error", **error_kwargs)
         error_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
             "sessionID": session_id,
-            "supersessionID": supersessionid,
             "status": "error",
-            "error": str(e),
-            "reason": f"Agent5 failed: {type(e).__name__}",
-            "timestamp": int(time.time() * 1000)
+            "timestamp": int(time.time() * 1000),
+            **error_kwargs
         }
-        await websocket_manager.send_progress(session_id, error_data)
         await create_status_json("5", "error", error_data)
         raise
 
