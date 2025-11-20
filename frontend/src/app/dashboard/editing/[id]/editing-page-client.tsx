@@ -32,7 +32,7 @@ import { api } from "@/trpc/react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Hardcoded test video S3 key for testing purposes
-const TEST_VIDEO_S3_KEY = "users/9/k6NpPlUF5gsaIc6bNEYon/videos/clip_0818d51a.mp4";
+const TEST_VIDEO_S3_KEY = "scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4";
 
 interface EditingPageClientProps {
   sessionId: string;
@@ -107,8 +107,10 @@ export function EditingPageClient({
         });
 
         if (!response.ok) {
+          // Don't treat 404 as error - session may not exist yet or we're in test mode
           if (response.status === 404) {
-            throw new Error("Session not found");
+            // Just continue polling, don't set error
+            return;
           }
           throw new Error(`Failed to fetch session: ${response.status}`);
         }
@@ -123,12 +125,10 @@ export function EditingPageClient({
           setIsLoading(false);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
-        setIsLoading(false);
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
+        // Don't set error for network failures - just continue polling
+        // This allows the test button to remain visible when backend is down
+        console.log("[EditingPage] Fetch error (backend may be down):", err);
+        // Don't setError or setIsLoading(false) - keep showing processing state with test button
       }
     };
 
