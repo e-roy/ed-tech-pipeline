@@ -4,7 +4,12 @@ import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { videoSessions, videoAssets } from "@/server/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { createSessionWithScript, generateScript } from "@/server/utils/generate-script";
+import {
+  createSessionWithScript,
+  updateSessionWithScript,
+  generateScript,
+} from "@/server/utils/generate-script";
+import { env } from "@/env";
 
 export const scriptRouter = createTRPCRouter({
   getSession: protectedProcedure
@@ -168,6 +173,7 @@ export const scriptRouter = createTRPCRouter({
         ),
         cost: z.number(),
         duration: z.number(),
+        sessionId: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -178,14 +184,84 @@ export const scriptRouter = createTRPCRouter({
         });
       }
 
-      const sessionId = await createSessionWithScript(
-        ctx.session.user.id,
-        input.topic,
-        input.facts,
-        input.script,
-        input.cost,
-        input.duration,
-      );
+      // Update existing session or create new one
+      const sessionId = input.sessionId
+        ? await updateSessionWithScript(
+            input.sessionId,
+            ctx.session.user.id,
+            input.topic,
+            input.facts,
+            input.script,
+            input.cost,
+            input.duration,
+          )
+        : await createSessionWithScript(
+            ctx.session.user.id,
+            input.topic,
+            input.facts,
+            input.script,
+            input.cost,
+            input.duration,
+          );
+
+      // Call external video processing API
+      try {
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/process`;
+        const scriptString = JSON.stringify(input.script);
+
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sessionId,
+            script: scriptString,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Video processing API returned status ${response.status}`,
+          );
+        }
+
+        const result = (await response.json()) as {
+          success: boolean;
+          message: string;
+        };
+
+        if (!result.success) {
+          throw new Error(result.message || "Video processing failed");
+        }
+
+        // Update session status to video_generating on success
+        await db
+          .update(videoSessions)
+          .set({
+            status: "video_generating",
+            updatedAt: new Date(),
+          })
+          .where(eq(videoSessions.id, sessionId));
+      } catch (error) {
+        // Update session status to video_failed on error
+        await db
+          .update(videoSessions)
+          .set({
+            status: "video_failed",
+            updatedAt: new Date(),
+          })
+          .where(eq(videoSessions.id, sessionId));
+
+        // Re-throw error to be handled by client
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to process video generation request",
+        });
+      }
 
       return { sessionId };
     }),

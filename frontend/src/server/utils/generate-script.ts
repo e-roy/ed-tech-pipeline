@@ -11,7 +11,7 @@ import { nanoid } from "nanoid";
 export async function generateScript(
   topic: string,
   facts: Array<{ concept: string; details: string }>,
-  targetDuration: number = 60,
+  targetDuration = 60,
 ) {
   const agent = new NarrativeBuilderAgent();
   const result = await agent.process({
@@ -24,7 +24,7 @@ export async function generateScript(
   });
 
   if (!result.success) {
-    throw new Error(result.error || "Script generation failed");
+    throw new Error(result.error ?? "Script generation failed");
   }
 
   return {
@@ -32,6 +32,83 @@ export async function generateScript(
     cost: result.cost,
     duration: result.duration,
   };
+}
+
+/**
+ * Update an existing session with the approved script.
+ */
+export async function updateSessionWithScript(
+  sessionId: string,
+  userId: string,
+  topic: string,
+  facts: Array<{ concept: string; details: string }>,
+  script: unknown,
+  cost: number,
+  duration: number,
+) {
+  // Validate session exists and belongs to user
+  const [session] = await db
+    .select()
+    .from(videoSessions)
+    .where(eq(videoSessions.id, sessionId))
+    .limit(1);
+
+  if (!session?.userId || session.userId !== userId) {
+    throw new Error("Session not found or does not belong to user");
+  }
+
+  // Update session
+  await db
+    .update(videoSessions)
+    .set({
+      status: "script_approved",
+      topic,
+      confirmedFacts: facts,
+      generatedScript: script,
+      updatedAt: new Date(),
+    })
+    .where(eq(videoSessions.id, sessionId));
+
+  // Check if script asset already exists
+  const existingAssets = await db
+    .select()
+    .from(videoAssets)
+    .where(eq(videoAssets.sessionId, sessionId));
+
+  const existingScriptAsset = existingAssets.find(
+    (asset) => asset.assetType === "script",
+  );
+
+  if (existingScriptAsset) {
+    // Update existing script asset
+    await db
+      .update(videoAssets)
+      .set({
+        metadata: {
+          script,
+          cost,
+          duration,
+        },
+      })
+      .where(eq(videoAssets.id, existingScriptAsset.id));
+  } else {
+    // Create new script asset
+    const assetId = nanoid();
+    await db.insert(videoAssets).values({
+      id: assetId,
+      sessionId,
+      assetType: "script",
+      url: "",
+      metadata: {
+        script,
+        cost,
+        duration,
+      },
+      createdAt: new Date(),
+    });
+  }
+
+  return sessionId;
 }
 
 /**
@@ -76,4 +153,3 @@ export async function createSessionWithScript(
 
   return sessionId;
 }
-
