@@ -36,6 +36,14 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
+
+@app.get("/health")
+@app.get("/api/health")
+def health_check():
+    """Health endpoint for load balancers and monitoring."""
+    return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
+
+
 # Configure CORS for Next.js frontend
 # Allow Vercel frontend and local development
 frontend_url = settings.FRONTEND_URL
