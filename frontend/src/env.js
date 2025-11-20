@@ -22,6 +22,10 @@ export const env = createEnv({
     S3_BUCKET_NAME: z.string().optional(),
     AWS_REGION: z.string().default("us-east-1"),
     OPENAI_API_KEY: z.string().optional(),
+    WEBHOOK_SECRET:
+      process.env.NODE_ENV === "production"
+        ? z.string()
+        : z.string().optional(), // Required in production, optional in development
   },
 
   /**
@@ -52,6 +56,7 @@ export const env = createEnv({
     S3_BUCKET_NAME: process.env.S3_BUCKET_NAME,
     AWS_REGION: process.env.AWS_REGION,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially
