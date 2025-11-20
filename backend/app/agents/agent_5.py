@@ -423,6 +423,7 @@ async def agent_5_process(
         agent4_prefix = f"scaffold_test/{user_id}/{session_id}/agent4/"
         
         script = {}
+        storyboard = {}
         audio_files = []
         background_music = {}
         
@@ -431,25 +432,80 @@ async def agent_5_process(
             agent2_files = storage_service.list_files_by_prefix(agent2_prefix, limit=1000)
             logger.info(f"Found {len(agent2_files)} files in Agent2 folder")
             
-            # Look for script JSON files or status files that might contain script data
-            for file_info in agent2_files:
-                key = file_info.get("key", file_info.get("Key", ""))
-                if "script" in key.lower() or "finished" in key.lower():
-                    # Try to download and parse
-                    try:
-                        obj = storage_service.s3_client.get_object(
-                            Bucket=storage_service.bucket_name,
-                            Key=key
-                        )
-                        content = obj["Body"].read().decode('utf-8')
-                        data = json.loads(content)
-                        if "generation_script" in data:
-                            script = data["generation_script"]
-                        elif "script" in data:
-                            script = data["script"]
-                    except Exception as e:
-                        logger.debug(f"Failed to parse file {key}: {e}")
-                        pass
+            # Look for storyboard.json first (preferred source)
+            storyboard_key = f"{agent2_prefix}storyboard.json"
+            try:
+                obj = storage_service.s3_client.get_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=storyboard_key
+                )
+                content = obj["Body"].read().decode('utf-8')
+                storyboard = json.loads(content)
+                logger.info(f"Agent5 loaded storyboard.json from {storyboard_key}")
+                
+                # Extract script from storyboard segments if available
+                if storyboard.get("segments"):
+                    # Convert storyboard segments to script format for compatibility
+                    script_parts = {}
+                    for segment in storyboard["segments"]:
+                        segment_type = segment.get("type", "")
+                        if segment_type == "hook":
+                            script_parts["hook"] = {
+                                "text": segment.get("narration", ""),
+                                "duration": str(segment.get("duration", 0)),
+                                "key_concepts": segment.get("key_concepts", []),
+                                "visual_guidance": segment.get("visual_guidance", "")
+                            }
+                        elif segment_type == "concept_introduction":
+                            script_parts["concept"] = {
+                                "text": segment.get("narration", ""),
+                                "duration": str(segment.get("duration", 0)),
+                                "key_concepts": segment.get("key_concepts", []),
+                                "visual_guidance": segment.get("visual_guidance", "")
+                            }
+                        elif segment_type == "process_explanation":
+                            script_parts["process"] = {
+                                "text": segment.get("narration", ""),
+                                "duration": str(segment.get("duration", 0)),
+                                "key_concepts": segment.get("key_concepts", []),
+                                "visual_guidance": segment.get("visual_guidance", "")
+                            }
+                        elif segment_type == "conclusion":
+                            script_parts["conclusion"] = {
+                                "text": segment.get("narration", ""),
+                                "duration": str(segment.get("duration", 0)),
+                                "key_concepts": segment.get("key_concepts", []),
+                                "visual_guidance": segment.get("visual_guidance", "")
+                            }
+                    if script_parts:
+                        script = script_parts
+                        logger.info("Agent5 extracted script from storyboard.json")
+            except Exception as e:
+                logger.debug(f"Agent5 could not load storyboard.json: {e}, will try other sources")
+            
+            # Look for script JSON files or status files that might contain script data (fallback)
+            if not script:
+                for file_info in agent2_files:
+                    key = file_info.get("key", file_info.get("Key", ""))
+                    if "script" in key.lower() or "finished" in key.lower():
+                        # Skip storyboard.json as we already tried it
+                        if "storyboard.json" in key:
+                            continue
+                        # Try to download and parse
+                        try:
+                            obj = storage_service.s3_client.get_object(
+                                Bucket=storage_service.bucket_name,
+                                Key=key
+                            )
+                            content = obj["Body"].read().decode('utf-8')
+                            data = json.loads(content)
+                            if "generation_script" in data:
+                                script = data["generation_script"]
+                            elif "script" in data:
+                                script = data["script"]
+                        except Exception as e:
+                            logger.debug(f"Failed to parse file {key}: {e}")
+                            pass
             
             # Scan Agent4 folder for audio files
             agent4_files = storage_service.list_files_by_prefix(agent4_prefix, limit=1000)
@@ -516,10 +572,16 @@ async def agent_5_process(
                 
                 if agent_2_data or agent_4_data:
                     script = agent_2_data.get("script", script)
+                    # Use storyboard from agent_2_data if available, otherwise keep what we loaded
+                    if agent_2_data.get("storyboard"):
+                        storyboard = agent_2_data.get("storyboard")
                     audio_files = agent_4_data.get("audio_files", audio_files)
                     background_music = agent_4_data.get("background_music", background_music)
                 else:
                     script = pipeline_data.get("script", script)
+                    # Use storyboard from pipeline_data if available
+                    if pipeline_data.get("storyboard"):
+                        storyboard = pipeline_data.get("storyboard")
                     audio_data = pipeline_data.get("audio_data", {})
                     audio_files = audio_data.get("audio_files", audio_files)
                     background_music = audio_data.get("background_music", background_music)
@@ -528,6 +590,12 @@ async def agent_5_process(
                 raise ValueError("No script data found in S3 or pipeline_data")
             if not audio_files:
                 raise ValueError("No audio files found in S3 or pipeline_data")
+            
+            # Log storyboard status
+            if storyboard:
+                logger.info(f"Agent5 loaded storyboard.json with {len(storyboard.get('segments', []))} segments")
+            else:
+                logger.info("Agent5 did not find storyboard.json, using script data only")
                 
         except Exception as e:
             logger.error(f"Agent5 failed to scan S3 folders: {e}")
@@ -555,7 +623,35 @@ async def agent_5_process(
             # Get section data and visual prompt
             section_data = script.get(part, {})
             visual_prompt = section_data.get("visual_prompt", "")
-
+            
+            # If storyboard is available, try to get enhanced data from it
+            if storyboard and storyboard.get("segments"):
+                # Map part to storyboard segment type
+                segment_type_map = {
+                    "hook": "hook",
+                    "concept": "concept_introduction",
+                    "process": "process_explanation",
+                    "conclusion": "conclusion"
+                }
+                segment_type = segment_type_map.get(part)
+                
+                # Find matching segment in storyboard
+                if segment_type:
+                    storyboard_segment = next(
+                        (seg for seg in storyboard["segments"] if seg.get("type") == segment_type),
+                        None
+                    )
+                    if storyboard_segment:
+                        # Use visual_guidance from storyboard if available
+                        if storyboard_segment.get("visual_guidance") and not visual_prompt:
+                            visual_prompt = storyboard_segment.get("visual_guidance")
+                        # Use key_concepts from storyboard if available
+                        if storyboard_segment.get("key_concepts") and not section_data.get("key_concepts"):
+                            section_data["key_concepts"] = storyboard_segment.get("key_concepts")
+                        # Use duration from storyboard if available
+                        if storyboard_segment.get("duration") and not section_data.get("duration"):
+                            section_data["duration"] = str(storyboard_segment.get("duration"))
+            
             if not visual_prompt:
                 # Fallback: generate prompt from text
                 text = section_data.get("text", "")

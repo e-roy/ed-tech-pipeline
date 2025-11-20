@@ -698,15 +698,11 @@ async def start_processing(
             
             try:
                 from app.agents.agent_4 import agent_4_process
-                # Generate a supersessionid for Agent4
-                import secrets
-                supersessionid = f"{request.sessionID}_{secrets.token_urlsafe(12)[:16]}"
                 
                 await agent_4_process(
                     websocket_manager=websocket_manager,
                     user_id=request.userID,
                     session_id=request.sessionID,
-                    supersessionid=supersessionid,
                     script=request.script,
                     voice=request.voice or "alloy",
                     audio_option=request.audio_option or "tts",

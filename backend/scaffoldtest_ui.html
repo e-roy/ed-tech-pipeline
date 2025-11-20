@@ -762,6 +762,10 @@
                     websocket.close();
                 }
 
+                // Set current session ID immediately
+                currentSessionId = sessionId;
+                console.log(`Setting current session ID to: ${currentSessionId}`);
+
                 // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
                 let wsUrl, wsPath;
                 if (window.location.hostname.includes('execute-api')) {
@@ -802,6 +806,12 @@
                             connectionReady = true;
                             console.log('WebSocket connection confirmed ready');
                             updateConnectionStatus('connected', 'WebSocket: Connected');
+                            
+                            // Update current session ID from message if provided (backup)
+                            if (message.sessionID && message.sessionID !== currentSessionId) {
+                                console.log(`Updating current session ID from ${currentSessionId} to ${message.sessionID}`);
+                                currentSessionId = message.sessionID;
+                            }
                             
                             // Start ping interval to keep connection alive
                             if (websocket && websocket.readyState === WebSocket.OPEN) {
