@@ -101,7 +101,8 @@
 
     <script>
         // Hardcoded S3 URL - latest generated video
-        const hardcodedUrl = 'https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/test_user/1_test/final_video_b96d092e.mp4?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=XCL5YmUaqcP0Mb2cIjXTdQapjCc%3D&Expires=1763576838';
+        // Use presigned URL from API instead of hardcoded URL
+        // const hardcodedUrl = 'https://pipeline-backend-assets.s3.amazonaws.com/...'; // REMOVED: Contains expired AWS credentials
 
         const video = document.getElementById('test-video');
         const urlDisplay = document.getElementById('current-url');
