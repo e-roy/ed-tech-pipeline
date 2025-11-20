@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,7 @@ export function HardcodeCreateForm({
   userEmail,
   sessionId,
 }: HardcodeCreateFormProps) {
+  const router = useRouter();
   const [templateTitle, setTemplateTitle] = useState("Photosynthesis");
   const [hookText, setHookText] = useState(
     "Have you ever wondered how plants make their own food? Let's discover the amazing process of photosynthesis!",
@@ -195,6 +197,8 @@ export function HardcodeCreateForm({
         // Check if there's a video_url in the message
         if (lastMessage.video_url) {
           setFinalVideoUrl(lastMessage.video_url);
+          // Redirect to editing page
+          router.push(`/dashboard/editing/${lastMessage.session_id}`);
         }
         fetchResults(lastMessage.session_id);
       }
