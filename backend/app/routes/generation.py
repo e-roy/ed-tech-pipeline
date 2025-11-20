@@ -1960,6 +1960,47 @@ async def compose_hardcode_video(
         # Get audio files from S3
         audio_prefix = storage_service.get_session_prefix(current_user.id, session_id, "audio")
         audio_files_list = []
+
+        # Helper function to get audio duration using ffprobe
+        async def get_audio_duration(audio_url: str) -> float:
+            """Get actual audio duration using ffprobe."""
+            import subprocess
+            import tempfile
+            import httpx
+
+            try:
+                # Download audio file temporarily
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.get(audio_url)
+                    response.raise_for_status()
+
+                    # Save to temp file
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                        tmp.write(response.content)
+                        tmp_path = tmp.name
+
+                # Use ffprobe to get duration
+                cmd = [
+                    "ffprobe", "-v", "quiet",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    tmp_path
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                # Clean up temp file
+                import os
+                os.unlink(tmp_path)
+
+                if result.returncode == 0 and result.stdout.strip():
+                    return float(result.stdout.strip())
+                else:
+                    logger.warning(f"ffprobe failed, using default duration: {result.stderr}")
+                    return 10.0
+            except Exception as e:
+                logger.warning(f"Failed to get audio duration: {e}, using default")
+                return 10.0
+
         try:
             audio_files = storage_service.list_files_by_prefix(audio_prefix, limit=100)
             segment_part_map = {1: "hook", 2: "concept", 3: "process", 4: "conclusion"}
@@ -1975,11 +2016,16 @@ async def compose_hardcode_video(
                             break
 
                     if part:
+                        # Get actual audio duration
+                        audio_url = audio_file["presigned_url"]
+                        duration = await get_audio_duration(audio_url)
+                        logger.info(f"Audio duration for {part}: {duration:.1f}s")
+
                         audio_files_list.append({
                             "part": part,
-                            "url": audio_file["presigned_url"],
+                            "url": audio_url,
                             "s3_key": audio_file["key"],
-                            "duration": 10.0  # Placeholder - actual duration should be retrieved
+                            "duration": duration
                         })
         except Exception as audio_error:
             logger.warning(f"Failed to fetch audio files: {audio_error}")
