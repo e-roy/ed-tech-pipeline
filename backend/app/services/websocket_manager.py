@@ -24,12 +24,8 @@ class WebSocketManager:
     def __init__(self):
         # Dictionary mapping session_id to list of WebSocket connections (in-memory, per worker)
         self.active_connections: Dict[str, List[WebSocket]] = {}
-        # Connections that have not registered a session_id yet (API Gateway flow)
-        self.pending_connections: Dict[str, WebSocket] = {}
-        # Map connection_id -> session_id (used for cleanup)
-        self.connection_sessions: Dict[str, Optional[str]] = {}
 
-    async def connect(self, websocket: WebSocket, session_id: Optional[str], connection_id: Optional[str] = None):
+    async def connect(self, websocket: WebSocket, session_id: str, connection_id: Optional[str] = None):
         """
         Accept and register a new WebSocket connection.
 
@@ -40,31 +36,46 @@ class WebSocketManager:
         """
         await websocket.accept()
 
+        if session_id not in self.active_connections:
+            self.active_connections[session_id] = []
+
+        self.active_connections[session_id].append(websocket)
+        
+        # Register connection in database for cross-worker communication
         if connection_id is None:
             import secrets
             connection_id = f"ws_{secrets.token_urlsafe(16)}"
+        
+        # Register connection in database for cross-worker communication
+        # Note: This may fail if session_id doesn't exist in sessions table (e.g., in scaffoldtest)
+        # We handle this gracefully and continue with in-memory tracking
+        db: Session = SessionLocal()
+        try:
+            # Check if connection already exists
+            existing = db.query(WSConnectionModel).filter(
+                WSConnectionModel.connection_id == connection_id
+            ).first()
+            
+            if not existing:
+                ws_conn = WSConnectionModel(
+                    session_id=session_id,
+                    connection_id=connection_id,
+                    connected_at=datetime.utcnow()
+                )
+                db.add(ws_conn)
+                db.commit()
+                logger.info(f"Registered WebSocket connection {connection_id} for session {session_id} in database")
+        except Exception as e:
+            # Log but don't fail - in-memory tracking will still work
+            # This can happen if session_id doesn't exist in sessions table (e.g., scaffoldtest)
+            logger.warning(f"Failed to register WebSocket connection in database (non-critical): {e}")
+            db.rollback()
+        finally:
+            db.close()
+        
+        logger.info(f"WebSocket connected for session {session_id}. Total connections for this session: {len(self.active_connections[session_id])}")
 
-        self.connection_sessions[connection_id] = session_id
-
-        if session_id:
-            if session_id not in self.active_connections:
-                self.active_connections[session_id] = []
-
-            self.active_connections[session_id].append(websocket)
-            self._persist_connection(connection_id, session_id)
-            logger.info(
-                "WebSocket connected for session %s. Total connections: %s",
-                session_id,
-                len(self.active_connections[session_id]),
-            )
-        else:
-            # Defer registration until we receive a register message
-            self.pending_connections[connection_id] = websocket
-            logger.info("WebSocket connected without session_id. Awaiting registration. connection_id=%s", connection_id)
-
-        return connection_id
-
-    async def disconnect(self, websocket: WebSocket, session_id: Optional[str], connection_id: Optional[str] = None):
+    async def disconnect(self, websocket: WebSocket, session_id: str, connection_id: Optional[str] = None):
         """
         Remove a WebSocket connection.
 
@@ -73,10 +84,7 @@ class WebSocketManager:
             session_id: The session ID this connection was tracking
             connection_id: Optional connection ID to remove from database
         """
-        if connection_id and session_id is None:
-            session_id = self.connection_sessions.get(connection_id)
-
-        if session_id and session_id in self.active_connections:
+        if session_id in self.active_connections:
             if websocket in self.active_connections[session_id]:
                 self.active_connections[session_id].remove(websocket)
 
@@ -84,16 +92,8 @@ class WebSocketManager:
             if len(self.active_connections[session_id]) == 0:
                 del self.active_connections[session_id]
         
-        if connection_id and connection_id in self.pending_connections:
-            # Pending connection closed before registration
-            self.pending_connections.pop(connection_id, None)
-
-        # Remove connection/session mapping
-        if connection_id and connection_id in self.connection_sessions:
-            self.connection_sessions.pop(connection_id, None)
-
         # Remove from database
-        if connection_id and session_id:
+        if connection_id:
             db: Session = SessionLocal()
             try:
                 ws_conn = db.query(WSConnectionModel).filter(
@@ -211,50 +211,6 @@ class WebSocketManager:
                 logger.info(f"WebSocket connection exists for session {session_id} on another worker. Message logged but may not be delivered.")
             else:
                 logger.warning(f"No active WebSocket connections for session {session_id}. Message not sent: {message.get('agentnumber', 'unknown')} - {message.get('status', 'unknown')}")
-
-    async def complete_registration(self, connection_id: str, session_id: str) -> Optional[WebSocket]:
-        """
-        Move a pending connection into an active session once the client registers.
-        """
-        websocket = self.pending_connections.pop(connection_id, None)
-        if not websocket:
-            # Already registered or unknown connection_id
-            return None
-
-        self.connection_sessions[connection_id] = session_id
-
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-
-        self.active_connections[session_id].append(websocket)
-        self._persist_connection(connection_id, session_id)
-        logger.info("Registered pending connection %s for session %s", connection_id, session_id)
-        return websocket
-
-    def _persist_connection(self, connection_id: str, session_id: str) -> None:
-        """
-        Store connection metadata in the database (best-effort).
-        """
-        db: Session = SessionLocal()
-        try:
-            existing = db.query(WSConnectionModel).filter(
-                WSConnectionModel.connection_id == connection_id
-            ).first()
-
-            if not existing:
-                ws_conn = WSConnectionModel(
-                    session_id=session_id,
-                    connection_id=connection_id,
-                    connected_at=datetime.utcnow()
-                )
-                db.add(ws_conn)
-                db.commit()
-                logger.info("Registered WebSocket connection %s for session %s in database", connection_id, session_id)
-        except Exception as e:
-            logger.warning("Failed to register WebSocket connection in database (non-critical): %s", e)
-            db.rollback()
-        finally:
-            db.close()
 
     async def broadcast_status(self, session_id: str, status: str, progress: int = 0, details: str = "", elapsed_time: float = None, total_cost: float = None, items: list = None):
         """
