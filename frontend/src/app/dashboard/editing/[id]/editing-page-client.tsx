@@ -1,0 +1,367 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Download, Scissors, ArrowLeft, Loader2, TestTube } from "lucide-react";
+import { api } from "@/trpc/react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// Hardcoded test video S3 key for testing purposes
+const TEST_VIDEO_S3_KEY = "users/9/k6NpPlUF5gsaIc6bNEYon/videos/clip_0818d51a.mp4";
+
+interface EditingPageClientProps {
+  sessionId: string;
+  userEmail: string;
+}
+
+interface SessionData {
+  id: string;
+  status: string;
+  prompt: string | null;
+  video_prompt: string | null;
+  final_video_url: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+interface VideoMetadata {
+  duration: number;
+  width: number;
+  height: number;
+}
+
+export function EditingPageClient({
+  sessionId,
+  userEmail,
+}: EditingPageClientProps) {
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
+  const [useTestVideo, setUseTestVideo] = useState(false);
+  const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // tRPC query for test video presigned URL
+  const testVideoQuery = api.storage.getPresignedUrl.useQuery(
+    {
+      file_key: TEST_VIDEO_S3_KEY,
+      expires_in: 3600,
+    },
+    {
+      enabled: useTestVideo,
+    }
+  );
+
+  // Handle test video query result
+  useEffect(() => {
+    if (testVideoQuery.data) {
+      setTestVideoUrl(testVideoQuery.data.presigned_url);
+      setIsLoading(false);
+      // Stop polling when using test video
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    }
+    if (testVideoQuery.error) {
+      setError(`Failed to load test video: ${testVideoQuery.error.message}`);
+      setIsLoading(false);
+    }
+  }, [testVideoQuery.data, testVideoQuery.error]);
+
+  // Polling logic to fetch session data
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/sessions/${sessionId}`, {
+          headers: {
+            "X-User-Email": userEmail,
+          },
+        });
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error("Session not found");
+          }
+          throw new Error(`Failed to fetch session: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setSessionData(data);
+
+        // Stop polling when video is ready
+        if (data.final_video_url && pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setIsLoading(false);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+        setIsLoading(false);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+      }
+    };
+
+    // Initial fetch
+    fetchSession();
+
+    // Start polling every 3 seconds
+    pollIntervalRef.current = setInterval(fetchSession, 3000);
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, [sessionId, userEmail]);
+
+  // Handle video metadata loaded
+  const handleVideoMetadata = () => {
+    if (videoRef.current) {
+      setVideoMetadata({
+        duration: videoRef.current.duration,
+        width: videoRef.current.videoWidth,
+        height: videoRef.current.videoHeight,
+      });
+    }
+  };
+
+  // Handle download
+  const handleDownload = () => {
+    const videoUrl = testVideoUrl || sessionData?.final_video_url;
+    if (!videoUrl) return;
+
+    const link = document.createElement("a");
+    link.href = videoUrl;
+    link.download = `video-${sessionId}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Handle loading test video
+  const handleLoadTestVideo = () => {
+    setUseTestVideo(true);
+    setError(null);
+  };
+
+  // Get the current video URL (test or session)
+  const currentVideoUrl = testVideoUrl || sessionData?.final_video_url;
+
+  // Format duration to MM:SS
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // Error state
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-destructive">Error</CardTitle>
+          <CardDescription>{error}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link href="/dashboard/hardcode-create">
+            <Button variant="outline">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Create
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Processing state (polling for video)
+  if (isLoading || !currentVideoUrl) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Processing Video</CardTitle>
+          <CardDescription>
+            Your video is being processed. This page will automatically update
+            when it&apos;s ready.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground text-sm">
+            Video is still processing...
+          </p>
+          {sessionData?.status && (
+            <p className="text-muted-foreground text-xs mt-2">
+              Status: {sessionData.status}
+            </p>
+          )}
+
+          {/* Test Video Button */}
+          <div className="mt-6 pt-6 border-t w-full max-w-sm">
+            <p className="text-muted-foreground text-xs text-center mb-3">
+              For testing purposes only:
+            </p>
+            <Button
+              variant="outline"
+              onClick={handleLoadTestVideo}
+              disabled={useTestVideo && testVideoQuery.isLoading}
+              className="w-full"
+            >
+              {useTestVideo && testVideoQuery.isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading Test Video...
+                </>
+              ) : (
+                <>
+                  <TestTube className="mr-2 h-4 w-4" />
+                  Load Test Video
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Video ready state - currentVideoUrl is guaranteed to be non-null here due to the check above
+  const videoUrl = currentVideoUrl as string;
+
+  return (
+    <div className="space-y-6">
+      {/* Video Player Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Your Video</CardTitle>
+          <CardDescription>
+            {testVideoUrl ? "Test Video" : `Session ID: ${sessionId}`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg overflow-hidden border bg-muted/50">
+            <video
+              ref={videoRef}
+              controls
+              className="w-full h-auto"
+              src={videoUrl}
+              preload="metadata"
+              onLoadedMetadata={handleVideoMetadata}
+            >
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Video Metadata Card */}
+      {videoMetadata && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Video Details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+              <div>
+                <p className="text-muted-foreground text-xs">Duration</p>
+                <p className="font-medium">
+                  {formatDuration(videoMetadata.duration)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Resolution</p>
+                <p className="font-medium">
+                  {videoMetadata.width} x {videoMetadata.height}
+                </p>
+              </div>
+              {sessionData?.created_at && (
+                <div>
+                  <p className="text-muted-foreground text-xs">Created</p>
+                  <p className="font-medium">
+                    {new Date(sessionData.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={handleDownload}>
+          <Download className="mr-2 h-4 w-4" />
+          Download Video
+        </Button>
+
+        <TooltipProvider>
+          <AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline">
+                    <Scissors className="mr-2 h-4 w-4" />
+                    Edit Video
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Coming Soon</p>
+              </TooltipContent>
+            </Tooltip>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Coming Soon</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Video editing features are currently in development. Stay tuned
+                  for updates!
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction>Got it</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </TooltipProvider>
+
+        <Link href="/dashboard/hardcode-create">
+          <Button variant="ghost">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Create
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
