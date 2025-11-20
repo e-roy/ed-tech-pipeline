@@ -66,7 +66,7 @@ const navItems = [
   },
   {
     title: "Edit",
-    url: "/dashboard/editing",
+    url: "/dashboard/editing/test",
     icon: Scissors,
   },
 ];
