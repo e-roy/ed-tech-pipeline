@@ -2,10 +2,12 @@
 Agent 5 - Video Generator using Remotion
 
 Generates a 60-second video from pipeline data:
-1. Generates images from visual prompts using DALL-E 2
+1. Generates AI videos in parallel using Replicate (Minimax)
 2. Calculates scene timing to space audio across 60 seconds
-3. Renders video using Remotion with Ken Burns effect
+3. Renders video using Remotion
 4. Uploads final video to S3
+
+Uses Replicate Minimax for AI-generated video clips (~$0.035/5s video)
 """
 import asyncio
 import json
@@ -18,6 +20,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
+from app.services.replicate_video import ReplicateVideoService
 from app.config import get_settings
 
 
@@ -26,6 +29,31 @@ from app.config import get_settings
 # remotion is at: remotion/
 # So we need to go up 3 levels from agent_5.py to backend, then up to pipeline, then into remotion
 REMOTION_DIR = Path(__file__).parent.parent.parent.parent / "remotion"
+
+
+async def generate_video_replicate(
+    prompt: str,
+    api_key: str,
+    model: str = "minimax",
+    progress_callback: Optional[callable] = None
+) -> str:
+    """
+    Generate a video using Replicate (Minimax video-01 by default).
+
+    Args:
+        prompt: Visual description for the video
+        api_key: Replicate API key
+        model: Model to use ("minimax", "kling", "luma")
+        progress_callback: Optional callback for progress updates
+
+    Returns:
+        URL of the generated video
+    """
+    service = ReplicateVideoService(api_key)
+    return await service.generate_video(
+        prompt=prompt,
+        model=model
+    )
 
 
 async def generate_image_dalle(prompt: str, api_key: str, max_retries: int = 3) -> bytes:
@@ -123,7 +151,7 @@ async def render_video_with_remotion(
     Render video using Remotion CLI.
 
     Args:
-        scenes: List of scene data with imageUrl, audioUrl, timing info
+        scenes: List of scene data with imageUrl/videoUrl, audioUrl, timing info
         background_music_url: URL or path to background music
         output_path: Path for output video file
         temp_dir: Temp directory containing local image files
@@ -135,26 +163,33 @@ async def render_video_with_remotion(
     remotion_public = REMOTION_DIR / "public"
     remotion_public.mkdir(exist_ok=True)
 
-    # Update scenes to use local file paths
+    # Update scenes based on visual type
     updated_scenes = []
     for scene in scenes:
         part = scene["part"]
-        local_image_path = os.path.join(temp_dir, f"{part}.png")
+        visual_type = scene.get("visualType", "image")
 
-        # Copy image to Remotion public dir
-        if os.path.exists(local_image_path):
-            dest_path = remotion_public / f"{part}.png"
-            import shutil
-            shutil.copy2(local_image_path, dest_path)
-            # Use relative path from Remotion's perspective
-            image_url = f"{part}.png"
+        if visual_type == "video":
+            # For video mode, keep the URL as-is (Remotion will fetch from URL)
+            updated_scenes.append(scene)
         else:
-            image_url = scene.get("imageUrl", "")
+            # For image mode, copy local files to Remotion public dir
+            local_image_path = os.path.join(temp_dir, f"{part}.png")
 
-        updated_scenes.append({
-            **scene,
-            "imageUrl": image_url
-        })
+            # Copy image to Remotion public dir
+            if os.path.exists(local_image_path):
+                dest_path = remotion_public / f"{part}.png"
+                import shutil
+                shutil.copy2(local_image_path, dest_path)
+                # Use relative path from Remotion's perspective
+                image_url = f"{part}.png"
+            else:
+                image_url = scene.get("imageUrl", "")
+
+            updated_scenes.append({
+                **scene,
+                "imageUrl": image_url
+            })
 
     # Prepare props for Remotion
     props = {
@@ -225,7 +260,8 @@ async def agent_5_process(
     session_id: str,
     supersessionid: str,
     storage_service: Optional[StorageService] = None,
-    pipeline_data: Optional[Dict[str, Any]] = None
+    pipeline_data: Optional[Dict[str, Any]] = None,
+    generation_mode: str = "video"  # Kept for backwards compatibility, always uses video
 ) -> Optional[str]:
     """
     Agent5: Video generation agent using Remotion.
@@ -239,6 +275,7 @@ async def agent_5_process(
         pipeline_data: Pipeline data including:
             - script: Script with visual_prompt for each section
             - audio_data: Audio files and background music
+        generation_mode: Deprecated - always uses AI video generation
 
     Returns:
         The presigned URL of the uploaded video, or None on error
@@ -301,37 +338,24 @@ async def agent_5_process(
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
 
-        # Report processing status
-        status_data = {
-            "agentnumber": "Agent5",
-            "userID": user_id,
-            "sessionID": session_id,
-            "supersessionID": supersessionid,
-            "status": "processing",
-            "message": "Generating images from visual prompts...",
-            "timestamp": int(time.time() * 1000)
-        }
-        await websocket_manager.send_progress(session_id, status_data)
-        await create_status_json("5", "processing", status_data)
+        # Calculate scene timing first
+        scene_timing = calculate_scene_timing(audio_files)
 
-        # Generate images for each script section
+        # Build the complete scenes structure BEFORE video generation
+        # This is what will be displayed and sent to Remotion
         sections = ["hook", "concept", "process", "conclusion"]
-        generated_images = {}
+        scenes = []
+        visual_prompts = {}  # Store prompts for parallel generation
 
-        for i, section in enumerate(sections):
-            # Update progress for each image
-            status_data = {
-                "agentnumber": "Agent5",
-                "userID": user_id,
-                "sessionID": session_id,
-                "supersessionID": supersessionid,
-                "status": "processing",
-                "message": f"Generating image {i+1}/4: {section}...",
-                "timestamp": int(time.time() * 1000)
-            }
-            await websocket_manager.send_progress(session_id, status_data)
+        for timing in scene_timing:
+            part = timing["part"]
 
-            section_data = script.get(section, {})
+            # Find matching audio file
+            audio_file = next((a for a in audio_files if a["part"] == part), None)
+            audio_url = audio_file.get("url", "") if audio_file else ""
+
+            # Get section data and visual prompt
+            section_data = script.get(part, {})
             visual_prompt = section_data.get("visual_prompt", "")
 
             if not visual_prompt:
@@ -339,20 +363,72 @@ async def agent_5_process(
                 text = section_data.get("text", "")
                 visual_prompt = f"Cinematic scene representing: {text[:200]}"
 
-            # Generate image
-            image_data = await generate_image_dalle(visual_prompt, settings.OPENAI_API_KEY)
+            visual_prompts[part] = visual_prompt
 
-            # Save locally
-            image_path = os.path.join(temp_dir, f"{section}.png")
-            with open(image_path, "wb") as f:
-                f.write(image_data)
+            # Get animation data from script if available
+            animation_data = section_data.get("animation", None)
 
-            # Upload to S3
-            s3_key = f"scaffold_test/{user_id}/{supersessionid}/image_{section}.png"
-            storage_service.upload_file_direct(image_data, s3_key, "image/png")
-            image_url = storage_service.generate_presigned_url(s3_key, expires_in=3600)
+            scene = {
+                "part": part,
+                "audioUrl": audio_url,
+                "startFrame": timing["startFrame"],
+                "durationFrames": timing["durationFrames"],
+                "audioDurationFrames": timing["audioDurationFrames"],
+                "visualType": "video",
+                "videoUrl": "",  # Will be populated after generation
+                "visualPrompt": visual_prompt  # Include prompt in the JSON
+            }
 
-            generated_images[section] = image_url
+            # Add animation data if present
+            if animation_data:
+                scene["animation"] = animation_data
+
+            scenes.append(scene)
+
+        # Send the unified JSON structure that will be used for generation
+        status_data = {
+            "agentnumber": "Agent5",
+            "userID": user_id,
+            "sessionID": session_id,
+            "supersessionID": supersessionid,
+            "status": "processing",
+            "message": "Generating all 4 AI videos in parallel...",
+            "timestamp": int(time.time() * 1000),
+            "generationPayload": {
+                "scenes": scenes,
+                "backgroundMusicUrl": background_music.get("url", ""),
+                "backgroundMusicVolume": 0.3
+            }
+        }
+        await websocket_manager.send_progress(session_id, status_data)
+        await create_status_json("5", "processing", status_data)
+
+        # Generate all 4 videos in parallel using asyncio.gather
+        async def generate_section_video(section: str) -> tuple[str, str]:
+            """Generate video for a section and return (section, url)"""
+            prompt = visual_prompts[section]
+            video_url = await generate_video_replicate(
+                prompt,
+                settings.REPLICATE_API_KEY,
+                model="minimax"
+            )
+            return (section, video_url)
+
+        # Run all 4 video generations in parallel
+        results = await asyncio.gather(
+            *[generate_section_video(section) for section in sections]
+        )
+
+        # Map results back to sections
+        generated_visuals = {section: url for section, url in results}
+
+        # Update scenes with generated video URLs
+        for scene in scenes:
+            part = scene["part"]
+            scene["videoUrl"] = generated_visuals.get(part, "")
+            # Remove the visual prompt from final output (was just for display)
+            if "visualPrompt" in scene:
+                del scene["visualPrompt"]
 
         # Update status for rendering
         status_data = {
@@ -365,27 +441,6 @@ async def agent_5_process(
             "timestamp": int(time.time() * 1000)
         }
         await websocket_manager.send_progress(session_id, status_data)
-
-        # Calculate scene timing
-        scene_timing = calculate_scene_timing(audio_files)
-
-        # Build scenes array for Remotion
-        scenes = []
-        for timing in scene_timing:
-            part = timing["part"]
-
-            # Find matching audio file
-            audio_file = next((a for a in audio_files if a["part"] == part), None)
-            audio_url = audio_file.get("url", "") if audio_file else ""
-
-            scenes.append({
-                "part": part,
-                "imageUrl": generated_images.get(part, ""),
-                "audioUrl": audio_url,
-                "startFrame": timing["startFrame"],
-                "durationFrames": timing["durationFrames"],
-                "audioDurationFrames": timing["audioDurationFrames"]
-            })
 
         # Get background music URL
         background_music_url = background_music.get("url", "")
