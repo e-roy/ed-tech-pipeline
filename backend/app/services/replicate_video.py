@@ -44,6 +44,7 @@ class ReplicateVideoService:
         prompt: str,
         model: str = "minimax",
         duration: int = 5,
+        seed: Optional[int] = None,
     ) -> str:
         """
         Generate a video from a text prompt.
@@ -52,6 +53,7 @@ class ReplicateVideoService:
             prompt: Text description of the video to generate
             model: Model to use ("minimax", "kling", "luma")
             duration: Approximate video duration (model-dependent)
+            seed: Optional random seed for reproducibility
 
         Returns:
             URL of the generated video
@@ -63,12 +65,13 @@ class ReplicateVideoService:
             self._run_prediction,
             model_id,
             prompt,
-            duration
+            duration,
+            seed
         )
 
         return output
 
-    def _run_prediction(self, model_id: str, prompt: str, duration: int) -> str:
+    def _run_prediction(self, model_id: str, prompt: str, duration: int, seed: Optional[int] = None) -> str:
         """
         Run the prediction synchronously.
 
@@ -76,6 +79,7 @@ class ReplicateVideoService:
             model_id: Replicate model identifier
             prompt: Text prompt
             duration: Video duration
+            seed: Optional random seed for reproducibility
 
         Returns:
             URL of the generated video
@@ -86,21 +90,32 @@ class ReplicateVideoService:
                 "prompt": prompt,
                 "prompt_optimizer": True,
             }
+            # Add seed if provided (Minimax supports seed)
+            if seed is not None:
+                input_data["seed"] = seed
         elif "kling" in model_id:
             input_data = {
                 "prompt": prompt,
                 "duration": str(duration),
                 "aspect_ratio": "16:9",
             }
+            # Add seed if provided (Kling supports seed)
+            if seed is not None:
+                input_data["seed"] = seed
         elif "luma" in model_id:
             input_data = {
                 "prompt": prompt,
                 "aspect_ratio": "16:9",
             }
+            # Luma may not support seed - only add if provided
+            if seed is not None:
+                input_data["seed"] = seed
         else:
             input_data = {
                 "prompt": prompt,
             }
+            if seed is not None:
+                input_data["seed"] = seed
 
         # Run the model
         output = replicate.run(model_id, input=input_data)
