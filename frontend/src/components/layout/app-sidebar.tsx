@@ -6,6 +6,7 @@ import {
   History,
   Plus,
   HardDrive,
+  Scissors,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -62,6 +63,11 @@ const navItems = [
     title: "Hardcode Assets",
     url: "/dashboard/hardcode-assets",
     icon: HardDrive,
+  },
+  {
+    title: "Edit",
+    url: "/dashboard/editing",
+    icon: Scissors,
   },
 ];
 
