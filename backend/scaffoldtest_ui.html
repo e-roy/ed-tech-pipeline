@@ -531,35 +531,37 @@
                 <div class="form-group">
                     <label for="a5-pipeline-data">Pipeline Data (JSON):</label>
                     <textarea id="a5-pipeline-data" name="pipeline_data" rows="30" required>{
-  "base_scene": {
-    "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic",
-    "setting": "bright animated classroom with large windows showing cartoon trees outside, wooden student desks in rows, colorful educational posters on walls, potted plants on windowsill, warm vibrant lighting",
-    "teacher": "animated female teacher character with brown hair in ponytail, light blue cardigan over white shirt, warm friendly smile, expressive gestures, consistent cartoon character design",
-    "students": "diverse group of 8-year-old animated students with big expressive eyes, mix of boys and girls in casual school clothes, engaged and curious expressions, consistent character designs"
-  },
-  "script": {
-    "hook": {
-      "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
-      "duration": "14",
-      "visual_prompt": "Wide shot of bright Pixar-style animated classroom, cheerful cartoon teacher with brown ponytail and light blue cardigan walking between colorful wooden desks gesturing enthusiastically, diverse animated students at desks looking up attentively with big expressive cartoon eyes, some raising hands eagerly, large windows showing animated green trees outside, warm vibrant lighting, smooth 3D CGI animation quality, kid-friendly educational show aesthetic, colorful posters on walls"
+  "agent_2_data": {
+    "base_scene": {
+      "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic",
+      "setting": "bright animated classroom with large windows showing cartoon trees outside, wooden student desks in rows, colorful educational posters on walls, potted plants on windowsill, warm vibrant lighting",
+      "teacher": "animated female teacher character with brown hair in ponytail, light blue cardigan over white shirt, warm friendly smile, expressive gestures, consistent cartoon character design",
+      "students": "diverse group of 8-year-old animated students with big expressive eyes, mix of boys and girls in casual school clothes, engaged and curious expressions, consistent character designs"
     },
-    "concept": {
-      "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
-      "duration": "16",
-      "visual_prompt": "Continuing from previous Pixar-style classroom scene, same brown-haired animated teacher in light blue cardigan walks from desks toward bright window holding cartoon potted plant with vibrant green leaves, same diverse animated students getting up excitedly from wooden desks and gathering around teacher, maintaining same vibrant 3D animation style and color palette, consistent character designs from previous scene, smooth camera movement following teacher to window, same warm classroom lighting"
-    },
-    "process": {
-      "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
-      "duration": "18",
-      "visual_prompt": "Smooth animated transition from same Pixar-style classroom with teacher holding cartoon plant, camera zooms into vibrant green animated leaf, then transitions inside showing magical glowing chloroplast structures like tiny emerald gems, golden sparkly light particles being absorbed and flowing through, energy pathways lighting up in bright colors, animated molecules moving and combining shown as blue wisps and silver sparkles, educational science visualization in same kid-friendly Pixar 3D animation style, vibrant magical yet scientific aesthetic"
-    },
-    "conclusion": {
-      "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
-      "duration": "12",
-      "visual_prompt": "Camera transitions back to same Pixar-style animated classroom, same brown-haired teacher in light blue cardigan at window with same diverse animated students gathered around looking outside excitedly, animated students talking and pointing at cartoon garden visible through window with vibrant plants and flowers, teacher giving thumbs up with warm smile, maintaining same 3D animation quality and vibrant color scheme, same character designs as all previous scenes, energetic happy ending, warm afternoon lighting"
+    "script": {
+      "hook": {
+        "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
+        "duration": "14",
+        "visual_prompt": "Wide shot of bright Pixar-style animated classroom, cheerful cartoon teacher with brown ponytail and light blue cardigan walking between colorful wooden desks gesturing enthusiastically, diverse animated students at desks looking up attentively with big expressive cartoon eyes, some raising hands eagerly, large windows showing animated green trees outside, warm vibrant lighting, smooth 3D CGI animation quality, kid-friendly educational show aesthetic, colorful posters on walls"
+      },
+      "concept": {
+        "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
+        "duration": "16",
+        "visual_prompt": "Continuing from previous Pixar-style classroom scene, same brown-haired animated teacher in light blue cardigan walks from desks toward bright window holding cartoon potted plant with vibrant green leaves, same diverse animated students getting up excitedly from wooden desks and gathering around teacher, maintaining same vibrant 3D animation style and color palette, consistent character designs from previous scene, smooth camera movement following teacher to window, same warm classroom lighting"
+      },
+      "process": {
+        "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
+        "duration": "18",
+        "visual_prompt": "Smooth animated transition from same Pixar-style classroom with teacher holding cartoon plant, camera zooms into vibrant green animated leaf, then transitions inside showing magical glowing chloroplast structures like tiny emerald gems, golden sparkly light particles being absorbed and flowing through, energy pathways lighting up in bright colors, animated molecules moving and combining shown as blue wisps and silver sparkles, educational science visualization in same kid-friendly Pixar 3D animation style, vibrant magical yet scientific aesthetic"
+      },
+      "conclusion": {
+        "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
+        "duration": "12",
+        "visual_prompt": "Camera transitions back to same Pixar-style animated classroom, same brown-haired teacher in light blue cardigan at window with same diverse animated students gathered around looking outside excitedly, animated students talking and pointing at cartoon garden visible through window with vibrant plants and flowers, teacher giving thumbs up with warm smile, maintaining same 3D animation quality and vibrant color scheme, same character designs as all previous scenes, energetic happy ending, warm afternoon lighting"
+      }
     }
   },
-  "audio_data": {
+  "agent_4_data": {
     "audio_files": [
       {"part": "hook", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=91tvjAImnrGa7FWaR2cJDzw45ek%3D&Expires=1763694052", "duration": 4.4},
       {"part": "concept", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_concept.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=jmu1yhped49w15E2QiDTnf1LB20%3D&Expires=1763694052", "duration": 7.6},

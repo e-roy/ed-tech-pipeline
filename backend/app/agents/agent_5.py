@@ -385,10 +385,21 @@ async def agent_5_process(
         if not pipeline_data:
             raise ValueError("No pipeline data provided")
 
-        script = pipeline_data.get("script", {})
-        audio_data = pipeline_data.get("audio_data", {})
-        audio_files = audio_data.get("audio_files", [])
-        background_music = audio_data.get("background_music", {})
+        # Support both old format and new agent-organized format
+        agent_2_data = pipeline_data.get("agent_2_data", {})
+        agent_4_data = pipeline_data.get("agent_4_data", {})
+
+        # If using new format, extract from agent data
+        if agent_2_data or agent_4_data:
+            script = agent_2_data.get("script", {})
+            audio_files = agent_4_data.get("audio_files", [])
+            background_music = agent_4_data.get("background_music", {})
+        else:
+            # Fallback to old format
+            script = pipeline_data.get("script", {})
+            audio_data = pipeline_data.get("audio_data", {})
+            audio_files = audio_data.get("audio_files", [])
+            background_music = audio_data.get("background_music", {})
 
         if not script:
             raise ValueError("No script data in pipeline")
@@ -489,7 +500,11 @@ async def agent_5_process(
             logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
 
             # Extract base_scene parameters if present for consistency
-            base_scene = pipeline_data.get("base_scene", {})
+            # Check both new format (agent_2_data) and old format (root level)
+            if agent_2_data:
+                base_scene = agent_2_data.get("base_scene", {})
+            else:
+                base_scene = pipeline_data.get("base_scene", {})
             style = base_scene.get("style", "")
             setting = base_scene.get("setting", "")
             teacher_desc = base_scene.get("teacher", "")
