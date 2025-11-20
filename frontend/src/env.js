@@ -26,6 +26,10 @@ export const env = createEnv({
       process.env.NODE_ENV === "production"
         ? z.string()
         : z.string().optional(), // Required in production, optional in development
+    VIDEO_PROCESSING_API_URL: z
+      .string()
+      .url()
+      .default("https://api.classclipscohort3.com"),
   },
 
   /**
@@ -57,6 +61,7 @@ export const env = createEnv({
     AWS_REGION: process.env.AWS_REGION,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
+    VIDEO_PROCESSING_API_URL: process.env.VIDEO_PROCESSING_API_URL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

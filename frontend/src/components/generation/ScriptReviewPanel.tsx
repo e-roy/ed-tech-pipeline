@@ -28,10 +28,13 @@ interface ScriptReviewPanelProps {
   topic?: string;
 }
 
-export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptReviewPanelProps) {
-  const { confirmedFacts, setIsGeneratingScript } = useFactExtraction();
+export function ScriptReviewPanel({
+  topic = "Educational Content",
+}: ScriptReviewPanelProps) {
+  const { confirmedFacts, setIsGeneratingScript, sessionId } =
+    useFactExtraction();
   const { sendMessage } = useChatMessage();
-  
+
   // sendMessage may be null if not in ChatMessageProvider context
   const [editableSegments, setEditableSegments] = useState<Segment[]>([]);
   const [generatedScript, setGeneratedScript] = useState<{
@@ -46,7 +49,11 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
     onSuccess: (data) => {
       setGeneratedScript(data);
       setIsGeneratingScript(false);
-      if (data.script && typeof data.script === "object" && "segments" in data.script) {
+      if (
+        data.script &&
+        typeof data.script === "object" &&
+        "segments" in data.script
+      ) {
         setEditableSegments((data.script as { segments: Segment[] }).segments);
       }
     },
@@ -59,8 +66,6 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
 
   const approveMutation = api.script.approve.useMutation({
     onSuccess: async () => {
-      alert("Script approved! Visual generation coming in next phase.");
-      
       // Add user message to chat when script is approved
       if (sendMessage) {
         try {
@@ -100,7 +105,14 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
         targetDuration: 60,
       });
     }
-  }, [confirmedFacts, topic, generatedScript, hasInitiatedGeneration, setIsGeneratingScript, generateMutation]);
+  }, [
+    confirmedFacts,
+    topic,
+    generatedScript,
+    hasInitiatedGeneration,
+    setIsGeneratingScript,
+    generateMutation,
+  ]);
 
   const handleApprove = async () => {
     if (!generatedScript || !confirmedFacts) return;
@@ -111,15 +123,16 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
     }));
 
     // Use edited segments if available, otherwise use original script
-    const scriptToApprove = editableSegments.length > 0
-      ? {
-          ...(typeof generatedScript.script === "object" &&
-          generatedScript.script !== null
-            ? generatedScript.script
-            : {}),
-          segments: editableSegments,
-        }
-      : generatedScript.script;
+    const scriptToApprove =
+      editableSegments.length > 0
+        ? {
+            ...(typeof generatedScript.script === "object" &&
+            generatedScript.script !== null
+              ? generatedScript.script
+              : {}),
+            segments: editableSegments,
+          }
+        : generatedScript.script;
 
     await approveMutation.mutateAsync({
       script: scriptToApprove,
@@ -127,10 +140,11 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
       facts,
       cost: generatedScript.cost,
       duration: generatedScript.duration,
+      sessionId: sessionId ?? undefined,
     });
   };
 
-  const handleRegenerateSegment = (index: number) => {
+  const handleRegenerateSegment = (_index: number) => {
     alert("Regeneration feature coming in Phase 04.2");
   };
 
@@ -175,12 +189,12 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
               key={segment.id}
               className="border-l-primary bg-muted/50 rounded-lg border-l-4 p-4"
             >
-              <div className="flex justify-between items-start mb-3">
+              <div className="mb-3 flex items-start justify-between">
                 <div>
-                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded text-sm font-medium">
+                  <span className="inline-block rounded bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
                     Segment {index + 1}: {segment.type}
                   </span>
-                  <span className="ml-3 text-sm text-muted-foreground">
+                  <span className="text-muted-foreground ml-3 text-sm">
                     {segment.start_time}s -{" "}
                     {segment.start_time + segment.duration}s
                   </span>
@@ -195,36 +209,38 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
               </div>
 
               <div className="mb-3">
-                <label className="block text-sm font-medium mb-2">
+                <label className="mb-2 block text-sm font-medium">
                   Narration:
                 </label>
                 <textarea
                   value={segment.narration}
                   onChange={(e) => {
                     const updated = [...editableSegments];
-                    if (updated[index]) {
-                      updated[index].narration = e.target.value;
+                    const segment = updated[index];
+                    if (segment) {
+                      segment.narration = e.target.value;
                       setEditableSegments(updated);
                     }
                   }}
-                  className="w-full border rounded px-3 py-2 min-h-[80px] text-sm"
+                  className="min-h-[80px] w-full rounded border px-3 py-2 text-sm"
                 />
               </div>
 
               <div className="mb-3">
-                <label className="block text-sm font-medium mb-2">
+                <label className="mb-2 block text-sm font-medium">
                   Visual Guidance:
                 </label>
                 <textarea
                   value={segment.visual_guidance}
                   onChange={(e) => {
                     const updated = [...editableSegments];
-                    if (updated[index]) {
-                      updated[index].visual_guidance = e.target.value;
+                    const segment = updated[index];
+                    if (segment) {
+                      segment.visual_guidance = e.target.value;
                       setEditableSegments(updated);
                     }
                   }}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="w-full rounded border px-3 py-2 text-sm"
                   rows={2}
                 />
               </div>
@@ -248,4 +264,3 @@ export function ScriptReviewPanel({ topic = "Educational Content" }: ScriptRevie
     </Card>
   );
 }
-
