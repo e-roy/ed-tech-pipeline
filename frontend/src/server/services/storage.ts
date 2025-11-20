@@ -140,22 +140,13 @@ export async function listUserFiles(
       continuationToken = response.NextContinuationToken;
     } while (continuationToken);
   } else {
-    // For output folder, list both traditional output and session image folders
-    const prefixes: string[] = [];
-
-    // Add traditional output prefix
-    if (asset_type) {
-      prefixes.push(`users/${userId}/output/${asset_type}/`);
-    } else {
-      prefixes.push(`users/${userId}/output/`);
-    }
-
-    // Also search for session image folders: users/{userId}/*/images/**
+    // For output folder, list all files from session folders: users/{userId}/{sessionId}/
     // List all session folders under user prefix
     const userPrefix = `users/${userId}/`;
     const sessionFolders: string[] = [];
 
     // List all session folders (users/{userId}/{session_id}/)
+    // Exclude 'input' folder as it's not part of session output
     let continuationToken: string | undefined;
     do {
       const command = new ListObjectsV2Command({
@@ -172,12 +163,17 @@ export async function listUserFiles(
       if (response.CommonPrefixes) {
         for (const prefix of response.CommonPrefixes) {
           if (prefix.Prefix) {
-            // Check if this session folder has an images subfolder
-            // We'll list it directly: users/{userId}/{session_id}/images/
-            const sessionIdRegex = /^users\/\d+\/([^/]+)\/$/;
+            // Match session folders: users/{userId}/{sessionId}/
+            // userId is a UUID string, not a number
+            // Exclude 'input' and 'output' folders
+            const sessionIdRegex = /^users\/[^/]+\/([^/]+)\/$/;
             const sessionIdMatch = sessionIdRegex.exec(prefix.Prefix);
             if (sessionIdMatch) {
-              sessionFolders.push(`${prefix.Prefix}images/`);
+              const folderName = sessionIdMatch[1];
+              // Exclude 'input' and 'output' folders, include all other session folders
+              if (folderName !== "input" && folderName !== "output") {
+                sessionFolders.push(prefix.Prefix);
+              }
             }
           }
         }
@@ -186,13 +182,13 @@ export async function listUserFiles(
       continuationToken = response.NextContinuationToken;
     } while (continuationToken);
 
-    // Now list files from each session's images folder
-    for (const sessionImagesPrefix of sessionFolders) {
+    // List all files directly from each session folder (files are in users/{userId}/{sessionId}/, not in subfolders)
+    for (const sessionPrefix of sessionFolders) {
       let sessionContinuationToken: string | undefined;
       do {
         const command = new ListObjectsV2Command({
           Bucket: env.S3_BUCKET_NAME,
-          Prefix: sessionImagesPrefix,
+          Prefix: sessionPrefix,
           MaxKeys: 1000,
           ContinuationToken: sessionContinuationToken,
         });
@@ -203,11 +199,10 @@ export async function listUserFiles(
             (obj): obj is typeof obj & { Key: string } => !!obj.Key,
           )
             .filter((obj) => {
-              // Only include image files, exclude segments.md, status.json, and diagram.png
+              // Exclude directory markers and metadata files
               const key = obj.Key;
-              const isImage = /\.(png|jpg|jpeg|gif|webp)$/i.test(key);
               return (
-                isImage &&
+                !key.endsWith("/") &&
                 !key.endsWith("segments.md") &&
                 !key.endsWith("status.json") &&
                 !key.endsWith("diagram.png")
@@ -223,33 +218,6 @@ export async function listUserFiles(
         }
         sessionContinuationToken = response.NextContinuationToken;
       } while (sessionContinuationToken);
-    }
-
-    // Also list traditional output folder files
-    for (const prefix of prefixes) {
-      let continuationToken: string | undefined;
-      do {
-        const command = new ListObjectsV2Command({
-          Bucket: env.S3_BUCKET_NAME,
-          Prefix: prefix,
-          MaxKeys: limit + offset,
-          ContinuationToken: continuationToken,
-        });
-
-        const response = await client.send(command);
-        if (response.Contents) {
-          const validObjects = response.Contents.filter(
-            (obj): obj is typeof obj & { Key: string } => !!obj.Key,
-          ).map((obj) => ({
-            Key: obj.Key,
-            Size: obj.Size ?? 0,
-            LastModified: obj.LastModified,
-            ContentType: undefined, // ListObjectsV2 doesn't return ContentType
-          }));
-          allObjects.push(...validObjects);
-        }
-        continuationToken = response.NextContinuationToken;
-      } while (continuationToken);
     }
   }
 
