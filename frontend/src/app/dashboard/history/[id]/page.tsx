@@ -31,11 +31,9 @@ export default function HistoryDetailPage({ params }: Props) {
     { sessionId },
     { enabled: !!sessionId },
   );
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+
   const session = queryResult.data as SessionData | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  const isLoading = queryResult.isLoading as boolean;
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const isLoading = queryResult.isLoading;
   const error = queryResult.error as Error | null;
 
   if (isLoading) {
@@ -87,7 +85,7 @@ export default function HistoryDetailPage({ params }: Props) {
   }
 
   return (
-    <div className="flex h-full flex-col p-4">
+    <div className="flex h-full flex-col overflow-y-auto p-4">
       <div className="mb-4">
         <h1 className="text-2xl font-semibold">
           {session.topic ?? "Untitled Session"}

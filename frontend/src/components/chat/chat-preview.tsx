@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, FileUIPart } from "ai";
@@ -39,10 +39,40 @@ import { ChatMessageProvider } from "@/components/chat/chat-message-context";
 import { ScriptGenerationChainOfThought } from "@/components/generation/ScriptGenerationChainOfThought";
 import type { Fact } from "@/types";
 
-export function ChatPreview() {
+interface ChatPreviewProps {
+  sessionId?: string; // For history page resumption
+}
+
+export function ChatPreview({
+  sessionId: propSessionId,
+}: ChatPreviewProps = {}) {
   const pathname = usePathname();
   const isCreatePage = pathname === "/dashboard/create";
   const factExtraction = useFactExtraction();
+
+  // Initialize sessionId: prop (history) > localStorage (create page) > null
+  // Initialize to propSessionId or null (localStorage access happens in useEffect)
+  const [sessionId, setSessionId] = useState<string | null>(
+    propSessionId ?? null,
+  );
+
+  // Load from localStorage on client side only (for create pages)
+  useEffect(() => {
+    // Only access localStorage on client side
+    if (typeof window === "undefined") return;
+
+    // If we have propSessionId, use it (history page) - don't check localStorage
+    if (propSessionId) {
+      setSessionId(propSessionId);
+      return;
+    }
+
+    // Create page - check localStorage for active session
+    const storedSessionId = localStorage.getItem("chatSessionId");
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+    }
+  }, [propSessionId]);
 
   // Handle when AI finishes responding
   const handleMessageFinish = useCallback(
@@ -66,10 +96,78 @@ export function ChatPreview() {
     [isCreatePage, factExtraction],
   );
 
+  // Update sessionId if prop changes (e.g., navigating to history page)
+  useEffect(() => {
+    if (propSessionId && propSessionId !== sessionId) {
+      setSessionId(propSessionId);
+      // Don't store history sessionId in localStorage
+    }
+  }, [propSessionId, sessionId]);
+
+  // Keep a ref to sessionId for useChat transport closure
+  const sessionIdRef = useRef<string | null>(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   // Use AI SDK's useChat hook for chat state management
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/chat",
+      fetch: async (url, options) => {
+        const currentSessionId = sessionIdRef.current;
+
+        // Include existing sessionId if we have one
+        if (options?.body && currentSessionId) {
+          try {
+            const body = JSON.parse(options.body as string) as {
+              sessionId?: string;
+              [key: string]: unknown;
+            };
+            body.sessionId = currentSessionId;
+
+            // Set header if sessionId came from props (history page resumption)
+            if (propSessionId) {
+              options.headers = {
+                ...options.headers,
+                "x-session-id": currentSessionId,
+              };
+            }
+
+            options.body = JSON.stringify(body);
+          } catch {
+            // If body parsing fails, continue without modification
+          }
+        }
+
+        const response = await fetch(url, options);
+
+        // Capture sessionId from header on first response
+        // Only store in localStorage if NOT from props (create pages only)
+        const responseSessionId =
+          response.headers.get("x-session-id") ??
+          response.headers.get("X-Session-Id");
+
+        console.log("[ChatPreview] Response Headers:", {
+          sessionIdHeader: responseSessionId,
+          allHeaders: [...response.headers.entries()],
+        });
+
+        if (
+          responseSessionId &&
+          responseSessionId !== currentSessionId &&
+          !propSessionId
+        ) {
+          console.log(
+            "[ChatPreview] Capturing new sessionId:",
+            responseSessionId,
+          );
+          setSessionId(responseSessionId);
+          localStorage.setItem("chatSessionId", responseSessionId);
+        }
+
+        return response;
+      },
     }),
     onFinish: (event) => {
       console.log(event.message);
@@ -91,12 +189,16 @@ export function ChatPreview() {
       !prevConfirmedFactsRef.current
     ) {
       // Facts were just confirmed, send message
+      const factsPayload = {
+        facts: factExtraction.confirmedFacts,
+      };
+
       sendMessage({
         role: "user",
         parts: [
           {
             type: "text",
-            text: "These facts look good, let's proceed with script generation",
+            text: `I confirm the following facts for the script:\n\n\`\`\`json\n${JSON.stringify(factsPayload, null, 2)}\n\`\`\`\n\nPlease proceed with generating the script.`,
           },
         ],
       }).catch((error) => {
