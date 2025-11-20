@@ -736,10 +736,9 @@
                 // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
                 let wsUrl, wsPath;
                 if (window.location.hostname.includes('execute-api')) {
-                    // API Gateway: use path parameter (query params don't work in $connect route)
-                    // Format: wss://.../prod/{session_id}
+                    // API Gateway: connect to stage root and register session after open
                     wsUrl = WS_API_GATEWAY_URL;
-                    wsPath = `${wsUrl}/${sessionId}`;
+                    wsPath = wsUrl;
                 } else {
                     // Direct connection: use path parameter
                     wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
@@ -760,6 +759,16 @@
                     console.log('WebSocket opened, waiting for ready confirmation...');
                     reconnectAttempts = 0;
                     updateConnectionStatus('connecting', 'WebSocket: Waiting for confirmation...');
+                    
+                    // Send registration message so backend knows the session ID
+                    try {
+                        websocket.send(JSON.stringify({
+                            type: 'register',
+                            sessionID: sessionId
+                        }));
+                    } catch (err) {
+                        console.error('Failed to send registration message:', err);
+                    }
                 };
 
                 websocket.onmessage = (event) => {
@@ -1216,9 +1225,9 @@
             // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
             let wsUrl, wsPath;
             if (window.location.hostname.includes('execute-api')) {
-                // API Gateway: use WebSocket API Gateway with query parameter
+                // API Gateway: connect to stage root and register session via message
                 wsUrl = WS_API_GATEWAY_URL;
-                wsPath = `${wsUrl}?session_id=${sessionId}`;
+                wsPath = wsUrl;
             } else {
                 // Direct connection: use path parameter
                 wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
@@ -1241,6 +1250,16 @@
                 }
             };
 
+            a5Websocket.onopen = () => {
+                try {
+                    a5Websocket.send(JSON.stringify({
+                        type: 'register',
+                        sessionID: sessionId
+                    }));
+                } catch (err) {
+                    console.error('Failed to send registration for Agent5:', err);
+                }
+            };
             a5Websocket.onopen = () => {
                 console.log('Agent 5 WebSocket connected');
             };

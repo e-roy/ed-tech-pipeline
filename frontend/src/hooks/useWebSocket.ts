@@ -27,14 +27,25 @@ export function useWebSocket(sessionId: string | null) {
       // Use query parameter format for API Gateway compatibility
       // Format: wss://gateway-url/prod?session_id=xxx
       // Backend supports both: /ws/{session_id} (path) and /ws?session_id=xxx (query)
-      const wsUrl = WS_URL.includes('execute-api') 
-        ? `${WS_URL}?session_id=${sessionId}`  // API Gateway format
-        : `${WS_URL}/ws/${sessionId}`;          // Direct connection format
+      const wsUrl = WS_URL.includes("execute-api")
+        ? WS_URL // API Gateway stage URL (session handled via register message)
+        : `${WS_URL}/ws/${sessionId}`; // Direct connection format
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setIsConnected(true);
         reconnectAttempts.current = 0; // Reset on successful connection
+
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "register",
+              sessionID: sessionId,
+            }),
+          );
+        } catch (err) {
+          console.error("Failed to send WebSocket registration message:", err);
+        }
       };
 
       ws.onmessage = (event) => {

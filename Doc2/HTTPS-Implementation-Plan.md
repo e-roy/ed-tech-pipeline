@@ -30,44 +30,29 @@
 
 ## Solution Architecture
 
-### Approach: AWS API Gateway (REST + WebSocket) + HTTP Integration
+### Final Approach: AWS Application Load Balancer (HTTPS + WSS)
 
-**Why This Solution Works:**
+Because API Gateway’s `HTTP_PROXY` WebSocket integration never upgraded the connection (it proxied a plain HTTP GET to `/ws`, producing 404 responses), we replaced the gateway stack with an **Application Load Balancer** that terminates TLS and forwards both HTTP and upgraded WebSocket traffic directly to the FastAPI service.
 
-1. **AWS-Native**: Fully integrated with AWS ecosystem
-2. **Managed HTTPS**: Automatic SSL/TLS termination, no certificate management
-3. **Quick Returns**: API Gateway works perfectly with our architecture where endpoints return immediately and use WebSocket for long-running operations
-4. **WebSocket Support**: Separate WebSocket API Gateway handles real-time agent progress updates
-5. **Cost Effective**: Pay-per-request pricing, no base cost for low traffic
-6. **Production Ready**: Built-in DDoS protection, monitoring, and scaling
+**Why this works**
+1. **Native WebSocket support** – ALB maintains the HTTP/1.1 upgrade and streams frames to the backend unchanged.
+2. **Managed TLS** – ACM certificate (`api.gauntlet3.com`) attached to the HTTPS listener; browsers connect via `https://`/`wss://` without mixed-content issues.
+3. **Simple routing** – Both REST and WebSocket paths share the same domain (`api.gauntlet3.com`), so frontend env vars are a single base URL.
+4. **Security controls** – ALB security group restricts ingress to 80/443, while backend traffic now originates from the ALB’s security group (future hardening can limit SG-to-SG traffic).
 
-### Architecture Diagram
+**Deployed resources (us-east-2)**
+- Load balancer: `pipeline-backend-alb` → DNS `pipeline-backend-alb-699610424.us-east-2.elb.amazonaws.com`
+- HTTPS listener (443) + HTTP listener (80) forwarding to target group `pipeline-backend-tg`
+- Target group health check: `HTTP /api/health`
+- ACM certificate: `arn:aws:acm:us-east-2:971422717446:certificate/d836813c-8725-4717-8a91-b72f71abbfc2`
+- Route53 alias: `api.gauntlet3.com` → ALB
 
-```
-Internet (HTTPS)
-    ↓
-API Gateway REST API (HTTPS) - SSL Termination
-    ↓
-EC2 Backend (HTTP, Port 8000) - Internal
-    ↓
-Neon PostgreSQL (SSL with sslmode=prefer)
-```
+**Current client endpoints**
+- REST: `https://api.gauntlet3.com/api/...`
+- WebSocket: `wss://api.gauntlet3.com/ws/{sessionId}` (clients also send a `register` message for compatibility)
 
-**WebSocket Flow:**
-```
-Client (WSS)
-    ↓
-API Gateway WebSocket API (WSS) - SSL Termination
-    ↓
-EC2 Backend WebSocket (WS, Port 8000) - Internal
-```
-
-### Key Components
-
-1. **REST API Gateway**: Handles all HTTP endpoints (`/api/*`)
-2. **WebSocket API Gateway**: Handles WebSocket connections (`/ws/*`)
-3. **HTTP Integration**: Both APIs forward to EC2 backend (no Lambda)
-4. **Database Fix**: Change `sslmode=require` to `sslmode=prefer` to avoid certificate file lookups
+### (Deprecated) Approach: AWS API Gateway (REST + WebSocket)
+Kept below for history, but superseded by the ALB design after discovering WebSocket upgrade limitations with `HTTP_PROXY`.
 
 ---
 
