@@ -1,6 +1,7 @@
 """
 Main FastAPI application for Gauntlet Pipeline Orchestrator.
 """
+import os
 import time
 import asyncio
 import json
@@ -1001,6 +1002,7 @@ class Agent5TestRequest(BaseModel):
     """Request model for testing Agent 5 (Video Generator) directly."""
     session_id: str
     pipeline_data: Dict[str, Any]
+    generation_mode: str = "video"  # Always uses AI video generation (Replicate Minimax)
 
 
 @app.post("/api/agent5/test", response_model=AgentTestResponse)
@@ -1045,22 +1047,148 @@ async def test_agent5_video(request: Agent5TestRequest) -> AgentTestResponse:
             session_id=request.session_id,
             supersessionid=supersessionid,
             storage_service=storage_service,
-            pipeline_data=request.pipeline_data
+            pipeline_data=request.pipeline_data,
+            generation_mode=request.generation_mode
         )
+
+        # Calculate cost for AI video generation
+        # Replicate Minimax video-01: ~$0.035 per 5s video
+        # 4 scenes = $0.14 total
+        cost = 4 * 0.035  # $0.14
+        model = "replicate-minimax-video-01"
+        data = {
+            "videoUrl": video_url,
+            "supersessionId": supersessionid,
+            "model": model,
+            "videoDuration": "5s",
+            "videosGenerated": 4
+        }
 
         return AgentTestResponse(
             success=True,
-            data={
-                "videoUrl": video_url,
-                "supersessionId": supersessionid
-            },
-            cost=0.0,  # TODO: Track DALL-E costs
+            data=data,
+            cost=cost,
             duration=time.time() - start_time
         )
 
     except Exception as e:
         import traceback
         logger.error(f"Agent 5 test failed: {e}\n{traceback.format_exc()}")
+        return AgentTestResponse(
+            success=False,
+            data={},
+            cost=0.0,
+            duration=time.time() - start_time,
+            error=str(e)
+        )
+
+
+class AnimatedVideoRequest(BaseModel):
+    """Request model for rendering programmatic animated video."""
+    session_id: str
+    animation_data: Dict[str, Any] = {}
+    background_music_volume: float = 0.3
+
+
+@app.post("/api/agent5/animated", response_model=AgentTestResponse)
+async def render_animated_video(request: AnimatedVideoRequest) -> AgentTestResponse:
+    """
+    Render a programmatic animated video (no DALL-E images).
+
+    Uses the PhotosynthesisAnimation composition which is fully code-generated
+    with animated molecules, plants, sun rays, etc.
+    """
+    import asyncio
+    import subprocess
+    import tempfile
+    import uuid
+    from pathlib import Path
+
+    start_time = time.time()
+    from urllib.parse import quote
+
+    try:
+        # Path to Remotion project
+        # main.py is at backend/app/main.py, so go up 3 levels to pipeline root, then into remotion
+        # __file__ -> backend/app/main.py
+        # .parent -> backend/app
+        # .parent.parent -> backend
+        # .parent.parent.parent -> pipeline (root)
+        remotion_dir = Path(__file__).parent.parent.parent / "remotion"
+
+        # Create temp directory for output
+        temp_dir = tempfile.mkdtemp(prefix="animated_video_")
+        output_path = os.path.join(temp_dir, "output.mp4")
+
+        # Convert local filepaths to URLs for audio files
+        animation_data = request.animation_data.copy() if request.animation_data else {}
+        if "audio_data" in animation_data and "audio_files" in animation_data["audio_data"]:
+            for audio_file in animation_data["audio_data"]["audio_files"]:
+                # If filepath exists but url is empty, convert to local serve URL
+                if audio_file.get("filepath") and not audio_file.get("url"):
+                    encoded_path = quote(audio_file["filepath"])
+                    audio_file["url"] = f"http://localhost:8000/api/audio/local?path={encoded_path}"
+
+        # Prepare props for Remotion
+        props = {
+            "animationData": animation_data,
+            "backgroundMusicVolume": request.background_music_volume
+        }
+
+        # Write props to temp file
+        props_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        import json
+        json.dump(props, props_file)
+        props_file.close()
+
+        try:
+            # Run Remotion render with EducationalAnimation composition
+            cmd = f"bunx remotion render src/index.ts EducationalAnimation {output_path} --props={props_file.name}"
+
+            logger.info(f"Rendering animated video: {cmd}")
+
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                cwd=str(remotion_dir),
+                capture_output=True,
+                text=True,
+                shell=True,
+                env={**os.environ, "PATH": f"/Users/mfuechec/.bun/bin:{os.environ.get('PATH', '')}"}
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(f"Remotion render failed: {result.stderr}\n{result.stdout}")
+
+            # Upload to S3
+            video_filename = f"animated_video_{uuid.uuid4().hex[:8]}.mp4"
+            supersessionid = f"{request.session_id}_animated"
+            video_s3_key = f"scaffold_test/test_user/{supersessionid}/{video_filename}"
+
+            with open(output_path, "rb") as f:
+                video_content = f.read()
+
+            storage_service.upload_file_direct(video_content, video_s3_key, "video/mp4")
+            video_url = storage_service.generate_presigned_url(video_s3_key, expires_in=86400)
+
+            return AgentTestResponse(
+                success=True,
+                data={
+                    "videoUrl": video_url,
+                    "supersessionId": supersessionid
+                },
+                cost=0.0,
+                duration=time.time() - start_time
+            )
+
+        finally:
+            os.unlink(props_file.name)
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Animated video render failed: {e}\n{traceback.format_exc()}")
         return AgentTestResponse(
             success=False,
             data={},

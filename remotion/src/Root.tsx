@@ -1,5 +1,7 @@
 import { Composition } from "remotion";
 import { VideoComposition, VideoCompositionProps } from "./VideoComposition";
+import { PhotosynthesisAnimation, PhotosynthesisProps } from "./PhotosynthesisAnimation";
+import { EducationalAnimation, EducationalAnimationProps } from "./EducationalAnimation";
 
 // Default props for studio preview
 const defaultProps: VideoCompositionProps = {
@@ -41,17 +43,63 @@ const defaultProps: VideoCompositionProps = {
   backgroundMusicVolume: 0.3,
 };
 
+// Default props for PhotosynthesisAnimation
+const photosynthesisDefaultProps: PhotosynthesisProps = {
+  audioUrls: {},
+  backgroundMusicVolume: 0.3,
+};
+
+// Default props for EducationalAnimation
+const educationalDefaultProps: EducationalAnimationProps = {
+  animationData: {
+    title: "Demo",
+    scenes: [
+      {
+        id: "intro",
+        background: "classroom",
+        elements: ["whiteboard", "teacher", "students", "floor"],
+        textOverlays: [
+          { text: "Welcome to Class!", position: "top", startFrame: 30, endFrame: 400, animation: "scale", style: { fontSize: 56, color: "#333" } }
+        ]
+      }
+    ],
+    audio_data: {
+      audio_files: [],
+      background_music: { url: "", duration: 60 }
+    }
+  },
+  backgroundMusicVolume: 0.3,
+};
+
 export const Root: React.FC = () => {
   return (
     <>
       <Composition
         id="VideoComposition"
-        component={VideoComposition}
+        component={VideoComposition as unknown as React.FC<Record<string, unknown>>}
         durationInFrames={1800} // 60 seconds at 30fps
         fps={30}
         width={1920}
         height={1080}
         defaultProps={defaultProps}
+      />
+      <Composition
+        id="PhotosynthesisAnimation"
+        component={PhotosynthesisAnimation as unknown as React.FC<Record<string, unknown>>}
+        durationInFrames={1800} // 60 seconds at 30fps (4 scenes x 15 seconds)
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={photosynthesisDefaultProps}
+      />
+      <Composition
+        id="EducationalAnimation"
+        component={EducationalAnimation as unknown as React.FC<Record<string, unknown>>}
+        durationInFrames={1800} // 60 seconds at 30fps
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={educationalDefaultProps}
       />
     </>
   );
