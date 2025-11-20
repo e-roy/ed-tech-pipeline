@@ -7,7 +7,6 @@ Functionality will be added between status states.
 import asyncio
 import json
 import logging
-import secrets
 import time
 from typing import Optional, Callable, Awaitable
 from sqlalchemy.orm import Session
@@ -79,10 +78,6 @@ async def agent_2_process(
         except Exception as e:
             logger.error(f"Agent2 failed to query video_session: {e}")
             raise
-    
-    # Generate supersessionid: original_session_id + 16 character random string
-    random_suffix = secrets.token_urlsafe(12)[:16]  # Generate 16 char random string
-    supersessionid = f"{session_id}_{random_suffix}"
     
     # Extract data from video_session if provided
     topic = None
@@ -157,16 +152,15 @@ async def agent_2_process(
             logger.warning(f"Failed to create status JSON file: {e}")
     
     try:
-        logger.info(f"Agent2 starting for session {session_id}, supersessionid: {supersessionid}")
+        logger.info(f"Agent2 starting for session {session_id}")
         
         # Report starting status
         logger.info(f"Agent2 sending starting status for session {session_id}")
-        await send_status("Agent2", "starting", supersessionID=supersessionid)
+        await send_status("Agent2", "starting")
         status_data = {
             "agentnumber": "Agent2",
             "userID": user_id,
             "sessionID": session_id,
-            "supersessionID": supersessionid,
             "status": "starting",
             "timestamp": int(time.time() * 1000)
         }
@@ -190,7 +184,7 @@ async def agent_2_process(
             script = generate_script_structure()
         
         # Report processing status
-        processing_kwargs = {"supersessionID": supersessionid}
+        processing_kwargs = {}
         # Include video_session data in status messages ONLY when video_session_data is provided
         if video_session_data:
             processing_kwargs["topic"] = topic
@@ -204,7 +198,6 @@ async def agent_2_process(
             "agentnumber": "Agent2",
             "userID": user_id,
             "sessionID": session_id,
-            "supersessionID": supersessionid,
             "status": "processing",
             "timestamp": int(time.time() * 1000),
             **processing_kwargs
@@ -214,10 +207,32 @@ async def agent_2_process(
         # Wait 2 seconds
         await asyncio.sleep(2)
 
-        # TODO: Add main agent work here (e.g., storyboard generation)
+        # Generate storyboard.json from script data
+        storyboard = None
+        if script:
+            try:
+                storyboard = create_storyboard_from_script(script, topic)
+                logger.info(f"Agent2 generated storyboard with {len(storyboard.get('segments', []))} segments")
+                
+                # Upload storyboard.json to S3
+                if storage_service.s3_client:
+                    s3_key = f"scaffold_test/{user_id}/{session_id}/agent2/storyboard.json"
+                    storyboard_json = json.dumps(storyboard, indent=2).encode('utf-8')
+                    storage_service.s3_client.put_object(
+                        Bucket=storage_service.bucket_name,
+                        Key=s3_key,
+                        Body=storyboard_json,
+                        ContentType='application/json'
+                    )
+                    logger.info(f"Agent2 uploaded storyboard.json to S3: {s3_key}")
+                else:
+                    logger.warning("Storage service not configured, skipping storyboard.json upload")
+            except Exception as e:
+                logger.error(f"Agent2 failed to generate/upload storyboard.json: {e}", exc_info=True)
+                # Don't fail the pipeline if storyboard generation fails
 
         # Report finished status
-        finished_kwargs = {"supersessionID": supersessionid}
+        finished_kwargs = {}
         # Include video_session data in status messages ONLY when video_session_data is provided
         if video_session_data:
             finished_kwargs["topic"] = topic
@@ -231,7 +246,6 @@ async def agent_2_process(
             "agentnumber": "Agent2",
             "userID": user_id,
             "sessionID": session_id,
-            "supersessionID": supersessionid,
             "status": "finished",
             "timestamp": int(time.time() * 1000),
             **finished_kwargs
@@ -243,8 +257,8 @@ async def agent_2_process(
         # Return completion status for orchestrator
         return {
             "status": "success",
-            "supersessionid": supersessionid,
             "script": script,
+            "storyboard": storyboard,
             "video_session_data": video_session_data
         }
         
@@ -252,8 +266,7 @@ async def agent_2_process(
         # Report error status and stop pipeline
         error_kwargs = {
             "error": str(e),
-            "reason": f"Agent2 failed: {type(e).__name__}",
-            "supersessionID": supersessionid if 'supersessionid' in locals() else None
+            "reason": f"Agent2 failed: {type(e).__name__}"
         }
         await send_status("Agent2", "error", **error_kwargs)
         error_data = {
@@ -308,6 +321,132 @@ def extract_script_from_generated_script(generated_script: Optional[dict]) -> Op
         return script_parts
     
     return None
+
+
+def calculate_duration_from_words(narration: str) -> int:
+    """
+    Calculate duration in seconds based on word count.
+    Assumes ~150 words per minute speaking rate.
+    
+    Args:
+        narration: The narration text
+        
+    Returns:
+        Duration in seconds (rounded to nearest integer)
+    """
+    if not narration:
+        return 0
+    words = len(narration.split())
+    # 150 words per minute = 2.5 words per second
+    duration = round((words / 150) * 60)
+    return max(1, duration)  # Minimum 1 second
+
+
+def create_storyboard_from_script(script: dict, topic: Optional[str] = None) -> dict:
+    """
+    Create a storyboard.json structure from script data.
+    
+    Args:
+        script: Dict with hook, concept, process, conclusion keys
+        topic: Optional topic string for context
+        
+    Returns:
+        Dict with storyboard structure including segments, reading_level, total_duration, key_terms_count
+    """
+    segments = []
+    start_time = 0
+    all_key_concepts = set()
+    
+    # Map script parts to segment types
+    segment_mapping = [
+        ("hook", "hook"),
+        ("concept", "concept_introduction"),
+        ("process", "process_explanation"),
+        ("conclusion", "conclusion")
+    ]
+    
+    for idx, (script_key, segment_type) in enumerate(segment_mapping, start=1):
+        if script_key not in script:
+            continue
+            
+        part_data = script[script_key]
+        
+        # Get narration text (could be "text", "narration", or nested)
+        narration = ""
+        if isinstance(part_data, dict):
+            narration = part_data.get("text") or part_data.get("narration") or part_data.get("narrationtext") or ""
+        elif isinstance(part_data, str):
+            narration = part_data
+        
+        if not narration:
+            continue
+        
+        # Calculate duration from word count
+        duration = calculate_duration_from_words(narration)
+        
+        # Get key concepts
+        key_concepts = []
+        if isinstance(part_data, dict):
+            key_concepts = part_data.get("key_concepts", []) or []
+            if isinstance(key_concepts, str):
+                key_concepts = [key_concepts]
+        
+        # Add to all_key_concepts set
+        for concept in key_concepts:
+            if concept:
+                all_key_concepts.add(concept)
+        
+        # Get visual guidance
+        visual_guidance = ""
+        if isinstance(part_data, dict):
+            visual_guidance = part_data.get("visual_guidance") or part_data.get("visual_guidance_preview") or ""
+        
+        # Get educational purpose (if available, otherwise generate default)
+        educational_purpose = ""
+        if isinstance(part_data, dict):
+            educational_purpose = part_data.get("educational_purpose") or ""
+        
+        if not educational_purpose:
+            # Generate default educational purpose based on segment type
+            purpose_map = {
+                "hook": "Engage the audience by highlighting the importance or relevance of the topic.",
+                "concept_introduction": "Introduce key vocabulary and the basic concept.",
+                "process_explanation": "Explain how the process works and its significance.",
+                "conclusion": "Summarize the importance and its role in the broader context."
+            }
+            educational_purpose = purpose_map.get(segment_type, "Educational content for this segment.")
+        
+        segment = {
+            "id": f"seg_{idx:03d}",
+            "type": segment_type,
+            "duration": duration,
+            "narration": narration,
+            "start_time": start_time,
+            "key_concepts": key_concepts,
+            "visual_guidance": visual_guidance,
+            "educational_purpose": educational_purpose
+        }
+        
+        segments.append(segment)
+        start_time += duration
+    
+    # Calculate total duration
+    total_duration = sum(seg.get("duration", 0) for seg in segments)
+    
+    # Calculate reading level (default to 6.5 if not available)
+    reading_level = "6.5"  # Could be calculated from text complexity in the future
+    
+    # Count unique key terms
+    key_terms_count = len(all_key_concepts)
+    
+    storyboard = {
+        "segments": segments,
+        "reading_level": reading_level,
+        "total_duration": total_duration,
+        "key_terms_count": key_terms_count
+    }
+    
+    return storyboard
 
 
 def generate_script_structure() -> dict:

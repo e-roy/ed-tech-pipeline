@@ -34,6 +34,27 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _get_openai_api_key() -> Optional[str]:
+    """
+    Get OPENAI_API_KEY from AWS Secrets Manager with fallback to settings.
+    
+    Returns:
+        OpenAI API key string, or None if not found
+    """
+    try:
+        from app.services.secrets import get_secret
+        return get_secret("pipeline/openai-api-key")
+    except Exception as e:
+        logger.debug(f"Could not retrieve OPENAI_API_KEY from Secrets Manager: {e}, falling back to settings")
+        key = settings.OPENAI_API_KEY
+        if not key:
+            logger.warning(
+                "OPENAI_API_KEY not set in Secrets Manager or settings - "
+                "image and audio generation will fail."
+            )
+        return key
+
+
 def _write_errors_json(storage_service: StorageService, session_folder: str, error_data: Dict[str, Any]) -> None:
     """
     Write errors.json to the session folder in S3.
@@ -110,13 +131,13 @@ class VideoGenerationOrchestrator:
         self.websocket_manager = websocket_manager
 
         # Initialize AI agents
-        openai_api_key = settings.OPENAI_API_KEY
+        openai_api_key = _get_openai_api_key()
         replicate_api_key = settings.REPLICATE_API_KEY
 
         if not openai_api_key:
             logger.warning(
                 "OPENAI_API_KEY not set - image and audio generation will fail. "
-                "Add it to .env file."
+                "Add it to AWS Secrets Manager (pipeline/openai-api-key) or .env file."
             )
 
         if not replicate_api_key:
@@ -862,8 +883,12 @@ class VideoGenerationOrchestrator:
 
             # Call Audio Pipeline Agent
             # Re-initialize audio pipeline with db and storage for music generation
+            openai_key = _get_openai_api_key()
+            if not openai_key:
+                raise ValueError("OPENAI_API_KEY not configured. Set it in AWS Secrets Manager (pipeline/openai-api-key) or .env file.")
+            
             audio_pipeline_with_music = AudioPipelineAgent(
-                api_key=settings.OPENAI_API_KEY,
+                api_key=openai_key,
                 db=db,
                 storage_service=self.storage_service
             )
@@ -2045,9 +2070,9 @@ class VideoGenerationOrchestrator:
             logger.info(f"[{session_id}] Retrieving API keys from Secrets Manager...")
             openrouter_key = get_secret("pipeline/openrouter-api-key")
             replicate_key = get_secret("pipeline/replicate-api-key")
-            openai_key = settings.OPENAI_API_KEY
+            openai_key = _get_openai_api_key()
             if not openai_key:
-                raise ValueError("OPENAI_API_KEY not configured in settings")
+                raise ValueError("OPENAI_API_KEY not configured. Set it in AWS Secrets Manager (pipeline/openai-api-key) or .env file.")
             logger.info(f"[{session_id}] Successfully retrieved API keys")
         except Exception as e:
             error_msg = f"Failed to retrieve API keys: {e}"
@@ -3086,14 +3111,10 @@ class VideoGenerationOrchestrator:
             )
             
             # Agent4 will extract script from video_session if needed
-            # Generate supersessionid for Agent4
-            agent4_supersessionid = f"{sessionId}_{secrets.token_urlsafe(12)[:16]}"
-            
             agent4_task = agent_4_process(
                 websocket_manager=None,  # Not used - using callback instead
                 user_id=userId,
                 session_id=sessionId,
-                supersessionid=agent4_supersessionid,
                 script={},  # Will be extracted from video_session by Agent4
                 voice="alloy",
                 audio_option="tts",
