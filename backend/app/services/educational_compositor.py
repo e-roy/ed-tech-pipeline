@@ -218,12 +218,35 @@ class EducationalCompositor:
             for i, segment in enumerate(timeline):
                 logger.debug(f"[{session_id}] Downloading assets for segment {i + 1}/{len(timeline)}: {segment['part']}")
 
-                # Download video (if available) or image
+                # Download video(s) (if available) or image
                 video_path = None
+                video_paths = []
                 image_path = None
 
-                if segment.get("video_url"):
-                    # Download generated video clip
+                # Check for multiple video URLs (new format)
+                if segment.get("video_urls"):
+                    video_urls = segment["video_urls"]
+                    logger.error(f"[{session_id}] [MULTI-CLIP DEBUG] COMPOSITOR: Found video_urls with {len(video_urls)} clips for {segment['part']}")
+                    logger.info(f"[{session_id}] Downloading {len(video_urls)} video clips for {segment['part']}")
+
+                    for j, video_url in enumerate(video_urls):
+                        video_response = await client.get(video_url)
+                        video_response.raise_for_status()
+
+                        clip_path = os.path.join(self.work_dir, f"{session_id}_seg_{i}_clip_{j}.mp4")
+                        with open(clip_path, 'wb') as f:
+                            f.write(video_response.content)
+                        video_paths.append(clip_path)
+
+                    # If multiple clips, concatenate them into one video for this segment
+                    if len(video_paths) > 1:
+                        video_path = await self._concatenate_segment_clips(video_paths, session_id, i)
+                    else:
+                        video_path = video_paths[0]
+
+                elif segment.get("video_url"):
+                    # Single video URL (legacy format)
+                    logger.error(f"[{session_id}] [MULTI-CLIP DEBUG] COMPOSITOR: Using single video_url for {segment['part']} (no video_urls array found)")
                     logger.info(f"[{session_id}] Downloading video for {segment['part']}")
                     video_response = await client.get(segment["video_url"])
                     video_response.raise_for_status()
@@ -263,6 +286,53 @@ class EducationalCompositor:
 
         logger.info(f"[{session_id}] Downloaded assets for {len(segment_files)} segments")
         return segment_files
+
+    async def _concatenate_segment_clips(
+        self,
+        clip_paths: List[str],
+        session_id: str,
+        segment_index: int
+    ) -> str:
+        """
+        Concatenate multiple video clips within a single segment.
+
+        Args:
+            clip_paths: List of video clip file paths
+            session_id: Session ID
+            segment_index: Index of the segment
+
+        Returns:
+            Path to the concatenated video
+        """
+        import subprocess
+
+        output_path = os.path.join(self.work_dir, f"{session_id}_seg_{segment_index}_concat.mp4")
+
+        # Create concat file list
+        concat_list_path = os.path.join(self.work_dir, f"{session_id}_seg_{segment_index}_concat_list.txt")
+        with open(concat_list_path, 'w') as f:
+            for clip_path in clip_paths:
+                f.write(f"file '{clip_path}'\n")
+
+        logger.info(f"[{session_id}] Concatenating {len(clip_paths)} clips for segment {segment_index + 1}")
+
+        # Use concat demuxer for fast concatenation (no re-encoding)
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concat_list_path,
+            "-c", "copy",  # No re-encoding for speed
+            output_path
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"[{session_id}] FFmpeg concat failed: {result.stderr}")
+            raise Exception(f"Failed to concatenate segment clips: {result.stderr}")
+
+        logger.info(f"[{session_id}] Concatenated {len(clip_paths)} clips into {output_path}")
+        return output_path
 
     async def _process_video_clips(
         self,

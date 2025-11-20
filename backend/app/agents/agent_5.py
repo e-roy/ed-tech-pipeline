@@ -11,11 +11,15 @@ Uses Replicate Minimax for AI-generated video clips (~$0.035/5s video)
 """
 import asyncio
 import json
+import math
 import os
 import subprocess
 import tempfile
 import time
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from app.services.websocket_manager import WebSocketManager
@@ -457,39 +461,132 @@ async def agent_5_process(
         await websocket_manager.send_progress(session_id, status_data)
         await create_status_json("5", "processing", status_data)
 
-        # Generate all 4 videos in parallel using asyncio.gather
+        # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
         completed_videos = []
 
+        # Constants for video generation
+        CLIP_DURATION = 6.0  # Minimax generates 6-second clips
+
+        # Calculate clips needed per section based on scene timing
+        clips_per_section = {}
+        for scene in scenes:
+            part = scene["part"]
+            scene_duration = scene["durationFrames"] / 30.0  # Convert frames to seconds
+            clips_needed = max(1, math.ceil(scene_duration / CLIP_DURATION))
+            clips_per_section[part] = clips_needed
+
+        total_clips = sum(clips_per_section.values())
+
         async def generate_section_video(section: str) -> tuple[str, str]:
-            """Generate video for a section and return (section, url)"""
+            """Generate multiple video clips for a section and return (section, concatenated_url)"""
+            import subprocess
+            import httpx
+
             prompt = visual_prompts[section]
-            video_url = await generate_video_replicate(
-                prompt,
-                settings.REPLICATE_API_KEY,
-                model="minimax"
-            )
+            clips_needed = clips_per_section[section]
 
-            # Send progress update when this video completes
-            completed_videos.append(section)
-            status_data = {
-                "agentnumber": "Agent5",
-                "userID": user_id,
-                "sessionID": session_id,
-                "supersessionID": supersessionid,
-                "status": "processing",
-                "message": f"Generated video {len(completed_videos)}/4 ({section})",
-                "timestamp": int(time.time() * 1000),
-                "progress": {
-                    "stage": "video_generation",
-                    "completed": len(completed_videos),
-                    "total": 4,
-                    "section": section
+            logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
+
+            # Generate prompts for each clip with progressive camera movements
+            clip_prompts = []
+            for i in range(clips_needed):
+                camera_movements = [
+                    "slow zoom in, focusing on key details",
+                    "gentle pan across the scene",
+                    "smooth tracking shot",
+                    "gradual zoom out to show context"
+                ]
+                camera = camera_movements[i % len(camera_movements)]
+
+                if i == 0:
+                    clip_prompt = f"Opening: {prompt}. {camera}."
+                elif i == clips_needed - 1:
+                    clip_prompt = f"Conclusion: {prompt}. {camera}."
+                else:
+                    clip_prompt = f"Continuation: {prompt}. {camera}."
+
+                clip_prompts.append(clip_prompt)
+
+            # Generate all clips for this section
+            generated_clips = []
+            for clip_idx, clip_prompt in enumerate(clip_prompts):
+                video_url = await generate_video_replicate(
+                    clip_prompt,
+                    settings.REPLICATE_API_KEY,
+                    model="minimax"
+                )
+                generated_clips.append(video_url)
+
+                # Update progress
+                completed_videos.append(f"{section}_{clip_idx}")
+                status_data = {
+                    "agentnumber": "Agent5",
+                    "userID": user_id,
+                    "sessionID": session_id,
+                    "supersessionID": supersessionid,
+                    "status": "processing",
+                    "message": f"Generated clip {len(completed_videos)}/{total_clips} ({section} {clip_idx+1}/{clips_needed})",
+                    "timestamp": int(time.time() * 1000),
+                    "progress": {
+                        "stage": "video_generation",
+                        "completed": len(completed_videos),
+                        "total": total_clips,
+                        "section": section
+                    }
                 }
-            }
-            await websocket_manager.send_progress(session_id, status_data)
+                await websocket_manager.send_progress(session_id, status_data)
 
-            return (section, video_url)
+            # If only one clip, return it directly
+            if len(generated_clips) == 1:
+                return (section, generated_clips[0])
+
+            # Concatenate multiple clips
+            # Download all clips to temp files
+            clip_paths = []
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for i, clip_url in enumerate(generated_clips):
+                    response = await client.get(clip_url)
+                    response.raise_for_status()
+                    clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
+                    with open(clip_path, 'wb') as f:
+                        f.write(response.content)
+                    clip_paths.append(clip_path)
+
+            # Create concat list file
+            concat_list_path = os.path.join(temp_dir, f"{section}_concat_list.txt")
+            with open(concat_list_path, 'w') as f:
+                for clip_path in clip_paths:
+                    f.write(f"file '{clip_path}'\n")
+
+            # Concatenate clips using ffmpeg
+            output_path = os.path.join(temp_dir, f"{section}_concatenated.mp4")
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list_path,
+                "-c", "copy",
+                output_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
+                # Fallback to first clip
+                return (section, generated_clips[0])
+
+            # Upload concatenated video to S3 for Remotion to access
+            with open(output_path, 'rb') as f:
+                concat_content = f.read()
+
+            concat_s3_key = f"scaffold_test/{user_id}/{supersessionid}/{section}_concat.mp4"
+            storage_service.upload_file_direct(concat_content, concat_s3_key, "video/mp4")
+            concat_url = storage_service.generate_presigned_url(concat_s3_key, expires_in=3600)
+
+            logger.info(f"[{session_id}] Concatenated {len(generated_clips)} clips for {section}")
+
+            return (section, concat_url)
 
         # Run all 4 video generations in parallel
         results = await asyncio.gather(
