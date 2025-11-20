@@ -531,29 +531,62 @@
                 <div class="form-group">
                     <label for="a5-pipeline-data">Pipeline Data (JSON):</label>
                     <textarea id="a5-pipeline-data" name="pipeline_data" rows="30" required>{
-  "script": {
-    "hook": {
-      "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
-      "duration": "14",
-      "visual_prompt": "Wide shot of a bright modern classroom with large windows showing greenery outside, enthusiastic teacher walking between desks gesturing excitedly while talking, diverse group of elementary students sitting at their desks looking up attentively, some students raising hands eagerly, natural daylight streaming through windows, potted plants on windowsill, colorful educational posters on walls, teacher moving from front of class toward students, warm inviting atmosphere, realistic school setting, smooth handheld camera following teacher's movement"
+  "agent_2_data": {
+    "base_scene": {
+      "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic, consistent character rigs and models throughout all scenes",
+      "color_palette": {
+        "primary": "warm yellows and soft blues, cream and sky blue tones",
+        "accent": "vibrant emerald greens for plants, bright orange for educational posters, warm wood tones",
+        "lighting": "warm golden afternoon sunlight streaming through windows, soft ambient classroom lighting"
+      },
+      "setting": {
+        "classroom": "bright modern elementary classroom, cream-colored walls with light blue trim along the bottom, light honey-colored wood floors with subtle grain, large floor-to-ceiling windows along left wall showing animated green oak trees and blue sky outside",
+        "furniture": "8 small wooden student desks in 2 rows of 4, light brown maple wood finish, each with small blue plastic chair, teacher's large wooden desk at front right with globe and small fern plant on top",
+        "decorations": "colorful alphabet poster and periodic table on front wall, potted green ferns on white windowsill, large world map above whiteboard on front wall, tall bookshelf with bright multicolored book spines against back wall, student artwork pinned to bulletin board on right wall"
+      },
+      "teacher": {
+        "name": "Ms. Rivera",
+        "appearance": "animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style",
+        "clothing": "light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings",
+        "personality": "enthusiastic hand gestures when teaching, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom"
+      },
+      "students": {
+        "count": 8,
+        "general": "diverse animated 8-year-old children with signature Pixar big expressive eyes and stylized features, various skin tones and hairstyles, all wearing casual school clothes, engaged and attentive expressions",
+        "key_characters": [
+          {"position": "front_row_left_seat_1", "name": "Maya", "description": "girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often"},
+          {"position": "front_row_right_seat_2", "name": "Oliver", "description": "boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression"},
+          {"position": "middle_row_left_seat_3", "name": "Sofia", "description": "girl with long blonde hair in ponytail, light skin, purple dress with white collar, thoughtful and takes notes"},
+          {"position": "middle_row_right_seat_4", "name": "James", "description": "boy with short black hair and darker skin, bright yellow t-shirt, wide smile and excited demeanor"},
+          {"position": "back_row_left_seat_5", "name": "Aisha", "description": "girl with brown skin and natural curly black hair in puffs, pink hoodie, asks questions"},
+          {"position": "back_row_right_seat_6", "name": "Ethan", "description": "boy with straight brown hair, medium skin, red sweater, focused and concentrating"}
+        ]
+      }
     },
-    "concept": {
-      "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
-      "duration": "16",
-      "visual_prompt": "Camera follows teacher walking to the window holding a potted plant, students getting up from desks and gathering around excitedly, teacher pointing from the plant to the sunlight streaming through the window, close up of children's faces showing curiosity and wonder, teacher gently touching the green leaves, sunbeams visible in the air between window and plant, students leaning in to look closer, one child reaching out to touch a leaf, camera moving smoothly between teacher and students showing their interaction, bright natural lighting, engaging educational moment, documentary style footage of real classroom learning"
-    },
-    "process": {
-      "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
-      "duration": "18",
-      "visual_prompt": "Smooth transition from classroom to extreme close-up of vibrant green leaf held in teacher's hand, camera pushing through the leaf surface revealing the microscopic world inside, glowing green chloroplasts actively absorbing golden light particles, energy flowing through cell structures, bright sunlight rays penetrating the leaf creating illuminated pathways, animated visualization of molecules moving and combining, carbon dioxide particles flowing in shown as blue wisps, oxygen bubbles emerging shown as silver sparkles, water molecules traveling through veins, dynamic particle movement showing active process, educational science visualization style, fluid camera movement through 3D space showing the transformation"
-    },
-    "conclusion": {
-      "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
-      "duration": "12",
-      "visual_prompt": "Camera pulls back out to classroom scene, teacher standing with students gathered around the window, children excitedly talking to each other and pointing at plants, teacher smiling and gesturing to the garden visible outside the classroom window, students running to window to look at the outdoor plants and trees, view through window showing sunny school garden with various green plants and flowers, students' animated faces showing they understand, teacher giving thumbs up, warm afternoon sunlight filling the classroom, energetic positive ending, camera slowly pulling back to show the whole happy classroom scene"
+    "script": {
+      "hook": {
+        "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
+        "duration": "14",
+        "visual_prompt": "Wide opening shot from back of classroom showing cream-colored walls with soft blue trim, honey-colored wood floors. Slow dolly forward toward Ms. Rivera (brown ponytail, sky-blue cardigan, white button-up shirt) walking between 8 wooden student desks gesturing with open palms. Students look up with wide expressive Pixar-style eyes - Maya with glasses and braids raises hand eagerly, Oliver with curly orange hair leans forward curiously, Sofia in purple dress takes notes. Warm golden afternoon light streams through large left-side windows showing animated green oak trees. Alphabet poster and periodic table visible on front wall, bookshelf with colorful spines against back wall. Vibrant Pixar 3D animation with consistent character rigs."
+      },
+      "concept": {
+        "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
+        "duration": "16",
+        "visual_prompt": "Follow-cam behind Ms. Rivera (same brown ponytail, sky-blue cardigan) walking from desks toward bright window. Gentle depth-of-field shift focusing on small potted plant with vibrant green leaves she picks up. Same 8 diverse students (Maya, Oliver, Sofia, James in yellow shirt, Aisha in pink hoodie, Ethan in red sweater) stand and gather in semicircle around teacher near window. Brighter lighting near window area, same cream walls and honey wood floors. Students point and lean in with animated enthusiasm, same expressive Pixar character models. Smooth camera movement maintains continuity from previous scene."
+      },
+      "process": {
+        "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
+        "duration": "18",
+        "visual_prompt": "Extreme close-up on vibrant green leaf, camera pushes through surface into microscopic world. Floating camera movement inside leaf showing soft glowing green textures. Tiny emerald orb-like chloroplasts softly glow and pulse. Gold sparkly particles (sunlight) swirl into chloroplasts which glow brighter and emit glowing energy trails. Blue wisps and silver sparkles (oxygen and energy molecules) combine and move gently along bright pathways. Magical but scientifically inspired Pixar-friendly CGI with smooth motion, educational science visualization aesthetic, vibrant colors."
+      },
+      "conclusion": {
+        "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
+        "duration": "12",
+        "visual_prompt": "Pull-back transition from glowing chloroplasts to window view, rotate to front-facing shot of group. Same cream classroom with blue trim, Ms. Rivera smiles and gives thumbs-up. Same 8 students (Maya, Oliver, Sofia, James, Aisha, Ethan, plus two background students) point excitedly out window at bright school garden with flowers and plants visible outside. Students chat silently with animated enthusiasm, maintaining exact same Pixar character designs and rigs. Camera rises slightly for uplifting final shot, warm afternoon lighting, energetic happy ending."
+      }
     }
   },
-  "audio_data": {
+  "agent_4_data": {
     "audio_files": [
       {"part": "hook", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=91tvjAImnrGa7FWaR2cJDzw45ek%3D&Expires=1763694052", "duration": 4.4},
       {"part": "concept", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_concept.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=jmu1yhped49w15E2QiDTnf1LB20%3D&Expires=1763694052", "duration": 7.6},

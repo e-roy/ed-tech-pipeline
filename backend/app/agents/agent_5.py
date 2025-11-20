@@ -39,7 +39,8 @@ async def generate_video_replicate(
     prompt: str,
     api_key: str,
     model: str = "minimax",
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[callable] = None,
+    seed: Optional[int] = None
 ) -> str:
     """
     Generate a video using Replicate (Minimax video-01 by default).
@@ -49,6 +50,7 @@ async def generate_video_replicate(
         api_key: Replicate API key
         model: Model to use ("minimax", "kling", "luma")
         progress_callback: Optional callback for progress updates
+        seed: Optional random seed for reproducibility
 
     Returns:
         URL of the generated video
@@ -56,7 +58,8 @@ async def generate_video_replicate(
     service = ReplicateVideoService(api_key)
     return await service.generate_video(
         prompt=prompt,
-        model=model
+        model=model,
+        seed=seed
     )
 
 
@@ -385,10 +388,21 @@ async def agent_5_process(
         if not pipeline_data:
             raise ValueError("No pipeline data provided")
 
-        script = pipeline_data.get("script", {})
-        audio_data = pipeline_data.get("audio_data", {})
-        audio_files = audio_data.get("audio_files", [])
-        background_music = audio_data.get("background_music", {})
+        # Support both old format and new agent-organized format
+        agent_2_data = pipeline_data.get("agent_2_data", {})
+        agent_4_data = pipeline_data.get("agent_4_data", {})
+
+        # If using new format, extract from agent data
+        if agent_2_data or agent_4_data:
+            script = agent_2_data.get("script", {})
+            audio_files = agent_4_data.get("audio_files", [])
+            background_music = agent_4_data.get("background_music", {})
+        else:
+            # Fallback to old format
+            script = pipeline_data.get("script", {})
+            audio_data = pipeline_data.get("audio_data", {})
+            audio_files = audio_data.get("audio_files", [])
+            background_music = audio_data.get("background_music", {})
 
         if not script:
             raise ValueError("No script data in pipeline")
@@ -488,33 +502,66 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
 
-            # Generate prompts for each clip with progressive camera movements
+            # Extract base_scene parameters if present for consistency
+            # Check both new format (agent_2_data) and old format (root level)
+            if agent_2_data:
+                base_scene = agent_2_data.get("base_scene", {})
+            else:
+                base_scene = pipeline_data.get("base_scene", {})
+            style = base_scene.get("style", "")
+            setting = base_scene.get("setting", "")
+            teacher_desc = base_scene.get("teacher", "")
+            students_desc = base_scene.get("students", "")
+
+            # Build consistency anchor
+            consistency_anchor = ""
+            if style or setting or teacher_desc or students_desc:
+                consistency_parts = []
+                if style:
+                    consistency_parts.append(style)
+                if setting:
+                    consistency_parts.append(f"Setting: {setting}")
+                if teacher_desc:
+                    consistency_parts.append(f"Teacher: {teacher_desc}")
+                if students_desc:
+                    consistency_parts.append(f"Students: {students_desc}")
+                consistency_anchor = " | ".join(consistency_parts) + " | "
+
+            # Generate progressive prompts for each clip position
             clip_prompts = []
             for i in range(clips_needed):
-                camera_movements = [
-                    "slow zoom in, focusing on key details",
-                    "gentle pan across the scene",
-                    "smooth tracking shot",
-                    "gradual zoom out to show context"
-                ]
-                camera = camera_movements[i % len(camera_movements)]
-
-                if i == 0:
-                    clip_prompt = f"Opening: {prompt}. {camera}."
+                # Create clip-specific temporal and action cues based on position
+                if clips_needed == 1:
+                    # Single clip: use full prompt as-is
+                    clip_prompt = f"{consistency_anchor}{prompt}, smooth cinematic movement, maintaining consistent visual style throughout"
+                elif i == 0:
+                    # First clip: Opening/beginning of action
+                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt}, camera slowly pushes in, characters beginning action, establishing shot with clear framing"
                 elif i == clips_needed - 1:
-                    clip_prompt = f"Conclusion: {prompt}. {camera}."
+                    # Final clip: Conclusion of action
+                    clip_prompt = f"{consistency_anchor}CONTINUING FINAL SHOT: {prompt}, camera holds steady from previous angle, characters completing action, maintaining exact same composition and lighting as previous clip"
                 else:
-                    clip_prompt = f"Continuation: {prompt}. {camera}."
+                    # Middle clips: Progression of action
+                    clip_prompt = f"{consistency_anchor}MID-SEQUENCE SHOT {i+1}: {prompt}, camera maintains previous angle and framing, characters mid-action, same positioning and lighting"
 
                 clip_prompts.append(clip_prompt)
 
-            # Generate all clips for this section
+            # Generate deterministic seed for this section
+            # Use hash of section name to get consistent seed per section
+            import hashlib
+            section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
+            section_seed = section_hash % 100000  # Keep seed in reasonable range
+
+            logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
+
+            # Generate all clips for this section with same seed
             generated_clips = []
             for clip_idx, clip_prompt in enumerate(clip_prompts):
                 video_url = await generate_video_replicate(
                     clip_prompt,
                     settings.REPLICATE_API_KEY,
-                    model="minimax"
+                    model="minimax",
+                    seed=section_seed  # Same seed for all clips in this section
                 )
                 generated_clips.append(video_url)
 
