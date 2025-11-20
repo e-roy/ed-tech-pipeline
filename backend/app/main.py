@@ -281,21 +281,43 @@ async def websocket_endpoint_query(websocket: WebSocket):
     
     This endpoint supports API Gateway which passes session_id as query parameter.
     Format: `/ws?session_id=xxx`
+    
+    Also supports API Gateway WebSocket where query params may be in the request URL.
     """
     import secrets
     from urllib.parse import parse_qs
     
     # Extract session_id from query params (API Gateway compatibility)
     query_string = websocket.url.query
-    if not query_string:
-        await websocket.close(code=1008, reason="session_id required in query string")
-        return
     
-    query_params = parse_qs(query_string)
-    session_id = query_params.get('session_id', [None])[0]
+    # Try to get session_id from query string
+    session_id = None
+    if query_string:
+        query_params = parse_qs(query_string)
+        session_id = query_params.get('session_id', [None])[0]
     
+    # If not in query string, try to get from headers (API Gateway may pass it there)
     if not session_id:
-        await websocket.close(code=1008, reason="session_id required")
+        # Check for session_id in headers (some API Gateway configurations pass it here)
+        session_id = websocket.headers.get('x-session-id') or websocket.headers.get('session-id')
+    
+    # If still not found, try to extract from URL path (fallback)
+    if not session_id:
+        # Check if URL path contains session_id (e.g., /ws?session_id=xxx but parsed differently)
+        url_str = str(websocket.url)
+        if 'session_id=' in url_str:
+            try:
+                # Extract from URL string directly
+                parts = url_str.split('session_id=')
+                if len(parts) > 1:
+                    session_id = parts[1].split('&')[0].split('/')[0]
+            except:
+                pass
+    
+    # If still no session_id, reject connection
+    if not session_id:
+        logger.warning(f"WebSocket connection rejected: no session_id found in query string or headers. URL: {websocket.url}")
+        await websocket.close(code=1008, reason="session_id required in query string or headers")
         return
     
     connection_id = f"ws_{secrets.token_urlsafe(16)}"
