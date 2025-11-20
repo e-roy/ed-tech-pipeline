@@ -2,6 +2,14 @@ import { openai } from "@ai-sdk/openai";
 import { streamObject, type ModelMessage } from "ai";
 import { z } from "zod";
 import type { Fact } from "@/types";
+import { auth } from "@/server/auth";
+import {
+  getSessionIdFromRequest,
+  getOrCreateSession,
+} from "@/server/utils/session-utils";
+import { db } from "@/server/db";
+import { videoSessions } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
 
 export const maxDuration = 30;
 
@@ -10,11 +18,33 @@ interface RequestBody {
   documentContent?: string;
   mode?: "extract" | "narrate" | "edit";
   selectedFacts?: Fact[];
+  sessionId?: string | null;
 }
 
 export async function POST(req: Request) {
+  // Get authenticated user session
+  const session = await auth();
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const body = (await req.json()) as RequestBody;
   const { messages, documentContent, mode, selectedFacts } = body;
+
+  // Get or create session ID
+  if (!session.user?.id) {
+    return new Response("User ID not found in session", { status: 401 });
+  }
+
+  const requestedSessionId = getSessionIdFromRequest(req, body);
+  const sessionId = await getOrCreateSession(
+    session.user.id,
+    requestedSessionId,
+  );
+
+  // Detect if this is the first message (new conversation)
+  const isFirstMessage = messages.length === 1 && messages[0]?.role === "user";
+  const isNewSession = !requestedSessionId || requestedSessionId !== sessionId;
 
   if (mode === "extract") {
     const result = streamObject({
@@ -37,9 +67,35 @@ export async function POST(req: Request) {
           }),
         ),
       }),
+      onFinish: async (result) => {
+        if (result.object?.facts) {
+          // Save extracted facts to database
+          try {
+            await db
+              .update(videoSessions)
+              .set({
+                // Type casting as we're saving raw JSON
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                extractedFacts: result.object.facts as any,
+                status: "facts_extracted",
+                updatedAt: new Date(),
+              })
+              .where(eq(videoSessions.id, sessionId));
+          } catch (error) {
+            console.error("Error saving extracted facts:", error);
+          }
+        }
+      },
     });
 
-    return result.toTextStreamResponse();
+    const response = result.toTextStreamResponse();
+
+    // Set sessionId header if this is a new session (first message)
+    if (isFirstMessage && isNewSession) {
+      response.headers.set("x-session-id", sessionId);
+    }
+
+    return response;
   } else if (mode === "narrate") {
     const result = streamObject({
       model: openai("gpt-4o-mini"),
@@ -97,9 +153,46 @@ export async function POST(req: Request) {
           }),
         ),
       }),
+      onFinish: async (result) => {
+        if (result.object) {
+          // Save generated script to database
+          try {
+            await db
+              .update(videoSessions)
+              .set({
+                // Type casting as we're saving raw JSON
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                generatedScript: result.object as any,
+                status: "script_generated",
+                updatedAt: new Date(),
+              })
+              .where(eq(videoSessions.id, sessionId));
+
+            // Also save selected facts if they were provided
+            if (selectedFacts) {
+              await db
+                .update(videoSessions)
+                .set({
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  confirmedFacts: selectedFacts as any,
+                })
+                .where(eq(videoSessions.id, sessionId));
+            }
+          } catch (error) {
+            console.error("Error saving generated script:", error);
+          }
+        }
+      },
     });
 
-    return result.toTextStreamResponse();
+    const response = result.toTextStreamResponse();
+
+    // Set sessionId header if this is a new session (first message)
+    if (isFirstMessage && isNewSession) {
+      response.headers.set("x-session-id", sessionId);
+    }
+
+    return response;
   } else {
     // Default behavior (edit mode)
     const result = streamObject({
@@ -116,6 +209,13 @@ export async function POST(req: Request) {
       }),
     });
 
-    return result.toTextStreamResponse();
+    const response = result.toTextStreamResponse();
+
+    // Set sessionId header if this is a new session (first message)
+    if (isFirstMessage && isNewSession) {
+      response.headers.set("x-session-id", sessionId);
+    }
+
+    return response;
   }
 }

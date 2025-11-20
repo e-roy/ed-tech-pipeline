@@ -23,7 +23,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { type Fact, type Narration } from "@/types";
 
 type WorkflowStep = "input" | "selection" | "review";
@@ -39,6 +39,19 @@ export default function Home() {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [selectedFacts, setSelectedFacts] = useState<Fact[]>([]);
   const [narration, setNarration] = useState<Narration | null>(null);
+
+  // Initialize sessionId from localStorage only (for page reloads)
+  // Backend will create session on first message
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Load from localStorage on client side only
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedSessionId = localStorage.getItem("agentCreateSessionId");
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+    }
+  }, []);
 
   const handleFactToggle = (fact: Fact) => {
     setSelectedFacts((prev) => {
@@ -57,12 +70,35 @@ export default function Home() {
     try {
       const response = await fetch("/api/agent-create", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           messages,
           mode: "narrate",
           selectedFacts,
+          sessionId,
         }),
       });
+
+      // Capture sessionId from response header if this is first request
+      const responseSessionId =
+        response.headers.get("x-session-id") ||
+        response.headers.get("X-Session-Id");
+
+      console.log("[AgentCreate-SubmitFacts] Response Headers:", {
+        sessionIdHeader: responseSessionId,
+        allHeaders: [...response.headers.entries()],
+      });
+
+      if (responseSessionId && responseSessionId !== sessionId) {
+        console.log(
+          "[AgentCreate-SubmitFacts] Capturing new sessionId:",
+          responseSessionId,
+        );
+        setSessionId(responseSessionId);
+        localStorage.setItem("agentCreateSessionId", responseSessionId);
+      }
 
       if (!response.ok) {
         throw new Error("Failed to fetch response");
@@ -131,11 +167,34 @@ export default function Home() {
       try {
         const response = await fetch("/api/agent-create", {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
             messages: newMessages,
             mode: "extract",
+            sessionId,
           }),
         });
+
+        // Capture sessionId from response header if this is first request
+        const responseSessionId =
+          response.headers.get("x-session-id") ||
+          response.headers.get("X-Session-Id");
+
+        console.log("[AgentCreate] Response Headers:", {
+          sessionIdHeader: responseSessionId,
+          allHeaders: [...response.headers.entries()],
+        });
+
+        if (responseSessionId && responseSessionId !== sessionId) {
+          console.log(
+            "[AgentCreate] Capturing new sessionId:",
+            responseSessionId,
+          );
+          setSessionId(responseSessionId);
+          localStorage.setItem("agentCreateSessionId", responseSessionId);
+        }
 
         if (!response.ok) {
           throw new Error("Failed to fetch response");
@@ -188,11 +247,34 @@ export default function Home() {
         try {
           const response = await fetch("/api/agent-create", {
             method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify({
               messages: newMessages,
               mode: "extract",
+              sessionId,
             }),
           });
+
+          // Capture sessionId from response header if this is first request
+          const responseSessionId =
+            response.headers.get("x-session-id") ||
+            response.headers.get("X-Session-Id");
+
+          console.log("[AgentCreate-Review] Response Headers:", {
+            sessionIdHeader: responseSessionId,
+            allHeaders: [...response.headers.entries()],
+          });
+
+          if (responseSessionId && responseSessionId !== sessionId) {
+            console.log(
+              "[AgentCreate-Review] Capturing new sessionId:",
+              responseSessionId,
+            );
+            setSessionId(responseSessionId);
+            localStorage.setItem("agentCreateSessionId", responseSessionId);
+          }
 
           if (!response.ok) {
             throw new Error("Failed to fetch response");

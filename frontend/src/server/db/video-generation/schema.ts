@@ -21,6 +21,7 @@ export const videoSessions = createVideoTable("session", {
   status: varchar("status", { length: 50 }).notNull().default("created"),
   topic: varchar("topic", { length: 200 }),
   learningObjective: text("learning_objective"),
+  extractedFacts: jsonb("extracted_facts"),
   confirmedFacts: jsonb("confirmed_facts"),
   generatedScript: jsonb("generated_script"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

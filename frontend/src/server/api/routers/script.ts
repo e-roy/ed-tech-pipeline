@@ -189,5 +189,42 @@ export const scriptRouter = createTRPCRouter({
 
       return { sessionId };
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      // Verify session belongs to the authenticated user
+      const [session] = await db
+        .select()
+        .from(videoSessions)
+        .where(eq(videoSessions.id, input.sessionId))
+        .limit(1);
+
+      if (!session || session.userId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Session not found",
+        });
+      }
+
+      // Delete associated assets first (to respect foreign key constraints)
+      await db
+        .delete(videoAssets)
+        .where(eq(videoAssets.sessionId, input.sessionId));
+
+      // Delete the session
+      await db
+        .delete(videoSessions)
+        .where(eq(videoSessions.id, input.sessionId));
+
+      return { success: true };
+    }),
 });
 
