@@ -329,7 +329,6 @@
             <button type="button" class="tab-btn active" data-tab="pipeline">Full Pipeline</button>
             <button type="button" class="tab-btn" data-tab="agent4">Test Agent 4</button>
             <button type="button" class="tab-btn" data-tab="agent5">Test Agent 5</button>
-            <button type="button" class="tab-btn" data-tab="agent5video">AI Video Gen</button>
             <button type="button" class="tab-btn" data-tab="videotest">Video Test</button>
         </div>
 
@@ -534,24 +533,24 @@
                     <textarea id="a5-pipeline-data" name="pipeline_data" rows="30" required>{
   "script": {
     "hook": {
-      "text": "Have you ever wondered how plants create their own food?",
-      "duration": "12",
-      "visual_prompt": "Cinematic close-up of a vibrant green leaf with sunlight streaming through, droplets of water glistening, soft bokeh background"
+      "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
+      "duration": "14",
+      "visual_prompt": "Wide shot of a bright modern classroom with large windows showing greenery outside, enthusiastic teacher walking between desks gesturing excitedly while talking, diverse group of elementary students sitting at their desks looking up attentively, some students raising hands eagerly, natural daylight streaming through windows, potted plants on windowsill, colorful educational posters on walls, teacher moving from front of class toward students, warm inviting atmosphere, realistic school setting, smooth handheld camera following teacher's movement"
     },
     "concept": {
-      "text": "Photosynthesis is the process by which plants convert sunlight into energy.",
-      "duration": "15",
-      "visual_prompt": "Beautiful aerial view of a lush green forest canopy with golden sunbeams breaking through the trees, mist rising"
+      "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
+      "duration": "16",
+      "visual_prompt": "Camera follows teacher walking to the window holding a potted plant, students getting up from desks and gathering around excitedly, teacher pointing from the plant to the sunlight streaming through the window, close up of children's faces showing curiosity and wonder, teacher gently touching the green leaves, sunbeams visible in the air between window and plant, students leaning in to look closer, one child reaching out to touch a leaf, camera moving smoothly between teacher and students showing their interaction, bright natural lighting, engaging educational moment, documentary style footage of real classroom learning"
     },
     "process": {
-      "text": "Plants absorb carbon dioxide and water, then use sunlight to transform them into glucose and oxygen.",
-      "duration": "22",
-      "visual_prompt": "Microscopic view of plant cells with chloroplasts, showing molecular animation of CO2 and H2O molecules being converted"
+      "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
+      "duration": "18",
+      "visual_prompt": "Smooth transition from classroom to extreme close-up of vibrant green leaf held in teacher's hand, camera pushing through the leaf surface revealing the microscopic world inside, glowing green chloroplasts actively absorbing golden light particles, energy flowing through cell structures, bright sunlight rays penetrating the leaf creating illuminated pathways, animated visualization of molecules moving and combining, carbon dioxide particles flowing in shown as blue wisps, oxygen bubbles emerging shown as silver sparkles, water molecules traveling through veins, dynamic particle movement showing active process, educational science visualization style, fluid camera movement through 3D space showing the transformation"
     },
     "conclusion": {
-      "text": "Thanks to photosynthesis, plants provide us with the oxygen we breathe and the food we eat.",
-      "duration": "11",
-      "visual_prompt": "Wide shot of a peaceful meadow at golden hour, flowers swaying in the breeze, butterflies and bees pollinating"
+      "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
+      "duration": "12",
+      "visual_prompt": "Camera pulls back out to classroom scene, teacher standing with students gathered around the window, children excitedly talking to each other and pointing at plants, teacher smiling and gesturing to the garden visible outside the classroom window, students running to window to look at the outdoor plants and trees, view through window showing sunny school garden with various green plants and flowers, students' animated faces showing they understand, teacher giving thumbs up, warm afternoon sunlight filling the classroom, energetic positive ending, camera slowly pulling back to show the whole happy classroom scene"
     }
   },
   "audio_data": {
@@ -589,91 +588,6 @@
             </div>
 
             <div class="connection-status disconnected" id="a5-status">
-                Ready
-            </div>
-        </div>
-
-        <!-- AI Video Generation Tab -->
-        <div id="agent5video-tab" class="tab-content">
-            <h3 style="margin-bottom: 15px; color: #2196F3;">AI Video Generation</h3>
-            <p style="margin-bottom: 15px; color: #666;">
-                Generate videos using AI (Replicate Minimax) or images (DALL-E) with Ken Burns effect.
-            </p>
-
-            <form id="agent5VideoForm">
-                <div class="form-group">
-                    <label for="a5v-sessionID">Session ID:</label>
-                    <input type="text" id="a5v-sessionID" name="sessionID" placeholder="Leave empty for auto-generated">
-                </div>
-
-                <div class="form-group">
-                    <label for="a5v-generation-mode">Generation Mode:</label>
-                    <select id="a5v-generation-mode" name="generation_mode">
-                        <option value="video">Video (Replicate Minimax) - ~$0.14/video</option>
-                        <option value="image">Image (DALL-E + Ken Burns) - ~$0.08/video</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="a5v-pipeline-data">Pipeline Data (JSON):</label>
-                    <textarea id="a5v-pipeline-data" name="pipeline_data" rows="25" required>{
-  "script": {
-    "hook": {
-      "text": "Have you ever wondered how plants create their own food?",
-      "duration": "12",
-      "visual_prompt": "Cinematic close-up of a vibrant green leaf with sunlight streaming through, droplets of water glistening, soft bokeh background"
-    },
-    "concept": {
-      "text": "Photosynthesis is the process by which plants convert sunlight into energy.",
-      "duration": "15",
-      "visual_prompt": "Beautiful aerial view of a lush green forest canopy with golden sunbeams breaking through the trees, mist rising"
-    },
-    "process": {
-      "text": "Plants absorb carbon dioxide and water, then use sunlight to transform them into glucose and oxygen.",
-      "duration": "22",
-      "visual_prompt": "Microscopic view of plant cells with chloroplasts, showing molecular animation of CO2 and H2O molecules being converted"
-    },
-    "conclusion": {
-      "text": "Thanks to photosynthesis, plants provide us with the oxygen we breathe and the food we eat.",
-      "duration": "11",
-      "visual_prompt": "Wide shot of a peaceful meadow at golden hour, flowers swaying in the breeze, butterflies and bees pollinating"
-    }
-  },
-  "audio_data": {
-    "audio_files": [
-      {"part": "hook", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=91tvjAImnrGa7FWaR2cJDzw45ek%3D&Expires=1763694052", "duration": 4.4},
-      {"part": "concept", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_concept.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=jmu1yhped49w15E2QiDTnf1LB20%3D&Expires=1763694052", "duration": 7.6},
-      {"part": "process", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_process.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=G3bmQ%2F0iea362AdbuJqsuaHNYho%3D&Expires=1763694052", "duration": 11.6},
-      {"part": "conclusion", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_conclusion.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=ebS38PDfSla7dPB6PZllVAyAFqI%3D&Expires=1763694052", "duration": 5.8}
-    ],
-    "background_music": {
-      "url": "https://pipeline-backend-assets.s3.amazonaws.com/music/library/test_calm_01.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=MOJrd%2BP%2B5Ky%2FAYNkcvBvZUWz8yw%3D&Expires=1763694052",
-      "duration": 60
-    }
-  }
-}</textarea>
-                </div>
-
-                <button type="submit" class="submit-btn" id="a5v-submitBtn">Generate Video</button>
-            </form>
-
-            <div class="result-section" id="a5v-results" style="display: none;">
-                <h3>Generated Video</h3>
-                <video id="a5v-video-player" controls preload="auto" class="video-player" style="width: 100%; max-width: 800px; background: #000;">
-                    Your browser does not support video playback.
-                </video>
-                <div id="a5v-video-info" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px; font-family: monospace; font-size: 12px;">
-                    Video info will appear here...
-                </div>
-                <p style="margin-top: 10px;">
-                    <a id="a5v-video-download" href="#" download="generated_video.mp4" style="color: #2196F3;">
-                        Download Video
-                    </a>
-                </p>
-                <div class="result-content" id="a5v-result-json" style="margin-top: 15px;"></div>
-            </div>
-
-            <div class="connection-status disconnected" id="a5v-status">
                 Ready
             </div>
         </div>
@@ -1419,132 +1333,6 @@ ${JSON.stringify(result, null, 2)}`;
                 // Close WebSocket
                 if (a5Websocket && a5Websocket.readyState === WebSocket.OPEN) {
                     a5Websocket.close();
-                }
-            }
-        });
-
-        // AI Video Generation Form Submission
-        const agent5VideoForm = document.getElementById('agent5VideoForm');
-        const a5vSubmitBtn = document.getElementById('a5v-submitBtn');
-        const a5vStatus = document.getElementById('a5v-status');
-        const a5vResults = document.getElementById('a5v-results');
-        const a5vVideoPlayer = document.getElementById('a5v-video-player');
-        const a5vResultJson = document.getElementById('a5v-result-json');
-        const a5vVideoInfo = document.getElementById('a5v-video-info');
-        const a5vVideoDownload = document.getElementById('a5v-video-download');
-
-        // Create reusable video player for AI Video Gen
-        const loadA5vVideo = createVideoPlayer(a5vVideoPlayer, a5vVideoInfo, a5vVideoDownload);
-
-        agent5VideoForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const sessionId = document.getElementById('a5v-sessionID').value.trim() || Date.now().toString();
-            const generationMode = document.getElementById('a5v-generation-mode').value;
-            const pipelineDataText = document.getElementById('a5v-pipeline-data').value.trim();
-
-            // Parse and validate pipeline data JSON
-            let pipelineData;
-            try {
-                pipelineData = JSON.parse(pipelineDataText);
-            } catch (err) {
-                alert('Invalid JSON in pipeline data field: ' + err.message);
-                return;
-            }
-
-            // Disable button and show processing state
-            a5vSubmitBtn.disabled = true;
-            const modeLabel = generationMode === 'video' ? 'AI Videos (Replicate)' : 'Images (DALL-E)';
-            a5vSubmitBtn.textContent = `Generating ${modeLabel}...`;
-            a5vStatus.className = 'connection-status connecting';
-            a5vStatus.textContent = `Connecting to WebSocket for progress updates...`;
-            a5vResults.style.display = 'none';
-
-            // Connect to WebSocket for progress updates
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const a5vWebsocket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${sessionId}`);
-
-            a5vWebsocket.onopen = () => {
-                a5vStatus.textContent = `Connected. Generating ${modeLabel}... This may take 2-5 minutes.`;
-            };
-
-            a5vWebsocket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.agentnumber === 'Agent5') {
-                        const msg = data.message || data.status;
-                        a5vStatus.textContent = `${data.status}: ${msg}`;
-
-                        if (data.status === 'error') {
-                            a5vStatus.className = 'connection-status disconnected';
-                        }
-                    }
-                } catch (err) {
-                    console.log('WebSocket message:', event.data);
-                }
-            };
-
-            a5vWebsocket.onerror = (err) => {
-                console.error('WebSocket error:', err);
-            };
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/agent5/test`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        pipeline_data: pipelineData,
-                        generation_mode: generationMode
-                    })
-                });
-
-                const result = await response.json();
-
-                if (response.ok && result.success) {
-                    // Display success results
-                    a5vStatus.className = 'connection-status connected';
-                    a5vStatus.textContent = `Complete! Duration: ${result.duration.toFixed(1)}s | Cost: $${(result.cost || 0).toFixed(4)}`;
-                    a5vResults.style.display = 'block';
-
-                    // Display video if URL is available
-                    if (result.data && result.data.videoUrl) {
-                        a5vVideoPlayer.style.display = 'block';
-                        loadA5vVideo(result.data.videoUrl);
-                    } else {
-                        a5vVideoPlayer.style.display = 'none';
-                        a5vVideoInfo.textContent = 'No video URL returned';
-                    }
-
-                    // Display generation summary
-                    const costInfo = `
-<strong>Generation Summary</strong>
-Mode: ${generationMode === 'video' ? 'AI Video (Replicate Minimax)' : 'Images (DALL-E + Ken Burns)'}
-Duration: ${result.duration.toFixed(1)}s
-Cost: $${(result.cost || 0).toFixed(4)}
-Model: ${result.data.model || 'N/A'}
-
-<strong>Response Data:</strong>
-${JSON.stringify(result, null, 2)}`;
-                    a5vResultJson.innerHTML = '<pre>' + costInfo + '</pre>';
-                } else {
-                    throw new Error(result.error || result.detail || 'Video generation failed');
-                }
-            } catch (error) {
-                console.error('AI Video Gen error:', error);
-                a5vStatus.className = 'connection-status disconnected';
-                a5vStatus.textContent = `Error: ${error.message}`;
-                a5vResults.style.display = 'block';
-                a5vResultJson.textContent = `Error: ${error.message}`;
-                a5vVideoPlayer.style.display = 'none';
-            } finally {
-                a5vSubmitBtn.disabled = false;
-                a5vSubmitBtn.textContent = 'Generate Video';
-                // Close WebSocket
-                if (a5vWebsocket && a5vWebsocket.readyState === WebSocket.OPEN) {
-                    a5vWebsocket.close();
                 }
             }
         });
