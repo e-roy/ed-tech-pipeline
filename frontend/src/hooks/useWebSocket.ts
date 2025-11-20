@@ -24,7 +24,13 @@ export function useWebSocket(sessionId: string | null) {
     }
 
     try {
-      const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
+      // Use query parameter format for API Gateway compatibility
+      // Format: wss://gateway-url/prod?session_id=xxx
+      // Backend supports both: /ws/{session_id} (path) and /ws?session_id=xxx (query)
+      const wsUrl = WS_URL.includes('execute-api') 
+        ? `${WS_URL}?session_id=${sessionId}`  // API Gateway format
+        : `${WS_URL}/ws/${sessionId}`;          // Direct connection format
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setIsConnected(true);

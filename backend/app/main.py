@@ -37,10 +37,21 @@ app = FastAPI(
 )
 
 # Configure CORS for Next.js frontend
+# Allow Vercel frontend and local development
+frontend_url = settings.FRONTEND_URL
+cors_origins = [
+    frontend_url,
+    "http://localhost:3000",  # Local development
+    "http://localhost:3001",  # Alternative local port
+]
+
+# Add API Gateway domain if using (optional, for direct API Gateway access)
+# cors_origins.append("https://*.execute-api.us-east-2.amazonaws.com")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=cors_origins,
+    allow_credentials=True,  # Enable credentials for auth cookies/tokens
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -242,6 +253,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     Clients connect to this endpoint to receive status updates from agents.
     Messages are filtered by session_id.
+    
+    Path parameter format: `/ws/{session_id}` (for direct connections)
     """
     import secrets
     connection_id = f"ws_{secrets.token_urlsafe(16)}"
@@ -258,6 +271,81 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except Exception as e:
         logger.error(f"Failed to send connection ready message: {e}")
     
+    # Shared connection handling logic
+    await _handle_websocket_connection(websocket, session_id, connection_id)
+
+@app.websocket("/ws")
+async def websocket_endpoint_query(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time agent status updates (query parameter version).
+    
+    This endpoint supports API Gateway which passes session_id as query parameter.
+    Format: `/ws?session_id=xxx`
+    """
+    import secrets
+    from urllib.parse import parse_qs
+    
+    # Extract session_id from query params (API Gateway compatibility)
+    query_string = websocket.url.query
+    if not query_string:
+        await websocket.close(code=1008, reason="session_id required in query string")
+        return
+    
+    query_params = parse_qs(query_string)
+    session_id = query_params.get('session_id', [None])[0]
+    
+    if not session_id:
+        await websocket.close(code=1008, reason="session_id required")
+        return
+    
+    connection_id = f"ws_{secrets.token_urlsafe(16)}"
+    
+    await websocket_manager.connect(websocket, session_id, connection_id)
+    
+    # Send connection confirmation to client
+    try:
+        await websocket.send_text(json.dumps({
+            "type": "connection_ready",
+            "sessionID": session_id,
+            "status": "connected"
+        }))
+    except Exception as e:
+        logger.error(f"Failed to send connection ready message: {e}")
+    
+    # Shared connection handling logic
+    await _handle_websocket_connection(websocket, session_id, connection_id)
+
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
+    """Shared WebSocket connection handling logic."""
+    try:
+        while True:
+            # Keep connection alive - wait for any message (text or ping/pong)
+            # This keeps the connection open to receive agent status updates
+            try:
+                data = await websocket.receive_text()
+                # Client can send messages if needed, but we primarily use this for receiving
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        # Respond to ping with pong
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                # Handle ping/pong or other WebSocket frames, but check if still connected
+                try:
+                    await websocket.receive()
+                except (WebSocketDisconnect, RuntimeError):
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await websocket_manager.disconnect(websocket, session_id, connection_id)
+
+async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
+    """Shared WebSocket connection handling logic."""
     try:
         while True:
             # Keep connection alive - wait for any message (text or ping/pong)

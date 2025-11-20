@@ -545,27 +545,32 @@
     "audio_files": [
       {
         "part": "hook",
-        "url": "https://pipeline-backend-assets.s3.amazonaws.com/users/2/kvj5wAD9Nk0qwidv6GomZ/audio/audio_hook_fa63459a.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=CdqnyI8S0N0AfpCDvDzZUZQ6tfw%3D&Expires=1763661527",
+        // REMOVED: Hardcoded URL with AWS credentials - use API to get presigned URLs instead
+        "url": "", // Get from API endpoint
         "duration": 5.0
       },
       {
         "part": "concept",
-        "url": "https://pipeline-backend-assets.s3.amazonaws.com/users/2/kvj5wAD9Nk0qwidv6GomZ/audio/audio_concept_333bb68e.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=OKGpb5qBnUhZPSjGLRl7VO4USx4%3D&Expires=1763661527",
+        // REMOVED: Hardcoded URL with AWS credentials
+        "url": "", // Get from API endpoint
         "duration": 7.6
       },
       {
         "part": "process",
-        "url": "https://pipeline-backend-assets.s3.amazonaws.com/users/2/kvj5wAD9Nk0qwidv6GomZ/audio/audio_process_02272af6.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=lBGIYlgUfA6fnROpO%2Fw77vDI9Fs%3D&Expires=1763661527",
+        // REMOVED: Hardcoded URL with AWS credentials
+        "url": "", // Get from API endpoint
         "duration": 11.5
       },
       {
         "part": "conclusion",
-        "url": "https://pipeline-backend-assets.s3.amazonaws.com/users/2/kvj5wAD9Nk0qwidv6GomZ/audio/audio_conclusion_c782b4a4.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=6e%2BQRdj0lyZ9m9JPuOS21f1kIcY%3D&Expires=1763661527",
+        // REMOVED: Hardcoded URL with AWS credentials
+        "url": "", // Get from API endpoint
         "duration": 9.9
       }
     ],
     "background_music": {
-      "url": "https://pipeline-backend-assets.s3.amazonaws.com/music/library/test_calm_01.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=e3SHY9jJ8G%2FP8gB0fWFwBJFDyPQ%3D&Expires=1763661527",
+      // REMOVED: Hardcoded URL with AWS credentials
+      "url": "", // Get from API endpoint
       "duration": 60
     }
   }
@@ -632,8 +637,26 @@
         const maxReconnectAttempts = 5;
         const reconnectDelay = 3000; // 3 seconds
 
-        // Get API base URL - use same origin since HTML is served from backend
-        const API_BASE_URL = window.location.origin;
+        // Determine API base URL - support both direct EC2 and API Gateway
+        // API Gateway URLs
+        const WS_API_GATEWAY_URL = 'wss://927uc04ep5.execute-api.us-east-2.amazonaws.com/prod';
+        const REST_API_GATEWAY_URL = 'https://w8d3k51hg6.execute-api.us-east-2.amazonaws.com/prod';
+        
+        // Detect if we're accessing through API Gateway
+        const isApiGateway = window.location.hostname.includes('execute-api');
+        
+        // Set API base URL
+        let API_BASE_URL;
+        if (isApiGateway) {
+            // Accessing through REST API Gateway - use API Gateway URL for REST calls
+            API_BASE_URL = REST_API_GATEWAY_URL;
+        } else {
+            // Direct EC2 or localhost - use same origin
+            API_BASE_URL = window.location.origin;
+        }
+        
+        console.log('API Base URL:', API_BASE_URL);
+        console.log('Is API Gateway:', isApiGateway);
 
         // Agent status tracking
         const agentStatuses = {
@@ -705,8 +728,17 @@
                     websocket.close();
                 }
 
-                const wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
-                const wsPath = `${wsUrl}/ws/${sessionId}`;
+                // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
+                let wsUrl, wsPath;
+                if (window.location.hostname.includes('execute-api')) {
+                    // API Gateway: use WebSocket API Gateway with query parameter
+                    wsUrl = WS_API_GATEWAY_URL;
+                    wsPath = `${wsUrl}?session_id=${sessionId}`;
+                } else {
+                    // Direct connection: use path parameter
+                    wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+                    wsPath = `${wsUrl}/ws/${sessionId}`;
+                }
                 
                 updateConnectionStatus('connecting', 'Connecting...');
                 
@@ -1136,8 +1168,18 @@
             a5Results.style.display = 'none';
 
             // Connect to WebSocket for progress updates
-            const wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
-            a5Websocket = new WebSocket(`${wsUrl}/ws/${sessionId}`);
+            // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
+            let wsUrl, wsPath;
+            if (window.location.hostname.includes('execute-api')) {
+                // API Gateway: use WebSocket API Gateway with query parameter
+                wsUrl = WS_API_GATEWAY_URL;
+                wsPath = `${wsUrl}?session_id=${sessionId}`;
+            } else {
+                // Direct connection: use path parameter
+                wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+                wsPath = `${wsUrl}/ws/${sessionId}`;
+            }
+            a5Websocket = new WebSocket(wsPath);
 
             a5Websocket.onmessage = (event) => {
                 try {
@@ -1232,7 +1274,8 @@
         });
 
         // Pre-fill with latest video URL (you can update this)
-        videoUrlInput.value = 'https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/test_user/1_test/final_video_b96d092e.mp4?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=XCL5YmUaqcP0Mb2cIjXTdQapjCc%3D&Expires=1763576838';
+        // REMOVED: Hardcoded URL with AWS credentials - use API to get presigned URLs
+        videoUrlInput.value = ''; // Get from API endpoint
     </script>
 </body>
 </html>

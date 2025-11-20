@@ -4,7 +4,7 @@
 import requests
 import json
 
-url = "http://13.58.115.166:8000/api/build-narrative"
+url = "http://YOUR_SERVER_IP:8000/api/build-narrative"  # Replace with your EC2 IP or API Gateway URL
 headers = {
     "Content-Type": "application/json",
     "X-User-Email": "demo@example.com"
