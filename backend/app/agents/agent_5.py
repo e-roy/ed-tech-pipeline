@@ -165,42 +165,63 @@ async def generate_image_dalle(prompt: str, api_key: str, max_retries: int = 3) 
 #     pass
 
 
-async def concatenate_audio_files(audio_file_paths: List[str], output_path: str) -> str:
+async def create_timed_narration_track(audio_file_paths: List[str], output_path: str, total_duration: float = 60.0) -> str:
     """
-    Concatenate multiple audio files (MP3) into a single audio file.
+    Create a timed narration track by placing audio files at calculated intervals across the total duration.
+    Each narration plays at the beginning of its segment, with silence/space between narrations.
 
     Args:
         audio_file_paths: List of paths to audio files in order (hook, concept, process, conclusion)
-        output_path: Path for output concatenated audio file
+        output_path: Path for output timed audio file
+        total_duration: Total duration in seconds for the final track (default 60s)
 
     Returns:
-        Path to concatenated audio file
+        Path to timed audio file
     """
     import subprocess
 
-    # Create concat list file for ffmpeg
-    concat_list = output_path.replace('.mp3', '_concat_list.txt')
-    with open(concat_list, 'w') as f:
-        for audio_path in audio_file_paths:
-            f.write(f"file '{audio_path}'\n")
+    num_segments = len(audio_file_paths)
+    segment_duration = total_duration / num_segments  # e.g., 60s / 4 = 15s per segment
 
-    # Concatenate using ffmpeg with stream copy (fast, no re-encoding)
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concat_list,
-        "-c", "copy",
+    # Build ffmpeg filter_complex to place each audio at its segment start time using adelay
+    filter_parts = []
+    for i, audio_path in enumerate(audio_file_paths):
+        # Calculate delay for this segment (in milliseconds)
+        start_time_seconds = i * segment_duration
+        delay_ms = int(start_time_seconds * 1000)
+
+        # Add adelay filter to position this audio at the correct time
+        # adelay takes stereo input, so we delay both channels
+        filter_parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}]")
+
+    # Mix all delayed audio tracks together, extending to total duration
+    mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
+    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0[mixed]"
+
+    # Build ffmpeg command
+    cmd = ["ffmpeg", "-y"]
+
+    # Add all audio inputs
+    for audio_path in audio_file_paths:
+        cmd.extend(["-i", audio_path])
+
+    # Add filter complex and output options
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[mixed]",
+        "-t", str(total_duration),  # Set total duration to 60s
+        "-ac", "2",  # Stereo
+        "-ar", "44100",  # Sample rate
+        "-c:a", "aac",  # AAC codec
+        "-b:a", "128k",  # Bitrate
         output_path
-    ]
+    ])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg audio concatenation failed: {result.stderr}")
+        raise RuntimeError(f"FFmpeg timed narration creation failed: {result.stderr}")
 
-    # Clean up concat list
-    os.unlink(concat_list)
-
+    logger.info(f"Created timed narration track: {num_segments} narrations across {total_duration}s")
     return output_path
 
 
@@ -725,6 +746,9 @@ async def agent_5_process(
 
             visual_prompts[part] = visual_prompt
 
+            # Log the visual prompt for verification
+            logger.info(f"[{session_id}] Section '{part}' visual prompt: {visual_prompt[:100]}...")
+
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
         completed_videos = []
@@ -766,7 +790,8 @@ async def agent_5_process(
             prompt = visual_prompts[section]
             clips_needed = clips_per_section[section]
 
-            logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
+            logger.info(f"[{session_id}] Generating {clips_needed} clips for section '{section}'")
+            logger.info(f"[{session_id}] Using prompt for '{section}': {prompt[:150]}...")
 
             # Extract base_scene parameters if present for consistency
             # Check both new format (agent_2_data) and old format (root level)
@@ -1049,7 +1074,7 @@ async def agent_5_process(
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message="Step 1/4: Concatenating narration audio files...",
+                message="Step 1/4: Creating timed narration track (60-second timeline)...",
                 cost=total_cost,
                 cost_breakdown=cost_per_section
             )
@@ -1106,10 +1131,10 @@ async def agent_5_process(
                         logger.error(f"[{session_id}] Failed to download audio for part '{part}' after trying {len(urls_to_try)} URLs")
                         raise ValueError(f"Failed to download audio file for part '{part}' from S3. Last error: {last_error}")
 
-            # Concatenate all narration audio files
-            concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
-            await concatenate_audio_files(audio_file_paths, concatenated_narration_path)
-            logger.info(f"[{session_id}] Concatenated {len(audio_file_paths)} audio files")
+            # Create timed narration track (places narrations at 0s, 15s, 30s, 45s across 60s timeline)
+            timed_narration_path = os.path.join(temp_dir, "timed_narration.mp3")
+            await create_timed_narration_track(audio_file_paths, timed_narration_path, total_duration=60.0)
+            logger.info(f"[{session_id}] Created timed narration track with {len(audio_file_paths)} narrations across 60 seconds")
 
             # ====================
             # AUDIO MIXING
@@ -1168,15 +1193,15 @@ async def agent_5_process(
                         logger.warning(f"[{session_id}] All download attempts failed for background music, continuing without it")
                         background_music_url = ""  # Continue without background music
 
-                # Mix narration with background music
+                # Mix timed narration with background music
                 final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
                 await mix_audio_with_background(
-                    concatenated_narration_path,
+                    timed_narration_path,
                     background_music_path,
                     final_audio_path,
                     music_volume=0.3
                 )
-                logger.info(f"[{session_id}] Mixed narration with background music")
+                logger.info(f"[{session_id}] Mixed timed narration with background music")
                 
                 # Save final audio to S3 for future restarts
                 try:
@@ -1188,9 +1213,9 @@ async def agent_5_process(
                 except Exception as e:
                     logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
             else:
-                # No background music, use concatenated narration as-is
-                final_audio_path = concatenated_narration_path
-                logger.info(f"[{session_id}] No background music, using narration only")
+                # No background music, use timed narration as-is
+                final_audio_path = timed_narration_path
+                logger.info(f"[{session_id}] No background music, using timed narration only")
                 
                 # Save final audio to S3 for future restarts
                 try:
