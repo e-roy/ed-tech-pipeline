@@ -343,6 +343,41 @@
             color: #4ade80;
             font-weight: 600;
         }
+
+        #kill-all-agents-btn {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+        }
+
+        #kill-all-agents-btn:hover {
+            background: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+        }
+
+        #kill-all-agents-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .button-row .submit-btn {
+            flex: 1;
+        }
+
+        #restart-agent5-btn {
+            font-size: 14px;
+            padding: 14px;
+        }
+
+        @media (max-width: 600px) {
+            .button-row {
+                flex-direction: column;
+            }
+        }
     </style>
 </head>
 <body>
@@ -450,6 +485,15 @@
         <div class="status-section">
             <h2>Agent Status</h2>
             
+            <div class="button-row">
+                <button type="button" id="kill-all-agents-btn" class="submit-btn">
+                    Kill All Active Agents
+                </button>
+                <button type="button" id="restart-agent5-btn" class="submit-btn">
+                    🔄 Restart from Remotion
+                </button>
+            </div>
+            
             <div class="agent-status">
                 <span class="agent-label">Orchestrator</span>
                 <div class="status-light" id="light-orchestrator"></div>
@@ -476,9 +520,6 @@
                 <div class="status-light" id="light-agent5"></div>
                 <div class="status-text" id="status-agent5">Not triggered</div>
                 <div class="error-message" id="error-agent5"></div>
-                <button id="restart-agent5-btn" class="submit-btn" style="display: block; margin-top: 10px; font-size: 14px; padding: 10px;" onclick="restartAgent5FromRemotion()">
-                    🔄 Restart from Remotion
-                </button>
             </div>
 
             <div class="connection-status disconnected" id="connectionStatus">
@@ -1748,6 +1789,54 @@ ${JSON.stringify(result, null, 2)}`;
         window.agent5ClipsGenerated = 0;
         window.agent5TotalClips = 0;
         
+        // Function to kill all active agents
+        async function killAllAgents() {
+            const killBtn = document.getElementById('kill-all-agents-btn');
+            
+            if (!confirm('Are you sure you want to kill all active agents? This will stop all running agent processes.')) {
+                return;
+            }
+            
+            try {
+                killBtn.disabled = true;
+                killBtn.textContent = 'Killing Agents...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/kill-all-agents`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    alert(`Successfully killed ${data.cancelled_count} active agent(s)`);
+                    
+                    // Reset all agent statuses
+                    resetAgentStatuses();
+                    
+                    // Re-enable submit button if it was disabled
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Start Processing';
+                } else {
+                    throw new Error(data.message || 'Failed to kill agents');
+                }
+            } catch (error) {
+                console.error('Error killing agents:', error);
+                alert(`Failed to kill agents: ${error.message}`);
+            } finally {
+                killBtn.disabled = false;
+                killBtn.textContent = 'Kill All Active Agents';
+            }
+        }
+
+        // Attach event listener to kill all agents button
+        document.getElementById('kill-all-agents-btn').addEventListener('click', killAllAgents);
+
+        // Attach event listener to restart Agent5 button
+        document.getElementById('restart-agent5-btn').addEventListener('click', restartAgent5FromRemotion);
+
         // Function to restart Agent5 from Remotion rendering
         async function restartAgent5FromRemotion() {
             const restartBtn = document.getElementById('restart-agent5-btn');
