@@ -58,8 +58,8 @@ def get_secret(secret_name: str) -> str:
     # Cache miss or expired, fetch from Secrets Manager
     try:
         logger.info(f"Fetching secret '{secret_name}' from AWS Secrets Manager")
-        # Get AWS region from settings (defaults to us-east-1)
-        aws_region = settings.AWS_REGION or "us-east-1"
+        # Get AWS region from settings (defaults to us-east-2)
+        aws_region = settings.AWS_REGION or "us-east-2"
         
         # Only initialize if credentials are provided
         if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
