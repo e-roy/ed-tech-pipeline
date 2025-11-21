@@ -58,7 +58,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
           </Button>
         )}
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="max-h-[calc(100vh-60px)] flex-1">
         <div className="h-full p-4">
           {mode === "edit" ? (
             <div className="text-muted-foreground text-sm">

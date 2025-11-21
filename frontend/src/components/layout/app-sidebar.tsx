@@ -24,6 +24,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
@@ -40,11 +41,6 @@ const navItems = [
     icon: Plus,
   },
   {
-    title: "Create Agent",
-    url: "/dashboard/agent-create",
-    icon: Plus,
-  },
-  {
     title: "Assets",
     url: "/dashboard/assets",
     icon: FolderOpen,
@@ -54,20 +50,24 @@ const navItems = [
     icon: History,
     isCollapsible: true,
   },
-  // {
-  //   title: "Hardcode Create",
-  //   url: "/dashboard/hardcode-create",
-  //   icon: FileText,
-  // },
-  {
-    title: "Hardcode Assets",
-    url: "/dashboard/hardcode-assets",
-    icon: HardDrive,
-  },
+
   {
     title: "Edit",
     url: "/dashboard/editing/test",
     icon: Scissors,
+  },
+];
+
+const navItemsSub = [
+  {
+    title: "Old Create Page",
+    url: "/dashboard/old-create",
+    icon: Plus,
+  },
+  {
+    title: "Hardcode Assets",
+    url: "/dashboard/hardcode-assets",
+    icon: HardDrive,
   },
 ];
 
@@ -88,11 +88,11 @@ export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar> & { user: User }) {
   const pathname = usePathname();
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+
   const queryResult = api.script.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+
   const sessions = queryResult.data as SessionListItem[] | undefined;
 
   // Limit to 20 most recent sessions for sidebar
@@ -182,6 +182,34 @@ export function AppSidebar({
                   );
                 }
 
+                if (!item.url) {
+                  return null;
+                }
+
+                const isActive = item.url === pathname;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive}
+                      className="px-2.5 md:px-2"
+                    >
+                      <Link href={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarSeparator />
+        <SidebarGroup>
+          <SidebarGroupContent className="px-1.5 md:px-0">
+            <SidebarMenu>
+              {navItemsSub.map((item) => {
                 if (!item.url) {
                   return null;
                 }
