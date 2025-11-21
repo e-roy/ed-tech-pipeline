@@ -117,3 +117,4 @@ backend/DEPLOY_SCAFFOLD_TEST_UI.md
 # Remotion dependencies
 remotion/node_modules/
 Doc2/cursor_conversations/
+install_ffmpeg_ec2.ps1
