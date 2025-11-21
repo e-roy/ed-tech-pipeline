@@ -204,6 +204,39 @@ sudo journalctl -u pipeline-backend -f
 1. **`deploy_ec2.ps1`**: Enhanced with auto IP detection
 2. **`check_ec2_status.ps1`**: New diagnostic script (created)
 
+## ALB Health Check Timeout Fix
+
+### Problem
+ALB target health checks were timing out during "Restart Remotion" operations, causing the target to be marked as unhealthy. This occurred because the Remotion rendering process (2-4 minutes) was blocking the event loop in the single-worker FastAPI application.
+
+### Root Cause
+- Service runs with `--workers 1` (single worker)
+- `process.wait()` in `render_video_with_remotion()` was blocking the event loop
+- During 2-4 minute Remotion renders, health checks couldn't be processed
+- ALB marked target as unhealthy due to timeout
+
+### Solution Implemented
+**File**: `backend/app/agents/agent_5.py`
+
+Wrapped `process.wait()` in `asyncio.to_thread()` to prevent blocking the event loop:
+
+```python
+# Wait for process to complete without blocking the event loop
+# CRITICAL: This prevents the single worker from being blocked during health checks
+await asyncio.to_thread(process.wait)
+```
+
+**Key Changes:**
+- `read_output()` already runs in a thread (non-blocking)
+- `process.wait()` now also runs in a thread pool
+- Event loop remains free to handle health checks during long renders
+- Health check endpoint (`/health`) is synchronous and runs in FastAPI's thread pool
+
+### Verification
+- Health checks should now respond even during active Remotion rendering
+- ALB target should remain healthy during video generation
+- Background tasks continue processing without blocking the main event loop
+
 ## Notes
 
 - Instance uses dynamic IP (not Elastic IP) - may change on restart
@@ -211,4 +244,5 @@ sudo journalctl -u pipeline-backend -f
 - Backend runs as systemd service on EC2
 - Deployment requires SSH access to EC2 instance
 - Code is pulled from GitHub master branch
+- Single worker configuration requires careful async/threading to avoid blocking
 
