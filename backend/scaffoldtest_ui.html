@@ -870,10 +870,10 @@
                 // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
                 let wsUrl, wsPath;
                 if (window.location.hostname.includes('execute-api')) {
-                    // API Gateway: use path parameter (query params don't work in $connect route)
-                    // Format: wss://.../prod/{session_id}
+                    // API Gateway: use query parameter for session_id
+                    // Format: wss://.../prod?session_id=xxx
                     wsUrl = WS_API_GATEWAY_URL;
-                    wsPath = `${wsUrl}/${sessionId}`;
+                    wsPath = `${wsUrl}?session_id=${sessionId}`;
                 } else {
                     // Direct connection: use path parameter
                     wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
