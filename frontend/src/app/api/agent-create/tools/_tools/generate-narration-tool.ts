@@ -1,6 +1,9 @@
 import { type Tool } from "ai";
 import z from "zod";
 import { NarrativeBuilderAgent } from "@/server/agents/narrative-builder";
+import { db } from "@/server/db";
+import { videoSessions } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
 
 export const generateNarrationTool: Tool = {
   description:
@@ -34,6 +37,12 @@ export const generateNarrationTool: Tool = {
       .string()
       .optional()
       .describe("Child's interest to incorporate into examples"),
+    sessionId: z
+      .string()
+      .optional()
+      .describe(
+        "Session ID to load confirmedFacts and session data from database",
+      ),
   }),
   execute: async ({
     facts,
@@ -41,34 +50,88 @@ export const generateNarrationTool: Tool = {
     target_duration = 60,
     child_age,
     child_interest,
+    sessionId,
   }: {
     facts: Array<{ concept: string; details: string; confidence?: number }>;
     topic?: string;
     target_duration?: number;
     child_age?: string;
     child_interest?: string;
+    sessionId?: string;
   }) => {
     try {
+      // If sessionId provided, load confirmedFacts and session data from DB
+      let factsToUse = facts;
+      let topicToUse = topic;
+      let childAge = child_age;
+      let childInterest = child_interest;
+
+      if (sessionId) {
+        try {
+          const [session] = await db
+            .select({
+              confirmedFacts: videoSessions.confirmedFacts,
+              topic: videoSessions.topic,
+              childAge: videoSessions.childAge,
+              childInterest: videoSessions.childInterest,
+            })
+            .from(videoSessions)
+            .where(eq(videoSessions.id, sessionId))
+            .limit(1);
+
+          if (session) {
+            // Use confirmedFacts from DB if available, otherwise use request facts
+            if (
+              session.confirmedFacts &&
+              Array.isArray(session.confirmedFacts) &&
+              session.confirmedFacts.length > 0
+            ) {
+              factsToUse = session.confirmedFacts as typeof facts;
+            }
+
+            // Use topic from DB if not provided in request
+            if (!topicToUse && session.topic) {
+              topicToUse = session.topic;
+            }
+
+            // Use child_age and child_interest from DB if not provided in request
+            if (!childAge && session.childAge) {
+              childAge = session.childAge;
+            }
+            if (!childInterest && session.childInterest) {
+              childInterest = session.childInterest;
+            }
+          }
+        } catch (error) {
+          console.error(
+            "Error loading session for generateNarrationTool:",
+            error,
+          );
+          // Continue with request parameters if DB load fails
+        }
+      }
+
       // Use NarrativeBuilderAgent for better narration quality
       const agent = new NarrativeBuilderAgent();
 
       // Extract topic from facts if not provided
-      const inferredTopic = topic ?? facts[0]?.concept ?? "Educational Content";
+      const inferredTopic =
+        topicToUse ?? factsToUse[0]?.concept ?? "Educational Content";
 
       // Convert facts to the format expected by NarrativeBuilderAgent
-      const agentFacts = facts.map((f) => ({
+      const agentFacts = factsToUse.map((f) => ({
         concept: f.concept,
         details: f.details,
       }));
 
       const result = await agent.process({
-        sessionId: "", // Not needed for tool execution
+        sessionId: sessionId ?? "",
         data: {
           topic: inferredTopic,
           facts: agentFacts,
           target_duration: target_duration,
-          child_age: child_age ?? null,
-          child_interest: child_interest ?? null,
+          child_age: childAge ?? null,
+          child_interest: childInterest ?? null,
         },
       });
 
