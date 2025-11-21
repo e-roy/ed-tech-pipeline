@@ -1,12 +1,23 @@
 'use client';
 
 import { Box, Typography } from '@mui/material';
-import { useEditorStore, selectActiveElement } from '@/stores/editorStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useEditorStore } from '@/stores/editorStore';
 import { MediaProperties } from './properties/MediaProperties';
 import { TextProperties } from './properties/TextProperties';
 
 export function PropertiesPanel() {
-  const activeElement = useEditorStore(selectActiveElement);
+  // Use useShallow to prevent infinite re-render from new object references
+  const activeElement = useEditorStore(
+    useShallow((state) => {
+      if (!state.activeElementId) return null;
+      const media = state.mediaFiles.find((m) => m.id === state.activeElementId);
+      if (media) return { type: 'media' as const, element: media };
+      const text = state.textElements.find((t) => t.id === state.activeElementId);
+      if (text) return { type: 'text' as const, element: text };
+      return null;
+    })
+  );
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
