@@ -1,7 +1,8 @@
 'use client';
 
 import { Box } from '@mui/material';
-import { useEditorStore, selectMediaByTrack, selectTextByTrack, type Track as TrackType } from '@/stores/editorStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useEditorStore, type Track as TrackType } from '@/stores/editorStore';
 import { TimelineClip } from './TimelineClip';
 
 interface TrackProps {
@@ -11,8 +12,13 @@ interface TrackProps {
 }
 
 export function Track({ track, top, zoom }: TrackProps) {
-  const mediaFiles = useEditorStore(selectMediaByTrack(track.id));
-  const textElements = useEditorStore(selectTextByTrack(track.id));
+  // Use useShallow to compare array contents instead of reference
+  const mediaFiles = useEditorStore(
+    useShallow((state) => state.mediaFiles.filter((m) => m.trackId === track.id))
+  );
+  const textElements = useEditorStore(
+    useShallow((state) => state.textElements.filter((t) => t.trackId === track.id))
+  );
   const items = track.type === 'text' ? textElements : mediaFiles;
 
   return (
