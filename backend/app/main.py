@@ -993,6 +993,57 @@ async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = D
 
 
 # =============================================================================
+# Kill All Active Agents Endpoint
+# =============================================================================
+
+class KillAllAgentsResponse(BaseModel):
+    """Response for killing all active agents."""
+    success: bool
+    message: str
+    cancelled_count: int
+
+
+@app.post("/api/kill-all-agents", response_model=KillAllAgentsResponse)
+async def kill_all_agents():
+    """
+    Kill all active agent tasks.
+    
+    This endpoint cancels all background tasks that are currently running,
+    effectively stopping any untracked or stuck agents.
+    """
+    logger.info("Kill all agents request received")
+    
+    cancelled_count = 0
+    
+    # Check if background_tasks exists
+    if hasattr(app.state, 'background_tasks') and app.state.background_tasks:
+        tasks_to_cancel = list(app.state.background_tasks)
+        logger.info(f"Found {len(tasks_to_cancel)} active agent task(s) to cancel")
+        
+        for task in tasks_to_cancel:
+            if not task.done():
+                task.cancel()
+                cancelled_count += 1
+                logger.info(f"Cancelled agent task: {task}")
+            else:
+                # Remove completed tasks from the set
+                app.state.background_tasks.discard(task)
+        
+        # Clear the set after cancelling
+        app.state.background_tasks.clear()
+        
+        logger.info(f"Successfully cancelled {cancelled_count} agent task(s)")
+    else:
+        logger.info("No active agent tasks found")
+    
+    return KillAllAgentsResponse(
+        success=True,
+        message=f"Killed {cancelled_count} active agent(s)",
+        cancelled_count=cancelled_count
+    )
+
+
+# =============================================================================
 # Agent Test Endpoints - Test individual agents with custom input
 # =============================================================================
 
