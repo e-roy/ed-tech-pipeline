@@ -741,8 +741,10 @@ async def agent_5_process(
             # Check both new format (agent_2_data) and old format (root level)
             if agent_2_data:
                 base_scene = agent_2_data.get("base_scene", {})
-            else:
+            elif pipeline_data:
                 base_scene = pipeline_data.get("base_scene", {})
+            else:
+                base_scene = {}
             style = base_scene.get("style", "")
             setting = base_scene.get("setting", "")
             teacher_desc = base_scene.get("teacher", "")
