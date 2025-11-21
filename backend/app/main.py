@@ -507,9 +507,16 @@ async def start_processing(
     """
     Start the agent processing pipeline.
 
+    Expected request format:
+    {
+        "sessionID": "<session-id>",
+        "userID": "<user-id>",
+        "agent_selection": "Full Test"
+    }
+
     Supports multiple modes:
-    - Full Test: Uses video_session_data from database
-    - Agent2: Minimal inputs (userID, sessionID)
+    - Full Test: Requires sessionID, userID
+    - Agent2: Requires userID, sessionID
     - Agent4: Requires script, voice, audio_option
     - Agent5: Requires userID, sessionID, supersessionid
     """
