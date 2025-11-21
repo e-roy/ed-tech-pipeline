@@ -804,22 +804,18 @@ async def agent_5_process(
 
                 # Update progress
                 completed_videos.append(f"{section}_{clip_idx}")
-                status_data = {
-                    "agentnumber": "Agent5",
-                    "userID": user_id,
-                    "sessionID": session_id,
-                    "supersessionID": supersessionid,
-                    "status": "processing",
-                    "message": f"Generated clip {len(completed_videos)}/{total_clips} ({section} {clip_idx+1}/{clips_needed})",
-                    "timestamp": int(time.time() * 1000),
-                    "progress": {
+                await send_status(
+                    "Agent5",
+                    "processing",
+                    supersessionID=supersessionid,
+                    message=f"Generated clip {len(completed_videos)}/{total_clips} ({section} {clip_idx+1}/{clips_needed})",
+                    progress={
                         "stage": "video_generation",
                         "completed": len(completed_videos),
                         "total": total_clips,
                         "section": section
                     }
-                }
-                await websocket_manager.send_progress(session_id, status_data)
+                )
 
             # If only one clip, return it directly
             if len(generated_clips) == 1:
