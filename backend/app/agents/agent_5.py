@@ -1,11 +1,13 @@
 """
-Agent 5 - Video Generator using Remotion
+Agent 5 - Video Generator using FFmpeg
 
 Generates a 60-second video from pipeline data:
 1. Generates AI videos in parallel using Replicate (Minimax)
-2. Calculates scene timing to space audio across 60 seconds
-3. Renders video using Remotion
-4. Uploads final video to S3
+2. Downloads and concatenates all narration audio files
+3. Mixes concatenated narration with background music
+4. Concatenates all video clips into one video
+5. Combines final video with final audio
+6. Uploads final video to S3
 
 Uses Replicate Minimax for AI-generated video clips (~$0.035/5s video)
 """
@@ -30,13 +32,6 @@ from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
 from app.services.replicate_video import ReplicateVideoService
 from app.config import get_settings
-
-
-# Path to Remotion project
-# agent_5.py is at: backend/app/agents/agent_5.py
-# remotion is at: remotion/
-# So we need to go up 3 levels from agent_5.py to backend, then up to pipeline, then into remotion
-REMOTION_DIR = Path(__file__).parent.parent.parent.parent / "remotion"
 
 
 async def generate_video_replicate(
@@ -118,360 +113,224 @@ async def generate_image_dalle(prompt: str, api_key: str, max_retries: int = 3) 
         raise RuntimeError(last_error or "DALL-E API failed after retries")
 
 
-def calculate_scene_timing(audio_files: List[Dict], fps: int = 30, total_duration: int = 60) -> List[Dict]:
+# DEPRECATED: Remotion-based rendering has been replaced with ffmpeg-based concatenation
+# Keeping these functions commented out for reference
+#
+# def calculate_scene_timing(audio_files: List[Dict], fps: int = 30, total_duration: int = 60) -> List[Dict]:
+#     """
+#     Calculate scene timing to distribute audio across 60 seconds.
+#
+#     Returns scene data with start frames and durations.
+#     """
+#     total_frames = total_duration * fps
+#     num_scenes = len(audio_files)
+#
+#     # Calculate spacing between scenes
+#     scene_duration_frames = total_frames // num_scenes
+#
+#     scenes = []
+#     for i, audio in enumerate(audio_files):
+#         start_frame = i * scene_duration_frames
+#         duration_frames = scene_duration_frames
+#
+#         # Last scene gets any remaining frames
+#         if i == num_scenes - 1:
+#             duration_frames = total_frames - start_frame
+#
+#         audio_duration_seconds = audio.get("duration", 5.0)
+#         audio_duration_frames = int(audio_duration_seconds * fps)
+#
+#         scenes.append({
+#             "part": audio["part"],
+#             "startFrame": start_frame,
+#             "durationFrames": duration_frames,
+#             "audioDurationFrames": audio_duration_frames
+#         })
+#
+#     return scenes
+#
+#
+# async def render_video_with_remotion(
+#     scenes: List[Dict],
+#     background_music_url: str,
+#     output_path: str,
+#     temp_dir: str,
+#     websocket_manager: Optional[WebSocketManager] = None,
+#     session_id: Optional[str] = None,
+#     user_id: Optional[str] = None,
+#     supersessionid: Optional[str] = None,
+#     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
+# ) -> str:
+#     """DEPRECATED - Replaced with ffmpeg-based concatenation"""
+#     pass
+
+
+async def concatenate_audio_files(audio_file_paths: List[str], output_path: str) -> str:
     """
-    Calculate scene timing to distribute audio across 60 seconds.
-
-    Returns scene data with start frames and durations.
-    """
-    total_frames = total_duration * fps
-    num_scenes = len(audio_files)
-
-    # Calculate spacing between scenes
-    scene_duration_frames = total_frames // num_scenes
-
-    scenes = []
-    for i, audio in enumerate(audio_files):
-        start_frame = i * scene_duration_frames
-        duration_frames = scene_duration_frames
-
-        # Last scene gets any remaining frames
-        if i == num_scenes - 1:
-            duration_frames = total_frames - start_frame
-
-        audio_duration_seconds = audio.get("duration", 5.0)
-        audio_duration_frames = int(audio_duration_seconds * fps)
-
-        scenes.append({
-            "part": audio["part"],
-            "startFrame": start_frame,
-            "durationFrames": duration_frames,
-            "audioDurationFrames": audio_duration_frames
-        })
-
-    return scenes
-
-
-async def render_video_with_remotion(
-    scenes: List[Dict],
-    background_music_url: str,
-    output_path: str,
-    temp_dir: str,
-    websocket_manager: Optional[WebSocketManager] = None,
-    session_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    supersessionid: Optional[str] = None,
-    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
-) -> str:
-    """
-    Render video using Remotion CLI.
+    Concatenate multiple audio files (MP3) into a single audio file.
 
     Args:
-        scenes: List of scene data with imageUrl/videoUrl, audioUrl, timing info
-        background_music_url: URL or path to background music
-        output_path: Path for output video file
-        temp_dir: Temp directory containing local image files
-        websocket_manager: Optional WebSocket manager for progress updates
-        session_id: Optional session ID for progress updates
-        user_id: Optional user ID for progress updates
-        supersessionid: Optional supersession ID for progress updates
+        audio_file_paths: List of paths to audio files in order (hook, concept, process, conclusion)
+        output_path: Path for output concatenated audio file
 
     Returns:
-        Path to rendered video
+        Path to concatenated audio file
     """
-    # Copy images to Remotion's public directory for local access
-    remotion_public = REMOTION_DIR / "public"
-    remotion_public.mkdir(exist_ok=True)
+    import subprocess
 
-    # Update scenes based on visual type
-    updated_scenes = []
-    for scene in scenes:
-        part = scene["part"]
-        visual_type = scene.get("visualType", "image")
+    # Create concat list file for ffmpeg
+    concat_list = output_path.replace('.mp3', '_concat_list.txt')
+    with open(concat_list, 'w') as f:
+        for audio_path in audio_file_paths:
+            f.write(f"file '{audio_path}'\n")
 
-        if visual_type == "video":
-            # For video mode, keep the URL as-is (Remotion will fetch from URL)
-            updated_scenes.append(scene)
-        else:
-            # For image mode, copy local files to Remotion public dir
-            local_image_path = os.path.join(temp_dir, f"{part}.png")
+    # Concatenate using ffmpeg with stream copy (fast, no re-encoding)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list,
+        "-c", "copy",
+        output_path
+    ]
 
-            # Copy image to Remotion public dir
-            if os.path.exists(local_image_path):
-                dest_path = remotion_public / f"{part}.png"
-                import shutil
-                shutil.copy2(local_image_path, dest_path)
-                # Use relative path from Remotion's perspective
-                image_url = f"{part}.png"
-            else:
-                image_url = scene.get("imageUrl", "")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg audio concatenation failed: {result.stderr}")
 
-            updated_scenes.append({
-                **scene,
-                "imageUrl": image_url
-            })
+    # Clean up concat list
+    os.unlink(concat_list)
 
-    # Prepare props for Remotion
-    props = {
-        "scenes": updated_scenes,
-        "backgroundMusicUrl": background_music_url,
-        "backgroundMusicVolume": 0.3
-    }
+    return output_path
 
-    # Write props to temp file
-    props_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-    json.dump(props, props_file)
-    props_file.close()
 
-    try:
-        # Run Remotion render
-        import subprocess
-        import re
+async def mix_audio_with_background(narration_path: str, background_music_path: str, output_path: str, music_volume: float = 0.3) -> str:
+    """
+    Mix narration audio with background music.
 
-        # Log the props for debugging
-        print(f"Remotion props: {json.dumps(props, indent=2)}")
-        print(f"Remotion dir: {REMOTION_DIR}")
-        print(f"Public dir contents: {list(remotion_public.iterdir()) if remotion_public.exists() else 'not found'}")
+    Args:
+        narration_path: Path to concatenated narration audio
+        background_music_path: Path to background music file
+        output_path: Path for output mixed audio file
+        music_volume: Volume level for background music (0.0-1.0), default 0.3 (30%)
 
-        # Try to find bun/bunx in common locations
-        import shutil
-        
-        bunx_cmd = None
-        checked_paths = []
-        
-        # First try to find bunx in PATH
-        bunx_full = shutil.which('bunx')
-        if bunx_full:
-            bunx_cmd = bunx_full
-            logger.info(f"Found bunx in PATH: {bunx_full}")
-        else:
-            # Try common installation paths for bunx
-            bun_paths = [
-                '/home/ec2-user/.bun/bin/bunx',
-                '/usr/local/bin/bunx',
-                '/opt/homebrew/bin/bunx',
-                os.path.expanduser('~/.bun/bin/bunx'),
-            ]
-            for path in bun_paths:
-                checked_paths.append(path)
-                if os.path.exists(path) and os.access(path, os.X_OK):
-                    bunx_cmd = path
-                    logger.info(f"Found bunx at: {path}")
-                    break
-        
-        # If bunx not found, try using 'bun x' as fallback
-        if not bunx_cmd:
-            bun_full = shutil.which('bun')
-            if bun_full:
-                bunx_cmd = f"{bun_full} x"
-                logger.info(f"Found bun in PATH, using 'bun x': {bun_full}")
-            else:
-                # Try common bun paths
-                bun_paths_bun = [
-                    '/home/ec2-user/.bun/bin/bun',
-                    '/usr/local/bin/bun',
-                    '/opt/homebrew/bin/bun',
-                    os.path.expanduser('~/.bun/bin/bun'),
-                ]
-                for path in bun_paths_bun:
-                    checked_paths.append(path)
-                    if os.path.exists(path) and os.access(path, os.X_OK):
-                        bunx_cmd = f"{path} x"
-                        logger.info(f"Found bun at: {path}")
-                        break
-        
-        if not bunx_cmd:
-            error_msg = (
-                f"Could not find bun or bunx. Please ensure bun is installed.\n"
-                f"Checked paths: {', '.join(checked_paths)}\n"
-                f"Install bun: curl -fsSL https://bun.sh/install | bash\n"
-                f"Or on EC2: bash backend/install_bun_ec2.sh"
-            )
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        
-        cmd = f"{bunx_cmd} remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
+    Returns:
+        Path to mixed audio file
+    """
+    import subprocess
 
-        # Use Popen to stream output and send progress updates
-        # Explicitly set PATH to ensure bun and ffmpeg are accessible
-        env = os.environ.copy()
-        # Add common bun installation paths to PATH
-        bun_paths_to_add = [
-            '/home/ec2-user/.bun/bin',
-            os.path.expanduser('~/.bun/bin'),
-            '/usr/local/bin',
-            '/opt/homebrew/bin',
-        ]
-        current_path = env.get('PATH', '')
-        new_path_parts = [p for p in bun_paths_to_add if os.path.isdir(p)]
-        new_path_parts.append(current_path)
-        env['PATH'] = ':'.join(new_path_parts)
-        
-        # Create subprocess with resource limits to prevent SSH/system resource exhaustion
-        # Use process group to manage child processes spawned by Remotion/bun
-        def set_process_limits():
-            """Set resource limits for Remotion subprocess to prevent system resource exhaustion."""
-            try:
-                # Limit number of child processes (soft limit)
-                # This prevents Remotion from spawning too many processes that could exhaust system resources
-                resource.setrlimit(resource.RLIMIT_NPROC, (100, 200))  # Soft: 100, Hard: 200
-            except (ValueError, OSError) as e:
-                # If limits can't be set, log but continue (non-critical)
-                logger.warning(f"Could not set process limits: {e}")
-        
-        # Create process with new process group for better cleanup
-        # This helps prevent child processes from consuming resources after parent dies
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(REMOTION_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            shell=True,
-            env=env,
-            bufsize=1,
-            preexec_fn=set_process_limits,  # Set limits before process starts
-            start_new_session=True  # Create new process group for better isolation
-        )
+    # Mix narration with background music
+    # - Narration at 100% volume
+    # - Background music at specified volume (default 30%)
+    # - Loop music if needed with -stream_loop -1
+    # - Use duration of narration (first input) with -shortest
+    filter_complex = f"[1:a]volume={music_volume}[music];[0:a][music]amix=inputs=2:duration=first[aout]"
 
-        output_lines = []
-        last_progress_update = 0
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", narration_path,
+        "-stream_loop", "-1",  # Loop background music
+        "-i", background_music_path,
+        "-filter_complex", filter_complex,
+        "-map", "[aout]",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        output_path
+    ]
 
-        # Stream output and parse progress
-        def read_output():
-            nonlocal last_progress_update
-            for line in iter(process.stdout.readline, ''):
-                output_lines.append(line)
-                print(line, end='')
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg audio mixing failed: {result.stderr}")
 
-                # Parse rendering progress: "Rendered 100/1800"
-                match = re.search(r'Rendered (\d+)/(\d+)', line)
-                if match and session_id:
-                    current = int(match.group(1))
-                    total = int(match.group(2))
-                    percent = int((current / total) * 100)
+    return output_path
 
-                    # Only send updates every 5% to avoid flooding
-                    if percent >= last_progress_update + 5 or current == total:
-                        last_progress_update = percent
-                        message = f"Rendering video: {percent}% ({current}/{total} frames)"
-                        
-                        # Use status_callback if available (preferred), otherwise fall back to websocket_manager
-                        import asyncio
-                        try:
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
-                                if status_callback:
-                                    # Use callback (preferred - goes through orchestrator)
-                                    # Pass message and progress as kwargs
-                                    asyncio.run_coroutine_threadsafe(
-                                        status_callback(
-                                            agentnumber="Agent5",
-                                            status="processing",
-                                            userID=user_id or "",
-                                            sessionID=session_id,
-                                            timestamp=int(time.time() * 1000),
-                                            message=message,
-                                            progress={
-                                                "stage": "rendering",
-                                                "current": current,
-                                                "total": total,
-                                                "percent": percent
-                                            }
-                                        ),
-                                        loop
-                                    )
-                                # Also send detailed progress via websocket if available (for backwards compatibility)
-                                if websocket_manager:
-                                    asyncio.run_coroutine_threadsafe(
-                                        websocket_manager.send_progress(session_id, {
-                                            "agentnumber": "Agent5",
-                                            "userID": user_id or "",
-                                            "sessionID": session_id,
-                                            "supersessionID": supersessionid or "",
-                                            "status": "processing",
-                                            "message": message,
-                                            "timestamp": int(time.time() * 1000),
-                                            "progress": {
-                                                "stage": "rendering",
-                                                "current": current,
-                                                "total": total,
-                                                "percent": percent
-                                            }
-                                        }),
-                                        loop
-                                    )
-                        except Exception as e:
-                            print(f"Failed to send render progress: {e}")
 
-        # Run the output reading in a thread to avoid blocking the event loop
-        # This allows health checks to continue responding during long Remotion renders
-        await asyncio.to_thread(read_output)
-        
-        # Wait for process to complete without blocking the event loop
-        # CRITICAL: This prevents the single worker from being blocked during health checks
-        await asyncio.to_thread(process.wait)
+async def concatenate_all_video_clips(clip_paths: List[str], output_path: str) -> str:
+    """
+    Concatenate all video clips into a single video file.
 
-        if process.returncode != 0:
-            raise RuntimeError(f"Remotion render failed:\n{''.join(output_lines)}")
+    Args:
+        clip_paths: List of paths to video clips in order
+        output_path: Path for output concatenated video file
 
-        # Check output file size
-        if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            print(f"Output video size: {file_size} bytes")
-        else:
-            print(f"Output file not found at {output_path}")
+    Returns:
+        Path to concatenated video file
+    """
+    import subprocess
 
-        return output_path
+    # Create concat list file for ffmpeg
+    concat_list = output_path.replace('.mp4', '_concat_list.txt')
+    with open(concat_list, 'w') as f:
+        for clip_path in clip_paths:
+            f.write(f"file '{clip_path}'\n")
 
-    finally:
-        # Ensure process and all child processes are terminated to prevent resource exhaustion
-        # This is critical to prevent Remotion/bun child processes from consuming resources
-        # that could cause SSH to become unresponsive
-        try:
-            if 'process' in locals() and process.poll() is None:
-                # Process still running - terminate it and all children in process group
-                try:
-                    # Send SIGTERM to process group (kills all children spawned by Remotion/bun)
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                except (ProcessLookupError, OSError, AttributeError):
-                    # Process group doesn't exist, process already terminated, or no pgid
-                    # Try to terminate just the main process
-                    try:
-                        process.terminate()
-                    except (ProcessLookupError, OSError):
-                        pass
-                finally:
-                    # Wait a bit, then force kill if still running
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                        except (ProcessLookupError, OSError, AttributeError):
-                            try:
-                                process.kill()
-                            except (ProcessLookupError, OSError):
-                                pass
-        except Exception as e:
-            logger.warning(f"Error cleaning up Remotion process: {e}")
-        
-        # Clean up props file
-        try:
-            if 'props_file' in locals():
-                os.unlink(props_file.name)
-        except Exception:
-            pass
-        
-        # Clean up copied images from public dir
-        for scene in scenes:
-            part = scene["part"]
-            public_image = remotion_public / f"{part}.png"
-            if public_image.exists():
-                try:
-                    public_image.unlink()
-                except Exception:
-                    pass
+    # Concatenate using ffmpeg with stream copy (fast, no re-encoding)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list,
+        "-c", "copy",
+        output_path
+    ]
+
+    # Set PATH to ensure ffmpeg is accessible
+    env = os.environ.copy()
+    bun_paths_to_add = [
+        '/home/ec2-user/.bun/bin',
+        os.path.expanduser('~/.bun/bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+    ]
+    current_path = env.get('PATH', '')
+    new_path_parts = [p for p in bun_paths_to_add if os.path.isdir(p)]
+    new_path_parts.append(current_path)
+    env['PATH'] = ':'.join(new_path_parts)
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg video concatenation failed: {result.stderr}")
+
+    # Clean up concat list
+    os.unlink(concat_list)
+
+    return output_path
+
+
+async def combine_video_and_audio(video_path: str, audio_path: str, output_path: str) -> str:
+    """
+    Combine video and audio into final output file.
+
+    Args:
+        video_path: Path to concatenated video file
+        audio_path: Path to mixed audio file
+        output_path: Path for final output video file
+
+    Returns:
+        Path to final video file
+    """
+    import subprocess
+
+    # Combine video + audio
+    # - Copy video stream (no re-encoding)
+    # - Encode audio as AAC
+    # - Use shortest stream duration
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-i", audio_path,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-shortest",
+        output_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg video+audio combination failed: {result.stderr}")
+
+    return output_path
 
 
 async def agent_5_process(
@@ -484,10 +343,17 @@ async def agent_5_process(
     generation_mode: str = "video",  # Kept for backwards compatibility, always uses video
     db: Optional[Session] = None,
     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None,
-    restart_from_remotion: bool = False
+    restart_from_concat: bool = False  # Skip generation, reuse existing clips from S3
 ) -> Optional[str]:
     """
-    Agent5: Video generation agent using Remotion.
+    Agent5: Video generation agent using FFmpeg.
+
+    Generates a complete video by:
+    1. Generating AI video clips in parallel using Replicate (Minimax)
+    2. Concatenating all narration audio files
+    3. Mixing narration with background music
+    4. Concatenating all video clips
+    5. Combining final video with final audio
 
     Args:
         websocket_manager: WebSocket manager for status updates (deprecated, use status_callback)
@@ -501,7 +367,6 @@ async def agent_5_process(
         generation_mode: Deprecated - always uses AI video generation
         db: Database session for querying video_session table
         status_callback: Callback function for sending status updates to orchestrator
-        restart_from_remotion: If True, skip clip generation and restart from Remotion rendering
 
     Returns:
         The presigned URL of the uploaded video, or None on error
@@ -794,26 +659,15 @@ async def agent_5_process(
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
 
-        # Calculate scene timing first
-        scene_timing = calculate_scene_timing(audio_files)
-
-        # Build the complete scenes structure BEFORE video generation
-        # This is what will be displayed and sent to Remotion
+        # Build visual prompts for each section
         sections = ["hook", "concept", "process", "conclusion"]
-        scenes = []
         visual_prompts = {}  # Store prompts for parallel generation
 
-        for timing in scene_timing:
-            part = timing["part"]
-
-            # Find matching audio file
-            audio_file = next((a for a in audio_files if a["part"] == part), None)
-            audio_url = audio_file.get("url", "") if audio_file else ""
-
+        for part in sections:
             # Get section data and visual prompt
             section_data = script.get(part, {})
             visual_prompt = section_data.get("visual_prompt", "")
-            
+
             # If storyboard is available, try to get enhanced data from it
             if storyboard and storyboard.get("segments"):
                 # Map part to storyboard segment type
@@ -824,7 +678,7 @@ async def agent_5_process(
                     "conclusion": "conclusion"
                 }
                 segment_type = segment_type_map.get(part)
-                
+
                 # Find matching segment in storyboard
                 if segment_type:
                     storyboard_segment = next(
@@ -841,60 +695,13 @@ async def agent_5_process(
                         # Use duration from storyboard if available
                         if storyboard_segment.get("duration") and not section_data.get("duration"):
                             section_data["duration"] = str(storyboard_segment.get("duration"))
-            
+
             if not visual_prompt:
                 # Fallback: generate prompt from text
                 text = section_data.get("text", "")
                 visual_prompt = f"Cinematic scene representing: {text[:200]}"
 
             visual_prompts[part] = visual_prompt
-
-            # Get animation data from script if available
-            animation_data = section_data.get("animation", None)
-
-            scene = {
-                "part": part,
-                "audioUrl": audio_url,
-                "startFrame": timing["startFrame"],
-                "durationFrames": timing["durationFrames"],
-                "audioDurationFrames": timing["audioDurationFrames"],
-                "visualType": "video",
-                "videoUrl": "",  # Will be populated after generation
-                "visualPrompt": visual_prompt  # Include prompt in the JSON
-            }
-
-            # Add animation data if present
-            if animation_data:
-                scene["animation"] = animation_data
-
-            scenes.append(scene)
-
-        # Send the unified JSON structure that will be used for generation
-        await send_status(
-            "Agent5", "processing",
-            supersessionID=supersessionid,
-            message="Generating all 4 AI videos in parallel...",
-            generationPayload={
-                "scenes": scenes,
-                "backgroundMusicUrl": background_music.get("url", ""),
-                "backgroundMusicVolume": 0.3
-            }
-        )
-        status_data = {
-            "agentnumber": "Agent5",
-            "userID": user_id,
-            "sessionID": session_id,
-            "supersessionID": supersessionid,
-            "status": "processing",
-            "message": "Generating all 4 AI videos in parallel...",
-            "timestamp": int(time.time() * 1000),
-            "generationPayload": {
-                "scenes": scenes,
-                "backgroundMusicUrl": background_music.get("url", ""),
-                "backgroundMusicVolume": 0.3
-            }
-        }
-        await create_status_json("5", "processing", status_data)
 
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
@@ -907,21 +714,31 @@ async def agent_5_process(
 
         # Constants for video generation
         CLIP_DURATION = 6.0  # Minimax generates 6-second clips
+        
+        # Rate limiting: Max 4 concurrent Replicate API calls to avoid overwhelming the service
+        MAX_CONCURRENT_REPLICATE_CALLS = 4
+        replicate_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPLICATE_CALLS)
 
-        # Calculate clips needed per section based on scene timing
+        # Calculate clips needed per section based on audio file durations
         clips_per_section = {}
-        for scene in scenes:
-            part = scene["part"]
-            scene_duration = scene["durationFrames"] / 30.0  # Convert frames to seconds
-            clips_needed = max(1, math.ceil(scene_duration / CLIP_DURATION))
-            clips_per_section[part] = clips_needed
+        for audio_file in audio_files:
+            part = audio_file.get("part", "")
+            if part in sections:
+                # Get duration from audio file (default to 5.0 if not specified)
+                audio_duration = float(audio_file.get("duration", 5.0))
+                clips_needed = max(1, math.ceil(audio_duration / CLIP_DURATION))
+                clips_per_section[part] = clips_needed
+        
+        # Ensure all sections have at least 1 clip
+        for section in sections:
+            if section not in clips_per_section:
+                clips_per_section[section] = 1
 
         total_clips = sum(clips_per_section.values())
         
         # Define video generation function (used only if not restarting)
-        async def generate_section_video(section: str) -> tuple[str, str]:
-            """Generate multiple video clips for a section and return (section, concatenated_url)"""
-            import subprocess
+        async def generate_section_video(section: str) -> tuple[str, List[str]]:
+            """Generate multiple video clips for a section and return (section, list_of_clip_paths)"""
             import httpx
 
             prompt = visual_prompts[section]
@@ -983,25 +800,33 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
 
-            # Generate all clips for this section with same seed (in parallel for this section)
-            clip_tasks = []
-            for clip_idx, clip_prompt in enumerate(clip_prompts):
-                clip_tasks.append(
-                    generate_video_replicate(
+            # Generate all clips for this section with same seed (with rate limiting)
+            async def generate_clip_with_rate_limit(clip_prompt, seed_val):
+                """Generate a clip with rate limiting."""
+                async with replicate_semaphore:
+                    return await generate_video_replicate(
                         clip_prompt,
                         settings.REPLICATE_API_KEY,
                         model="minimax",
-                        seed=section_seed  # Same seed for all clips in this section
+                        seed=seed_val
+                    )
+            
+            clip_tasks = []
+            for clip_idx, clip_prompt in enumerate(clip_prompts):
+                clip_tasks.append(
+                    generate_clip_with_rate_limit(
+                        clip_prompt,
+                        section_seed  # Same seed for all clips in this section
                     )
                 )
-            
-            # Generate all clips for this section in parallel
+
+            # Generate all clips for this section (rate limited)
             generated_clips = await asyncio.gather(*clip_tasks)
-            
+
             # Calculate cost for this section
             section_cost = len(generated_clips) * COST_PER_CLIP
             cost_per_section[section] = section_cost
-            
+
             # Update progress with cost info
             for clip_idx in range(len(generated_clips)):
                 completed_videos.append(f"{section}_{clip_idx}")
@@ -1021,12 +846,8 @@ async def agent_5_process(
                     cost_breakdown=cost_per_section
                 )
 
-            # If only one clip, return it directly
-            if len(generated_clips) == 1:
-                return (section, generated_clips[0])
-
-            # Concatenate multiple clips
-            # Download all clips to temp files
+            # Download all clips to temp files and upload to S3 for restart capability
+            # Reuse single HTTP client for all downloads
             clip_paths = []
             async with httpx.AsyncClient(timeout=120.0) as client:
                 for i, clip_url in enumerate(generated_clips):
@@ -1036,185 +857,262 @@ async def agent_5_process(
                     with open(clip_path, 'wb') as f:
                         f.write(response.content)
                     clip_paths.append(clip_path)
+                    
+                    # Save clip to S3 for restart capability
+                    clip_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
+                    try:
+                        with open(clip_path, 'rb') as f:
+                            clip_content = f.read()
+                        storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
+                        logger.debug(f"[{session_id}] Saved clip to S3: {clip_s3_key}")
+                    except Exception as e:
+                        logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
 
-            # Create concat list file
-            concat_list_path = os.path.join(temp_dir, f"{section}_concat_list.txt")
-            with open(concat_list_path, 'w') as f:
-                for clip_path in clip_paths:
-                    f.write(f"file '{clip_path}'\n")
+            logger.info(f"[{session_id}] Downloaded and saved {len(generated_clips)} clips for {section}")
 
-            # Concatenate clips using ffmpeg
-            output_path = os.path.join(temp_dir, f"{section}_concatenated.mp4")
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", concat_list_path,
-                "-c", "copy",
-                output_path
-            ]
-
-            # Set PATH explicitly to ensure ffmpeg is accessible
-            env = os.environ.copy()
-            # Use the same PATH construction as the Remotion render
-            bun_paths_to_add = [
-                '/home/ec2-user/.bun/bin',
-                os.path.expanduser('~/.bun/bin'),
-                '/usr/local/bin',
-                '/opt/homebrew/bin',
-            ]
-            current_path = env.get('PATH', '')
-            new_path_parts = [p for p in bun_paths_to_add if os.path.isdir(p)]
-            new_path_parts.append(current_path)
-            env['PATH'] = ':'.join(new_path_parts)
-            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-            if result.returncode != 0:
-                logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
-                # Fallback to first clip
-                return (section, generated_clips[0])
-
-            # Upload concatenated video to S3 for Remotion to access
-            with open(output_path, 'rb') as f:
-                concat_content = f.read()
-
-            # Use scaffold_test/{userId}/{sessionId}/agent5/ path
-            concat_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_concat.mp4"
-            storage_service.upload_file_direct(concat_content, concat_s3_key, "video/mp4")
-            concat_url = storage_service.generate_presigned_url(concat_s3_key, expires_in=3600)
-
-            logger.info(f"[{session_id}] Concatenated {len(generated_clips)} clips for {section}")
-
-            return (section, concat_url)
+            return (section, clip_paths)
         
-        # RESTART LOGIC: If restarting from Remotion, skip clip generation and load from S3
-        if restart_from_remotion:
-            logger.info(f"[{session_id}] Restarting from Remotion - loading existing clips from S3")
-            
-            # Initialize cost tracking for restart (no new generation cost)
-            total_cost = 0.0
-            cost_per_section = {}
-            
-            # Send starting status
-            await send_status(
-                "Agent5", "starting",
-                supersessionID=supersessionid,
-                message="Restarting Agent5 from Remotion rendering stage...",
-                cost=total_cost
-            )
-            
+        # Handle restart mode: download existing clips from S3
+        all_clip_paths = []
+        if restart_from_concat:
+            logger.info(f"[{session_id}] Restart mode: Downloading existing clips from S3")
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message=f"Verifying {total_clips} clips in S3 for restart...",
-                cost=total_cost
+                message="Restart mode: Loading existing clips from S3...",
+                cost=0.0
             )
             
-            # Verify and load clips from S3
-            generated_visuals = {}
             agent5_prefix = f"scaffold_test/{user_id}/{session_id}/agent5/"
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for section in sections:
+                    section_clips = []
+                    clip_index = 0
+                    while True:
+                        clip_s3_key = f"{agent5_prefix}{section}_clip_{clip_index}.mp4"
+                        try:
+                            # Check if clip exists in S3
+                            storage_service.s3_client.head_object(
+                                Bucket=storage_service.bucket_name,
+                                Key=clip_s3_key
+                            )
+                            # Download clip
+                            clip_url = storage_service.generate_presigned_url(clip_s3_key, expires_in=3600)
+                            response = await client.get(clip_url)
+                            response.raise_for_status()
+                            clip_path = os.path.join(temp_dir, f"{section}_clip_{clip_index}.mp4")
+                            with open(clip_path, 'wb') as f:
+                                f.write(response.content)
+                            section_clips.append(clip_path)
+                            clip_index += 1
+                        except Exception:
+                            # No more clips for this section
+                            break
+                    
+                    if not section_clips:
+                        raise ValueError(f"No clips found in S3 for section: {section}")
+                    
+                    all_clip_paths.extend(section_clips)
+                    logger.info(f"[{session_id}] Loaded {len(section_clips)} clips for {section} from S3")
             
-            for section in sections:
-                concat_key = f"{agent5_prefix}{section}_concat.mp4"
-                
-                # Check if concatenated clip exists
-                try:
-                    storage_service.s3_client.head_object(
-                        Bucket=storage_service.bucket_name,
-                        Key=concat_key
-                    )
-                    # Generate presigned URL
-                    concat_url = storage_service.generate_presigned_url(concat_key, expires_in=3600)
-                    generated_visuals[section] = concat_url
-                    logger.info(f"[{session_id}] Found existing clip for {section}: {concat_key}")
-                except Exception as e:
-                    logger.error(f"[{session_id}] Missing clip for {section}: {e}")
-                    raise ValueError(f"Cannot restart - missing video clip for section '{section}'. Please regenerate from scratch.")
-            
-            await send_status(
-                "Agent5", "processing",
-                supersessionID=supersessionid,
-                message=f"All {total_clips} clips verified, skipping to Remotion rendering...",
-                cost=total_cost
-            )
-            
+            logger.info(f"[{session_id}] Restart mode: Loaded {len(all_clip_paths)} total clips from S3")
+            total_cost = 0.0  # No cost for restart (clips already generated)
         else:
             # Generate all videos in parallel (fully parallelized)
-            generated_visuals = {}
-            
             logger.info(f"[{session_id}] Generating all {len(sections)} sections in parallel")
-            
+
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
                 message=f"Generating all {len(sections)} videos in parallel...",
                 cost=0.0
             )
-            
+
             # Process all sections in parallel
             section_results = await asyncio.gather(
                 *[generate_section_video(section) for section in sections]
             )
-            
-            # Add all results to generated_visuals
-            for section, url in section_results:
-                generated_visuals[section] = url
-            
-            # Calculate final total cost
+
+            # Collect all clip paths in order (hook, concept, process, conclusion)
+            for section in sections:
+                # Find the result for this section
+                section_result = next((result for result in section_results if result[0] == section), None)
+                if section_result:
+                    section_name, clip_paths = section_result
+                    all_clip_paths.extend(clip_paths)
+
+        # Calculate final total cost (only if not restart mode)
+        if not restart_from_concat:
             total_cost = sum(cost_per_section.values())
             logger.info(f"[{session_id}] Completed all sections. Total cost: ${total_cost:.4f}")
-            
+
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message=f"All videos generated. Total cost: ${total_cost:.4f}",
+                message=f"All clips generated ({len(all_clip_paths)} total). Starting audio/video concatenation...",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
+            )
+        else:
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"Restart mode: Loaded {len(all_clip_paths)} clips. Starting concatenation...",
+                cost=0.0
+            )
+
+        # ====================
+        # AUDIO CONCATENATION
+        # ====================
+
+        if restart_from_concat:
+            # In restart mode, try to download existing final audio from S3
+            logger.info(f"[{session_id}] Restart mode: Attempting to load existing final audio from S3")
+            final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+            final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
+            
+            try:
+                # Check if final audio exists in S3
+                storage_service.s3_client.head_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=final_audio_s3_key
+                )
+                # Download existing final audio
+                audio_url = storage_service.generate_presigned_url(final_audio_s3_key, expires_in=3600)
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.get(audio_url)
+                    response.raise_for_status()
+                    with open(final_audio_path, 'wb') as f:
+                        f.write(response.content)
+                logger.info(f"[{session_id}] Restart mode: Loaded existing final audio from S3")
+            except Exception as e:
+                logger.warning(f"[{session_id}] Restart mode: Could not load existing audio, regenerating: {e}")
+                # Fall through to normal audio processing
+                restart_from_concat = False  # Temporarily disable restart flag for audio processing
+        
+        if not restart_from_concat:
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message="Step 1/4: Concatenating narration audio files...",
                 cost=total_cost,
                 cost_breakdown=cost_per_section
             )
 
-        # Update scenes with generated video URLs
-        for scene in scenes:
-            part = scene["part"]
-            scene["videoUrl"] = generated_visuals.get(part, "")
-            # Remove the visual prompt from final output (was just for display)
-            if "visualPrompt" in scene:
-                del scene["visualPrompt"]
+            # Download all audio files to temp directory (reuse single HTTP client)
+            import httpx
+            audio_file_paths = []
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for audio_file in audio_files:
+                    part = audio_file["part"]
+                    url = audio_file["url"]
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
+                    with open(audio_path, 'wb') as f:
+                        f.write(response.content)
+                    audio_file_paths.append(audio_path)
 
-        # Update status for rendering (include cost)
+            # Concatenate all narration audio files
+            concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
+            await concatenate_audio_files(audio_file_paths, concatenated_narration_path)
+            logger.info(f"[{session_id}] Concatenated {len(audio_file_paths)} audio files")
+
+            # ====================
+            # AUDIO MIXING
+            # ====================
+
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message="Step 2/4: Mixing narration with background music...",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
+            )
+
+            # Download background music
+            background_music_url = background_music.get("url", "")
+            if background_music_url:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.get(background_music_url)
+                    response.raise_for_status()
+                    background_music_path = os.path.join(temp_dir, "background_music.mp3")
+                    with open(background_music_path, 'wb') as f:
+                        f.write(response.content)
+
+                # Mix narration with background music
+                final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
+                await mix_audio_with_background(
+                    concatenated_narration_path,
+                    background_music_path,
+                    final_audio_path,
+                    music_volume=0.3
+                )
+                logger.info(f"[{session_id}] Mixed narration with background music")
+                
+                # Save final audio to S3 for future restarts
+                try:
+                    with open(final_audio_path, 'rb') as f:
+                        audio_content = f.read()
+                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
+                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
+            else:
+                # No background music, use concatenated narration as-is
+                final_audio_path = concatenated_narration_path
+                logger.info(f"[{session_id}] No background music, using narration only")
+                
+                # Save final audio to S3 for future restarts
+                try:
+                    with open(final_audio_path, 'rb') as f:
+                        audio_content = f.read()
+                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
+                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
+
+        # ====================
+        # VIDEO CONCATENATION
+        # ====================
+
+        step_num = "3/4" if not restart_from_concat else "1/2"
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,
-            message="Rendering video with Remotion (this may take 2-4 minutes)...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
+            message=f"Step {step_num}: Concatenating all {len(all_clip_paths)} video clips...",
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
         )
-        status_data = {
-            "agentnumber": "Agent5",
-            "userID": user_id,
-            "sessionID": session_id,
-            "supersessionID": supersessionid,
-            "status": "processing",
-            "message": "Rendering video with Remotion (this may take 2-4 minutes)...",
-            "timestamp": int(time.time() * 1000),
-            "cost": total_cost,
-            "cost_breakdown": cost_per_section
-        }
 
-        # Get background music URL
-        background_music_url = background_music.get("url", "")
+        # Concatenate all video clips
+        concatenated_video_path = os.path.join(temp_dir, "concatenated_video.mp4")
+        await concatenate_all_video_clips(all_clip_paths, concatenated_video_path)
+        logger.info(f"[{session_id}] Concatenated {len(all_clip_paths)} video clips")
 
-        # Render video
+        # ====================
+        # FINAL VIDEO + AUDIO COMBINATION
+        # ====================
+
+        step_num = "4/4" if not restart_from_concat else "2/2"
+        await send_status(
+            "Agent5", "processing",
+            supersessionID=supersessionid,
+            message=f"Step {step_num}: Combining video and audio...",
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
+        )
+
+        # Combine video and audio
         output_path = os.path.join(temp_dir, "output.mp4")
-        await render_video_with_remotion(
-            scenes,
-            background_music_url,
-            output_path,
-            temp_dir,
-            websocket_manager=websocket_manager,  # render_video_with_remotion may still use it
-            session_id=session_id,
-            user_id=user_id,
-            supersessionid=supersessionid,
-            status_callback=status_callback  # Pass callback for status updates during rendering
+        await combine_video_and_audio(
+            concatenated_video_path,
+            final_audio_path,
+            output_path
         )
+        logger.info(f"[{session_id}] Combined video and audio into final output")
 
         # Upload video to S3 - use scaffold_test/{userId}/{sessionId}/agent5/ path
         import uuid
