@@ -1034,6 +1034,10 @@ async def agent_5_process(
                     url = audio_file["url"]
                     s3_key = audio_file.get("s3_key", "unknown")
                     
+                    downloaded = False
+                    last_error = None
+                    
+                    # Try original URL first
                     try:
                         logger.debug(f"[{session_id}] Downloading audio for part '{part}' from {s3_key}")
                         response = await client.get(url)
@@ -1043,25 +1047,42 @@ async def agent_5_process(
                             f.write(response.content)
                         audio_file_paths.append(audio_path)
                         logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' ({len(response.content)} bytes)")
+                        downloaded = True
                     except httpx.HTTPStatusError as e:
-                        # If presigned URL fails, try regenerating it
-                        logger.warning(f"[{session_id}] Failed to download audio for part '{part}' from presigned URL (status {e.response.status_code}), attempting to regenerate URL...")
-                        try:
-                            # Regenerate presigned URL and retry
-                            new_url = storage_service.generate_presigned_url(s3_key, expires_in=86400)
-                            response = await client.get(new_url)
-                            response.raise_for_status()
-                            audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
-                            with open(audio_path, 'wb') as f:
-                                f.write(response.content)
-                            audio_file_paths.append(audio_path)
-                            logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' after URL regeneration")
-                        except Exception as retry_error:
-                            logger.error(f"[{session_id}] Failed to download audio for part '{part}' even after URL regeneration: {retry_error}")
-                            raise ValueError(f"Failed to download audio file for part '{part}' from S3: {retry_error}")
+                        last_error = e
+                        logger.warning(f"[{session_id}] Failed to download audio for part '{part}' (status {e.response.status_code}), trying fallback URLs...")
                     except Exception as e:
-                        logger.error(f"[{session_id}] Unexpected error downloading audio for part '{part}': {e}")
-                        raise ValueError(f"Failed to download audio file for part '{part}': {e}")
+                        last_error = e
+                        logger.warning(f"[{session_id}] Error downloading audio for part '{part}': {e}, trying fallback URLs...")
+                    
+                    # If original URL failed, try fallback URLs
+                    if not downloaded:
+                        try:
+                            # Get fallback URLs (tries both us-east-1 and regional endpoints)
+                            fallback_urls = storage_service.generate_s3_url_with_fallback(s3_key)
+                            
+                            for fallback_url in fallback_urls:
+                                try:
+                                    logger.debug(f"[{session_id}] Trying fallback URL: {fallback_url}")
+                                    response = await client.get(fallback_url)
+                                    response.raise_for_status()
+                                    audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
+                                    with open(audio_path, 'wb') as f:
+                                        f.write(response.content)
+                                    audio_file_paths.append(audio_path)
+                                    logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' using fallback URL ({len(response.content)} bytes)")
+                                    downloaded = True
+                                    break
+                                except Exception as fallback_error:
+                                    logger.debug(f"[{session_id}] Fallback URL failed: {fallback_error}")
+                                    last_error = fallback_error
+                                    continue
+                            
+                            if not downloaded:
+                                raise ValueError(f"All download attempts failed. Last error: {last_error}")
+                        except Exception as retry_error:
+                            logger.error(f"[{session_id}] Failed to download audio for part '{part}' even after trying all fallback URLs: {retry_error}")
+                            raise ValueError(f"Failed to download audio file for part '{part}' from S3: {retry_error}")
 
             # Concatenate all narration audio files
             concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
@@ -1085,6 +1106,9 @@ async def agent_5_process(
             if background_music_url:
                 background_music_s3_key = background_music.get("s3_key", "unknown")
                 async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                    music_downloaded = False
+                    
+                    # Try original URL first
                     try:
                         logger.debug(f"[{session_id}] Downloading background music from {background_music_s3_key}")
                         response = await client.get(background_music_url)
@@ -1093,23 +1117,36 @@ async def agent_5_process(
                         with open(background_music_path, 'wb') as f:
                             f.write(response.content)
                         logger.info(f"[{session_id}] Successfully downloaded background music ({len(response.content)} bytes)")
-                    except httpx.HTTPStatusError as e:
-                        # If presigned URL fails, try regenerating it
-                        logger.warning(f"[{session_id}] Failed to download background music from presigned URL (status {e.response.status_code}), attempting to regenerate URL...")
-                        try:
-                            new_url = storage_service.generate_presigned_url(background_music_s3_key, expires_in=86400)
-                            response = await client.get(new_url)
-                            response.raise_for_status()
-                            background_music_path = os.path.join(temp_dir, "background_music.mp3")
-                            with open(background_music_path, 'wb') as f:
-                                f.write(response.content)
-                            logger.info(f"[{session_id}] Successfully downloaded background music after URL regeneration")
-                        except Exception as retry_error:
-                            logger.warning(f"[{session_id}] Failed to download background music even after URL regeneration: {retry_error}, continuing without background music")
-                            background_music_url = ""  # Continue without background music
+                        music_downloaded = True
                     except Exception as e:
-                        logger.warning(f"[{session_id}] Unexpected error downloading background music: {e}, continuing without background music")
-                        background_music_url = ""  # Continue without background music
+                        logger.warning(f"[{session_id}] Failed to download background music: {e}, trying fallback URLs...")
+                    
+                    # If original URL failed, try fallback URLs
+                    if not music_downloaded:
+                        try:
+                            fallback_urls = storage_service.generate_s3_url_with_fallback(background_music_s3_key)
+                            
+                            for fallback_url in fallback_urls:
+                                try:
+                                    logger.debug(f"[{session_id}] Trying fallback URL for background music: {fallback_url}")
+                                    response = await client.get(fallback_url)
+                                    response.raise_for_status()
+                                    background_music_path = os.path.join(temp_dir, "background_music.mp3")
+                                    with open(background_music_path, 'wb') as f:
+                                        f.write(response.content)
+                                    logger.info(f"[{session_id}] Successfully downloaded background music using fallback URL ({len(response.content)} bytes)")
+                                    music_downloaded = True
+                                    break
+                                except Exception as fallback_error:
+                                    logger.debug(f"[{session_id}] Fallback URL failed: {fallback_error}")
+                                    continue
+                            
+                            if not music_downloaded:
+                                logger.warning(f"[{session_id}] All download attempts failed for background music, continuing without it")
+                                background_music_url = ""  # Continue without background music
+                        except Exception as retry_error:
+                            logger.warning(f"[{session_id}] Failed to download background music after all attempts: {retry_error}, continuing without background music")
+                            background_music_url = ""  # Continue without background music
 
                 # Mix narration with background music
                 final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
