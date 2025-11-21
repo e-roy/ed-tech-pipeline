@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Fact, Narration } from "@/types";
 import { parseToolResult } from "@/lib/ai-utils";
+import type { FileUIPart } from "ai";
 
 type WorkflowStep = "input" | "selection" | "review";
 
@@ -9,6 +10,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   id?: string;
+  files?: FileUIPart[];
 };
 
 type ThinkingStatus = {
@@ -52,7 +54,7 @@ interface AgentCreateState {
   }) => void;
   extractFacts: (messagesToSend: Message[]) => Promise<void>;
   handleSubmitFacts: () => Promise<void>;
-  handleSubmit: (message: { text: string; files: unknown[] }) => Promise<void>;
+  handleSubmit: (message: { text: string; files: FileUIPart[] }) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
 }
 
@@ -336,13 +338,56 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       },
 
       handleSubmit: async (message) => {
-        if (!message.text.trim()) return;
+        if (!message.text.trim() && message.files.length === 0) return;
 
         const state = get();
+        
+        // Process PDF files and extract text
+        let finalMessageText = message.text.trim();
+        const extractedContent: string[] = [];
+
+        // Extract text from PDFs
+        for (const filePart of message.files) {
+          if (filePart.mediaType === "application/pdf") {
+            try {
+              // Fetch the PDF file
+              const response = await fetch(filePart.url);
+              const blob = await response.blob();
+              const file = new File([blob], filePart.filename ?? "document.pdf", {
+                type: "application/pdf",
+              });
+
+              // Extract text from PDF
+              const { extractTextFromPDF } = await import("@/lib/extractPDF");
+              const pdfText = await extractTextFromPDF(file);
+              extractedContent.push(
+                `--- Content from ${filePart.filename ?? "PDF"} ---\n${pdfText}`,
+              );
+            } catch (error) {
+              console.error("Error extracting PDF text:", error);
+              // Continue even if PDF extraction fails
+            }
+          }
+        }
+
+        // Combine user text with extracted PDF content
+        if (extractedContent.length > 0) {
+          finalMessageText += `\n\n--- Extracted Learning Materials ---\n${extractedContent.join("\n\n")}`;
+        }
+
+        if (!finalMessageText.trim()) return;
+
+        // Store file attachments for display (but not the extracted text in content)
+        const displayContent = message.text.trim() || "PDF attached";
+        const fileAttachments = message.files.filter(
+          (file) => file.mediaType === "application/pdf",
+        );
+
         const newMessage: Message = {
           role: "user",
-          content: message.text,
+          content: finalMessageText, // Full content with extracted PDF text for API
           id: Date.now().toString(),
+          files: fileAttachments.length > 0 ? fileAttachments : undefined,
         };
 
         const newMessages = [...state.messages, newMessage];
@@ -382,6 +427,12 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           const data = await response.json();
 
           // Restore state from DB
+          const extractedFacts = (data.session.extractedFacts as Fact[]) || [];
+          const confirmedFacts = (data.session.confirmedFacts as Fact[]) || [];
+          const hasExtractedFacts = extractedFacts.length > 0;
+          const hasConfirmedFacts = confirmedFacts.length > 0;
+          const hasGeneratedScript = !!data.session.generatedScript;
+
           set({
             sessionId: data.session.id,
             messages: data.messages.map(
@@ -391,14 +442,16 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 id: m.id,
               }),
             ),
-            facts: (data.session.extractedFacts as Fact[]) || [],
-            selectedFacts: (data.session.confirmedFacts as Fact[]) || [],
+            facts: extractedFacts,
+            selectedFacts: confirmedFacts,
             narration: data.session.generatedScript || null,
-            workflowStep: data.session.confirmedFacts
-              ? data.session.generatedScript
+            workflowStep: hasConfirmedFacts
+              ? hasGeneratedScript
                 ? "review"
                 : "selection"
-              : "input",
+              : hasExtractedFacts
+                ? "selection" // If facts exist but aren't confirmed, allow selection
+                : "input",
           });
         } catch (error) {
           console.error("Failed to load session:", error);
