@@ -119,3 +119,4 @@ remotion/node_modules/
 Doc2/cursor_conversations/
 install_ffmpeg_ec2.ps1
 backend/AGENT5_BUN_INSTALLATION.md
+backend/install_bun_ec2.ps1
