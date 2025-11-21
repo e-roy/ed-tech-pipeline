@@ -441,57 +441,80 @@ async def agent_5_process(
             # Scan Agent2 folder for script/data files
             agent2_files = storage_service.list_files_by_prefix(agent2_prefix, limit=1000)
             logger.info(f"Found {len(agent2_files)} files in Agent2 folder")
-            
-            # Look for storyboard.json first (preferred source)
-            storyboard_key = f"{agent2_prefix}storyboard.json"
+
+            # Look for agent_2_data.json first (most complete source)
+            agent_2_data_key = f"{agent2_prefix}agent_2_data.json"
             try:
                 obj = storage_service.s3_client.get_object(
                     Bucket=storage_service.bucket_name,
-                    Key=storyboard_key
+                    Key=agent_2_data_key
                 )
                 content = obj["Body"].read().decode('utf-8')
-                storyboard = json.loads(content)
-                logger.info(f"Agent5 loaded storyboard.json from {storyboard_key}")
-                
-                # Extract script from storyboard segments if available
-                if storyboard.get("segments"):
-                    # Convert storyboard segments to script format for compatibility
-                    script_parts = {}
-                    for segment in storyboard["segments"]:
-                        segment_type = segment.get("type", "")
-                        if segment_type == "hook":
-                            script_parts["hook"] = {
-                                "text": segment.get("narration", ""),
-                                "duration": str(segment.get("duration", 0)),
-                                "key_concepts": segment.get("key_concepts", []),
-                                "visual_guidance": segment.get("visual_guidance", "")
-                            }
-                        elif segment_type == "concept_introduction":
-                            script_parts["concept"] = {
-                                "text": segment.get("narration", ""),
-                                "duration": str(segment.get("duration", 0)),
-                                "key_concepts": segment.get("key_concepts", []),
-                                "visual_guidance": segment.get("visual_guidance", "")
-                            }
-                        elif segment_type == "process_explanation":
-                            script_parts["process"] = {
-                                "text": segment.get("narration", ""),
-                                "duration": str(segment.get("duration", 0)),
-                                "key_concepts": segment.get("key_concepts", []),
-                                "visual_guidance": segment.get("visual_guidance", "")
-                            }
-                        elif segment_type == "conclusion":
-                            script_parts["conclusion"] = {
-                                "text": segment.get("narration", ""),
-                                "duration": str(segment.get("duration", 0)),
-                                "key_concepts": segment.get("key_concepts", []),
-                                "visual_guidance": segment.get("visual_guidance", "")
-                            }
-                    if script_parts:
-                        script = script_parts
-                        logger.info("Agent5 extracted script from storyboard.json")
+                loaded_agent_2_data = json.loads(content)
+                logger.info(f"Agent5 loaded agent_2_data.json from {agent_2_data_key}")
+
+                # Extract script and base_scene from agent_2_data
+                if loaded_agent_2_data.get("script"):
+                    script = loaded_agent_2_data["script"]
+                    logger.info("Agent5 extracted script from agent_2_data.json")
+
+                # Store agent_2_data for later use
+                agent_2_data = loaded_agent_2_data
+
             except Exception as e:
-                logger.debug(f"Agent5 could not load storyboard.json: {e}, will try other sources")
+                logger.debug(f"Agent5 could not load agent_2_data.json: {e}, will try other sources")
+
+            # Look for storyboard.json (fallback source)
+            if not script:
+                storyboard_key = f"{agent2_prefix}storyboard.json"
+                try:
+                    obj = storage_service.s3_client.get_object(
+                        Bucket=storage_service.bucket_name,
+                        Key=storyboard_key
+                    )
+                    content = obj["Body"].read().decode('utf-8')
+                    storyboard = json.loads(content)
+                    logger.info(f"Agent5 loaded storyboard.json from {storyboard_key}")
+
+                    # Extract script from storyboard segments if available
+                    if storyboard.get("segments"):
+                        # Convert storyboard segments to script format for compatibility
+                        script_parts = {}
+                        for segment in storyboard["segments"]:
+                            segment_type = segment.get("type", "")
+                            if segment_type == "hook":
+                                script_parts["hook"] = {
+                                    "text": segment.get("narration", ""),
+                                    "duration": str(segment.get("duration", 0)),
+                                    "key_concepts": segment.get("key_concepts", []),
+                                    "visual_guidance": segment.get("visual_guidance", "")
+                                }
+                            elif segment_type == "concept_introduction":
+                                script_parts["concept"] = {
+                                    "text": segment.get("narration", ""),
+                                    "duration": str(segment.get("duration", 0)),
+                                    "key_concepts": segment.get("key_concepts", []),
+                                    "visual_guidance": segment.get("visual_guidance", "")
+                                }
+                            elif segment_type == "process_explanation":
+                                script_parts["process"] = {
+                                    "text": segment.get("narration", ""),
+                                    "duration": str(segment.get("duration", 0)),
+                                    "key_concepts": segment.get("key_concepts", []),
+                                    "visual_guidance": segment.get("visual_guidance", "")
+                                }
+                            elif segment_type == "conclusion":
+                                script_parts["conclusion"] = {
+                                    "text": segment.get("narration", ""),
+                                    "duration": str(segment.get("duration", 0)),
+                                    "key_concepts": segment.get("key_concepts", []),
+                                    "visual_guidance": segment.get("visual_guidance", "")
+                                }
+                        if script_parts:
+                            script = script_parts
+                            logger.info("Agent5 extracted script from storyboard.json")
+                except Exception as e:
+                    logger.debug(f"Agent5 could not load storyboard.json: {e}, will try other sources")
             
             # Look for script JSON files or status files that might contain script data (fallback)
             if not script:
