@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$AwsProfile = "default1",
-    [string]$Region = "us-east-1",
+    [string]$AwsProfile = "default2",
+    [string]$Region = "us-east-2",
     [string]$BucketName = "pipeline-backend-assets"
 )
 
