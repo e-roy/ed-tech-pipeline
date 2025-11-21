@@ -840,7 +840,7 @@
         }
 
         // Update agent status based on WebSocket message
-        function updateAgentStatus(agentNumber, status, error, reason) {
+        function updateAgentStatus(agentNumber, status, error, reason, cost, costBreakdown, message) {
             const agent = agentStatuses[agentNumber];
             if (!agent) return;
 
@@ -850,12 +850,32 @@
             // Hide restart button by default
             const restartBtn = document.getElementById('restart-agent5-btn');
             
+            // Format cost display
+            let costText = '';
+            if (cost !== undefined && cost !== null) {
+                costText = ` | Cost: $${cost.toFixed(4)}`;
+                if (costBreakdown && Object.keys(costBreakdown).length > 0) {
+                    const breakdown = Object.entries(costBreakdown)
+                        .map(([section, sectionCost]) => `${section}: $${sectionCost.toFixed(4)}`)
+                        .join(', ');
+                    costText += ` (${breakdown})`;
+                }
+            }
+            
             if (status === 'starting') {
                 agent.light.classList.add('starting');
-                agent.text.textContent = 'Starting...';
+                agent.text.textContent = 'Starting...' + costText;
             } else if (status === 'processing') {
                 agent.light.classList.add('processing');
-                agent.text.textContent = 'Processing...';
+                let statusText = message || 'Processing...';
+                if (message && message.includes('clip')) {
+                    // Show clip progress
+                    const clipMatch = message.match(/(\d+)\/(\d+)/);
+                    if (clipMatch) {
+                        statusText = message;
+                    }
+                }
+                agent.text.textContent = statusText + costText;
                 
                 // Hide restart button when processing
                 if (agentNumber === 'Agent5' && restartBtn) {
@@ -863,7 +883,7 @@
                 }
             } else if (status === 'finished') {
                 agent.light.classList.add('finished');
-                agent.text.textContent = 'Finished';
+                agent.text.textContent = 'Finished' + costText;
                 
                 // Hide restart button on success
                 if (agentNumber === 'Agent5' && restartBtn) {
@@ -871,9 +891,21 @@
                 }
             } else if (status === 'error') {
                 agent.light.classList.add('error');
-                agent.text.textContent = 'Error';
+                // Always show cost on error if available
+                agent.text.textContent = 'Error' + costText;
                 if (error && reason) {
-                    agent.error.textContent = `${reason}: ${error}`;
+                    let errorMsg = `${reason}: ${error}`;
+                    // Add cost info to error message if available
+                    if (cost !== undefined && cost !== null && cost > 0) {
+                        errorMsg += ` | Cost incurred: $${cost.toFixed(4)}`;
+                        if (costBreakdown && Object.keys(costBreakdown).length > 0) {
+                            const breakdown = Object.entries(costBreakdown)
+                                .map(([section, sectionCost]) => `${section}: $${sectionCost.toFixed(4)}`)
+                                .join(', ');
+                            errorMsg += ` (${breakdown})`;
+                        }
+                    }
+                    agent.error.textContent = errorMsg;
                     agent.error.classList.add('show');
                     
                     // Show restart button for Agent5 Remotion errors
@@ -1002,7 +1034,10 @@
                                     message.agentnumber,
                                     message.status,
                                     message.error,
-                                    message.reason
+                                    message.reason,
+                                    message.cost,
+                                    message.cost_breakdown,
+                                    message.message
                                 );
                                 
                                 // Display video_session data if present (topic, confirmed_facts, generation_script)
