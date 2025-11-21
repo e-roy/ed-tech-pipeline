@@ -80,11 +80,37 @@ class StorageService:
             raise ValueError("Storage service not configured")
 
         # Generate regular S3 URL (bucket is publicly readable)
-        url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+        # Use standard endpoint (s3.amazonaws.com) for us-east-1 buckets
+        url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
 
         logger.debug(f"Generated public S3 URL for {s3_key}")
 
         return url
+
+    def generate_s3_url_with_fallback(self, s3_key: str) -> List[str]:
+        """
+        Generate multiple S3 URL variants to try (with fallback endpoints).
+        
+        Returns a list of URLs to try in order:
+        1. Standard endpoint (s3.amazonaws.com) - works for us-east-1
+        2. Regional endpoint (s3.{region}.amazonaws.com) - works for other regions
+
+        Args:
+            s3_key: S3 object key
+
+        Returns:
+            List of URL strings to try in order
+        """
+        if not self.s3_client:
+            raise ValueError("Storage service not configured")
+
+        urls = [
+            f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}",  # us-east-1
+            f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"  # regional
+        ]
+
+        logger.debug(f"Generated {len(urls)} S3 URL variants for {s3_key}")
+        return urls
 
     def upload_file_direct(
         self,
@@ -119,7 +145,7 @@ class StorageService:
                 # Note: Bucket policy makes objects publicly readable, ACLs are disabled
             )
 
-            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
 
             logger.info(f"Direct upload successful: {s3_url}")
 
@@ -337,7 +363,7 @@ class StorageService:
             )
 
             # Generate S3 URL
-            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
 
             logger.info(f"Upload successful: {s3_url}")
 
@@ -501,7 +527,7 @@ class StorageService:
             )
 
             # Generate S3 URL
-            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
 
             logger.info(f"User input upload successful: {s3_url}")
 
@@ -655,7 +681,7 @@ class StorageService:
             )
 
             # Generate S3 URL
-            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
 
             logger.info(f"Upload successful: {s3_url}")
 
@@ -944,7 +970,7 @@ class StorageService:
                 Key=dest_key
             )
 
-            s3_url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{dest_key}"
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{dest_key}"
             logger.info(f"Copied file from {source_key} to {dest_key}")
             return s3_url
 
