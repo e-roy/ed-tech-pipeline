@@ -189,11 +189,12 @@ async def root():
 
 
 @app.get("/scaffoldtest", response_class=HTMLResponse)
+@app.get("/scaffoldtest_ui.html", response_class=HTMLResponse)
 async def scaffoldtest_ui():
     """
     Serve the scaffold test UI HTML page.
     
-    Access at: http://localhost:8000/scaffoldtest
+    Access at: http://localhost:8000/scaffoldtest or /scaffoldtest_ui.html
     """
     # Get the backend directory (parent of app directory)
     backend_dir = Path(__file__).parent.parent
@@ -206,11 +207,12 @@ async def scaffoldtest_ui():
 
 
 @app.get("/videotest", response_class=HTMLResponse)
+@app.get("/video_test.html", response_class=HTMLResponse)
 async def video_test_ui():
     """
     Serve the video test HTML page.
 
-    Access at: http://localhost:8000/videotest
+    Access at: http://localhost:8000/videotest or /video_test.html
     """
     backend_dir = Path(__file__).parent.parent
     html_file = backend_dir / "video_test.html"
