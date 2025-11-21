@@ -18,6 +18,8 @@ import tempfile
 import time
 import httpx
 import logging
+import resource
+import signal
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -305,6 +307,20 @@ async def render_video_with_remotion(
         new_path_parts.append(current_path)
         env['PATH'] = ':'.join(new_path_parts)
         
+        # Create subprocess with resource limits to prevent SSH/system resource exhaustion
+        # Use process group to manage child processes spawned by Remotion/bun
+        def set_process_limits():
+            """Set resource limits for Remotion subprocess to prevent system resource exhaustion."""
+            try:
+                # Limit number of child processes (soft limit)
+                # This prevents Remotion from spawning too many processes that could exhaust system resources
+                resource.setrlimit(resource.RLIMIT_NPROC, (100, 200))  # Soft: 100, Hard: 200
+            except (ValueError, OSError) as e:
+                # If limits can't be set, log but continue (non-critical)
+                logger.warning(f"Could not set process limits: {e}")
+        
+        # Create process with new process group for better cleanup
+        # This helps prevent child processes from consuming resources after parent dies
         process = subprocess.Popen(
             cmd,
             cwd=str(REMOTION_DIR),
@@ -313,7 +329,9 @@ async def render_video_with_remotion(
             text=True,
             shell=True,
             env=env,
-            bufsize=1
+            bufsize=1,
+            preexec_fn=set_process_limits,  # Set limits before process starts
+            start_new_session=True  # Create new process group for better isolation
         )
 
         output_lines = []
@@ -407,14 +425,53 @@ async def render_video_with_remotion(
         return output_path
 
     finally:
+        # Ensure process and all child processes are terminated to prevent resource exhaustion
+        # This is critical to prevent Remotion/bun child processes from consuming resources
+        # that could cause SSH to become unresponsive
+        try:
+            if 'process' in locals() and process.poll() is None:
+                # Process still running - terminate it and all children in process group
+                try:
+                    # Send SIGTERM to process group (kills all children spawned by Remotion/bun)
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                except (ProcessLookupError, OSError, AttributeError):
+                    # Process group doesn't exist, process already terminated, or no pgid
+                    # Try to terminate just the main process
+                    try:
+                        process.terminate()
+                    except (ProcessLookupError, OSError):
+                        pass
+                finally:
+                    # Wait a bit, then force kill if still running
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        except (ProcessLookupError, OSError, AttributeError):
+                            try:
+                                process.kill()
+                            except (ProcessLookupError, OSError):
+                                pass
+        except Exception as e:
+            logger.warning(f"Error cleaning up Remotion process: {e}")
+        
         # Clean up props file
-        os.unlink(props_file.name)
+        try:
+            if 'props_file' in locals():
+                os.unlink(props_file.name)
+        except Exception:
+            pass
+        
         # Clean up copied images from public dir
         for scene in scenes:
             part = scene["part"]
             public_image = remotion_public / f"{part}.png"
             if public_image.exists():
-                public_image.unlink()
+                try:
+                    public_image.unlink()
+                except Exception:
+                    pass
 
 
 async def agent_5_process(
