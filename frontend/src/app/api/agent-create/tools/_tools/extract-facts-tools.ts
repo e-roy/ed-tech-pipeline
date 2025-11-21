@@ -1,6 +1,6 @@
-import { openai } from "@ai-sdk/openai";
-import { generateObject, type Tool } from "ai";
+import { type Tool } from "ai";
 import z from "zod";
+import { FactExtractionAgent } from "@/server/agents/fact-extraction";
 
 export const extractFactsTool: Tool = {
   description:
@@ -14,35 +14,30 @@ export const extractFactsTool: Tool = {
   }),
   execute: async ({ content }: { content: string }) => {
     try {
-      const { object } = await generateObject({
-        model: openai("gpt-4o-mini"),
-        system: `You are an expert fact extractor. Extract 5-15 key educational facts that are:
-  - Clear and well-defined concepts
-  - Relevant to teaching and learning
-  - Suitable for use in an educational video script
-  - Accurate and educational`,
-        prompt: `Extract educational facts from this content:\n\n${content}`,
-        schema: z.object({
-          facts: z
-            .array(
-              z.object({
-                concept: z.string().describe("Main concept or term"),
-                details: z.string().describe("Clear explanation or definition"),
-                confidence: z
-                  .number()
-                  .min(0)
-                  .max(1)
-                  .describe("Confidence score between 0 and 1"),
-              }),
-            )
-            .describe("Array of extracted educational facts"),
-          message: z
-            .string()
-            .describe("Friendly message explaining what was extracted"),
-        }),
+      // Use FactExtractionAgent for better fact extraction quality
+      const agent = new FactExtractionAgent();
+
+      const result = await agent.process({
+        sessionId: "", // Not needed for tool execution
+        data: {
+          content,
+        },
       });
 
-      return JSON.stringify(object);
+      if (!result.success) {
+        return JSON.stringify({
+          facts: [],
+          message: `Failed to extract facts: ${result.error ?? "Unknown error"}`,
+        });
+      }
+
+      // Return in the expected tool format
+      return JSON.stringify({
+        facts: result.data.facts ?? [],
+        message: result.data.message ?? "Facts extracted successfully",
+        topic: result.data.topic,
+        learningObjective: result.data.learningObjective,
+      });
     } catch (error) {
       console.error("Error extracting facts:", error);
       return JSON.stringify({

@@ -177,6 +177,16 @@ export async function POST(req: Request) {
         }
 
         if (extractedFacts && extractedFacts.length > 0 && session.user?.id) {
+          // Fetch session to get child_age and child_interest
+          const [sessionData] = await db
+            .select({
+              childAge: videoSessions.childAge,
+              childInterest: videoSessions.childInterest,
+            })
+            .from(videoSessions)
+            .where(eq(videoSessions.id, sessionId))
+            .limit(1);
+
           // Save confirmed facts immediately
           await db
             .update(videoSessions)
@@ -195,6 +205,9 @@ export async function POST(req: Request) {
                 topic,
                 facts: extractedFacts,
                 target_duration: 60,
+                // Pass child_age and child_interest if available
+                child_age: sessionData?.childAge ?? null,
+                child_interest: sessionData?.childInterest ?? null,
               },
             })
             .then(async (result) => {

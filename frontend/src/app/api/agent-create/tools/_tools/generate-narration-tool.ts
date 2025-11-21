@@ -1,6 +1,6 @@
-import { openai } from "@ai-sdk/openai";
-import { generateObject, type Tool } from "ai";
+import { type Tool } from "ai";
 import z from "zod";
+import { NarrativeBuilderAgent } from "@/server/agents/narrative-builder";
 
 export const generateNarrationTool: Tool = {
   description:
@@ -11,60 +11,88 @@ export const generateNarrationTool: Tool = {
         z.object({
           concept: z.string(),
           details: z.string(),
-          confidence: z.number(),
+          confidence: z.number().optional(),
         }),
       )
       .describe("The confirmed facts to base the narration on"),
+    topic: z
+      .string()
+      .optional()
+      .describe(
+        "The main topic/subject of the video (optional, will be inferred if not provided)",
+      ),
+    target_duration: z
+      .number()
+      .optional()
+      .default(60)
+      .describe("Target duration in seconds (default: 60)"),
+    child_age: z
+      .string()
+      .optional()
+      .describe("Child's age for age-appropriate content"),
+    child_interest: z
+      .string()
+      .optional()
+      .describe("Child's interest to incorporate into examples"),
   }),
   execute: async ({
     facts,
+    topic,
+    target_duration = 60,
+    child_age,
+    child_interest,
   }: {
-    facts: Array<{ concept: string; details: string; confidence: number }>;
+    facts: Array<{ concept: string; details: string; confidence?: number }>;
+    topic?: string;
+    target_duration?: number;
+    child_age?: string;
+    child_interest?: string;
   }) => {
     try {
-      const { object } = await generateObject({
-        model: openai("gpt-4o-mini"),
-        system: `You are a creative narrator for educational videos. Create a cohesive and engaging narration that incorporates the provided facts.
-  
-  Create 4 segments with types: hook, concept_introduction, process_explanation, and conclusion.`,
-        prompt: `Create a structured narration based on these facts:\n\n${JSON.stringify(facts, null, 2)}`,
-        schema: z.object({
-          total_duration: z
-            .number()
-            .describe("Estimated total duration in seconds"),
-          reading_level: z.string().describe("Reading level (e.g., '6.5')"),
-          key_terms_count: z.number().describe("Number of key terms used"),
-          segments: z.array(
-            z.object({
-              id: z.string().describe("Unique segment ID (e.g., 'seg_001')"),
-              type: z
-                .string()
-                .describe(
-                  "Segment type (hook, concept_introduction, process_explanation, conclusion)",
-                ),
-              start_time: z.number().describe("Start time in seconds"),
-              duration: z.number().describe("Duration in seconds"),
-              narration: z.string().describe("The script text"),
-              visual_guidance: z
-                .string()
-                .describe("Description of what should be shown"),
-              key_concepts: z
-                .array(z.string())
-                .describe("Key concepts covered"),
-              educational_purpose: z
-                .string()
-                .describe("Why this segment matters"),
-            }),
-          ),
-          message: z
-            .string()
-            .describe("Friendly message explaining what was created"),
-        }),
+      // Use NarrativeBuilderAgent for better narration quality
+      const agent = new NarrativeBuilderAgent();
+
+      // Extract topic from facts if not provided
+      const inferredTopic = topic ?? facts[0]?.concept ?? "Educational Content";
+
+      // Convert facts to the format expected by NarrativeBuilderAgent
+      const agentFacts = facts.map((f) => ({
+        concept: f.concept,
+        details: f.details,
+      }));
+
+      const result = await agent.process({
+        sessionId: "", // Not needed for tool execution
+        data: {
+          topic: inferredTopic,
+          facts: agentFacts,
+          target_duration: target_duration,
+          child_age: child_age ?? null,
+          child_interest: child_interest ?? null,
+        },
       });
 
-      // Extract message and return narration separately
-      const { message, ...narrationData } = object;
-      return JSON.stringify({ narration: narrationData, message });
+      if (!result.success) {
+        return JSON.stringify({
+          narration: null,
+          message: `Failed to generate narration: ${result.error ?? "Unknown error"}`,
+        });
+      }
+
+      // Return in the expected tool format
+      const narrationData = result.data.script;
+      const segmentCount =
+        narrationData &&
+        typeof narrationData === "object" &&
+        "segments" in narrationData &&
+        Array.isArray(narrationData.segments)
+          ? narrationData.segments.length
+          : 0;
+
+      return JSON.stringify({
+        narration: narrationData,
+        message: `Successfully generated narration with ${segmentCount} segments`,
+      });
     } catch (error) {
       console.error("Error generating narration:", error);
       return JSON.stringify({
