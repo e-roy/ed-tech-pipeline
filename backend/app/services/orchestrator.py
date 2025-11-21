@@ -26,11 +26,33 @@ import json
 import asyncio
 import time
 import traceback
+import secrets
 from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _get_openai_api_key() -> Optional[str]:
+    """
+    Get OPENAI_API_KEY from AWS Secrets Manager with fallback to settings.
+    
+    Returns:
+        OpenAI API key string, or None if not found
+    """
+    try:
+        from app.services.secrets import get_secret
+        return get_secret("pipeline/openai-api-key")
+    except Exception as e:
+        logger.debug(f"Could not retrieve OPENAI_API_KEY from Secrets Manager: {e}, falling back to settings")
+        key = settings.OPENAI_API_KEY
+        if not key:
+            logger.warning(
+                "OPENAI_API_KEY not set in Secrets Manager or settings - "
+                "image and audio generation will fail."
+            )
+        return key
 
 
 def _write_errors_json(storage_service: StorageService, session_folder: str, error_data: Dict[str, Any]) -> None:
@@ -109,13 +131,13 @@ class VideoGenerationOrchestrator:
         self.websocket_manager = websocket_manager
 
         # Initialize AI agents
-        openai_api_key = settings.OPENAI_API_KEY
+        openai_api_key = _get_openai_api_key()
         replicate_api_key = settings.REPLICATE_API_KEY
 
         if not openai_api_key:
             logger.warning(
                 "OPENAI_API_KEY not set - image and audio generation will fail. "
-                "Add it to .env file."
+                "Add it to AWS Secrets Manager (pipeline/openai-api-key) or .env file."
             )
 
         if not replicate_api_key:
@@ -861,8 +883,12 @@ class VideoGenerationOrchestrator:
 
             # Call Audio Pipeline Agent
             # Re-initialize audio pipeline with db and storage for music generation
+            openai_key = _get_openai_api_key()
+            if not openai_key:
+                raise ValueError("OPENAI_API_KEY not configured. Set it in AWS Secrets Manager (pipeline/openai-api-key) or .env file.")
+            
             audio_pipeline_with_music = AudioPipelineAgent(
-                api_key=settings.OPENAI_API_KEY,
+                api_key=openai_key,
                 db=db,
                 storage_service=self.storage_service
             )
@@ -2044,9 +2070,9 @@ class VideoGenerationOrchestrator:
             logger.info(f"[{session_id}] Retrieving API keys from Secrets Manager...")
             openrouter_key = get_secret("pipeline/openrouter-api-key")
             replicate_key = get_secret("pipeline/replicate-api-key")
-            openai_key = settings.OPENAI_API_KEY
+            openai_key = _get_openai_api_key()
             if not openai_key:
-                raise ValueError("OPENAI_API_KEY not configured in settings")
+                raise ValueError("OPENAI_API_KEY not configured. Set it in AWS Secrets Manager (pipeline/openai-api-key) or .env file.")
             logger.info(f"[{session_id}] Successfully retrieved API keys")
         except Exception as e:
             error_msg = f"Failed to retrieve API keys: {e}"
@@ -2928,3 +2954,278 @@ class VideoGenerationOrchestrator:
             "total_cost": total_video_cost,
             "duration": final_video_result.get("duration", 0.0)
         }
+
+    async def start_full_test_process(
+        self,
+        userId: str,
+        sessionId: str,
+        db: Session
+    ) -> None:
+        """
+        Start the Full Test pipeline process.
+        
+        Coordinates Agent2 and Agent4 in parallel, then Agent5 sequentially.
+        Creates S3 folder structure, sends orchestrator status updates, and forwards
+        standardized agent status messages to WebSocket.
+        
+        Args:
+            userId: User identifier
+            sessionId: Session identifier
+            db: Database session for querying video_session table
+        """
+        from app.agents.agent_2 import agent_2_process
+        from app.agents.agent_4 import agent_4_process
+        from app.agents.agent_5 import agent_5_process
+        from sqlalchemy import text as sql_text
+        
+        try:
+            # Send orchestrator starting status
+            await self._send_orchestrator_status(
+                userId, sessionId, "starting",
+                {"message": "Orchestrator starting Full Test process"}
+            )
+            
+            # Create S3 folder structure: scaffold_test/{userId}/{sessionId}/
+            s3_folder_prefix = f"scaffold_test/{userId}/{sessionId}/"
+            
+            # Create timestamp.json with Unix timestamp
+            timestamp = int(time.time())
+            timestamp_json = str(timestamp)
+            timestamp_s3_key = f"{s3_folder_prefix}timestamp.json"
+            
+            try:
+                self.storage_service.upload_file_direct(
+                    timestamp_json.encode('utf-8'),
+                    timestamp_s3_key,
+                    content_type='application/json'
+                )
+                logger.info(f"Created timestamp.json at {timestamp_s3_key} with timestamp {timestamp}")
+            except Exception as e:
+                logger.warning(f"Failed to create timestamp.json: {e}")
+                # Continue anyway - timestamp.json is not critical
+            
+            # Create status callback function for agents
+            async def status_callback(
+                agentnumber: str,
+                status: str,
+                userID: str,
+                sessionID: str,
+                timestamp: int,
+                **kwargs
+            ) -> None:
+                """
+                Status callback function that standardizes and forwards agent status messages.
+                
+                Args:
+                    agentnumber: Agent identifier ("Agent2", "Agent4", "Agent5")
+                    status: Status value ("starting", "processing", "finished", "error")
+                    userID: User identifier
+                    sessionID: Session identifier
+                    timestamp: Unix timestamp in milliseconds
+                    **kwargs: Additional fields (error, reason, videoUrl, progress, etc.)
+                """
+                # Build standardized status message
+                status_data = {
+                    "agentnumber": agentnumber,
+                    "userID": userID,
+                    "sessionID": sessionID,
+                    "status": status,
+                    "timestamp": timestamp
+                }
+                
+                # Add optional fields from kwargs
+                if "error" in kwargs:
+                    status_data["error"] = kwargs["error"]
+                if "reason" in kwargs:
+                    status_data["reason"] = kwargs["reason"]
+                if "videoUrl" in kwargs:
+                    status_data["videoUrl"] = kwargs["videoUrl"]
+                if "progress" in kwargs:
+                    status_data["progress"] = kwargs["progress"]
+                if "fileCount" in kwargs:
+                    status_data["fileCount"] = kwargs["fileCount"]
+                if "cost" in kwargs:
+                    status_data["cost"] = kwargs["cost"]
+                
+                # Add any other UI information from kwargs
+                for key, value in kwargs.items():
+                    if key not in ["error", "reason", "videoUrl", "progress", "fileCount", "cost"]:
+                        status_data[key] = value
+                
+                # Forward to WebSocket (with reconnection handling)
+                try:
+                    await self.websocket_manager.send_progress(sessionID, status_data)
+                except Exception as ws_error:
+                    logger.warning(f"Failed to send status via WebSocket (will retry): {ws_error}")
+                    # Continue processing - WebSocket reconnection will be handled
+            
+            # Send orchestrator processing status
+            await self._send_orchestrator_status(
+                userId, sessionId, "processing",
+                {"message": "Orchestrator triggering Agent2 and Agent4 in parallel"}
+            )
+            
+            # Query video_session table to verify it exists
+            try:
+                result = db.execute(
+                    sql_text(
+                        "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                    ),
+                    {"session_id": sessionId, "user_id": userId},
+                ).fetchone()
+                
+                if not result:
+                    raise ValueError(f"Video session not found for session_id={sessionId} and user_id={userId}")
+                
+                # Convert result to dict if needed
+                if hasattr(result, "_mapping"):
+                    video_session_data = dict(result._mapping)
+                else:
+                    video_session_data = {
+                        "id": getattr(result, "id", None),
+                        "user_id": getattr(result, "user_id", None),
+                        "topic": getattr(result, "topic", None),
+                        "confirmed_facts": getattr(result, "confirmed_facts", None),
+                        "generated_script": getattr(result, "generated_script", None),
+                    }
+            except Exception as e:
+                logger.error(f"Error querying video_session: {e}")
+                await self._send_orchestrator_status(
+                    userId, sessionId, "error",
+                    {"error": str(e), "reason": f"Database query failed: {type(e).__name__}"}
+                )
+                raise
+            
+            # Trigger Agent2 and Agent4 in parallel
+            agent2_task = agent_2_process(
+                websocket_manager=None,  # Not used - using callback instead
+                user_id=userId,
+                session_id=sessionId,
+                template_id="",  # Not used in Full Test
+                chosen_diagram_id="",  # Not used in Full Test
+                script_id="",  # Not used in Full Test
+                storage_service=self.storage_service,
+                video_session_data=video_session_data,
+                db=db,
+                status_callback=status_callback
+            )
+            
+            # Agent4 will extract script from video_session (same data as Agent2)
+            agent4_task = agent_4_process(
+                websocket_manager=None,  # Not used - using callback instead
+                user_id=userId,
+                session_id=sessionId,
+                script={},  # Will be extracted from video_session by Agent4
+                voice="alloy",
+                audio_option="tts",
+                storage_service=self.storage_service,
+                agent2_data=None,
+                video_session_data=video_session_data,  # Pass same data as Agent2
+                db=db,
+                status_callback=status_callback
+            )
+            
+            # Run both agents in parallel
+            try:
+                agent2_result, agent4_result = await asyncio.gather(agent2_task, agent4_task)
+                logger.info(f"Agent2 and Agent4 completed successfully for session {sessionId}")
+            except Exception as e:
+                logger.error(f"Agent2 or Agent4 failed: {e}")
+                await self._send_orchestrator_status(
+                    userId, sessionId, "error",
+                    {"error": str(e), "reason": f"Agent execution failed: {type(e).__name__}"}
+                )
+                raise
+            
+            # After Agent2+Agent4 complete successfully, trigger Agent5 synchronously
+            await self._send_orchestrator_status(
+                userId, sessionId, "processing",
+                {"message": "Agent2 and Agent4 completed, starting Agent5"}
+            )
+            
+            try:
+                # Agent5 will scan S3 folders to discover content
+                # Generate supersessionid for Agent5
+                agent5_supersessionid = f"{sessionId}_{secrets.token_urlsafe(12)[:16]}"
+                
+                agent5_result = await agent_5_process(
+                    websocket_manager=None,  # Not used - using callback instead
+                    user_id=userId,
+                    session_id=sessionId,
+                    supersessionid=agent5_supersessionid,
+                    storage_service=self.storage_service,
+                    pipeline_data=None,  # Agent5 will scan S3 instead
+                    generation_mode="video",
+                    db=db,
+                    status_callback=status_callback
+                )
+                
+                # Extract video URL from Agent5 result
+                video_url = agent5_result if isinstance(agent5_result, str) else None
+                
+                # Send orchestrator finished status with video link and all info
+                await self._send_orchestrator_status(
+                    userId, sessionId, "finished",
+                    {
+                        "message": "Full Test process completed successfully",
+                        "videoUrl": video_url,
+                        "agent2Result": agent2_result,
+                        "agent4Result": agent4_result,
+                        "agent5Result": agent5_result
+                    }
+                )
+                
+                logger.info(f"Full Test process completed successfully for session {sessionId}")
+                
+            except Exception as e:
+                logger.error(f"Agent5 failed: {e}")
+                await self._send_orchestrator_status(
+                    userId, sessionId, "error",
+                    {"error": str(e), "reason": f"Agent5 failed: {type(e).__name__}"}
+                )
+                raise
+                
+        except Exception as e:
+            logger.exception(f"Orchestrator error in start_full_test_process: {e}")
+            # Try to send error status (may fail if WebSocket is down)
+            try:
+                await self._send_orchestrator_status(
+                    userId, sessionId, "error",
+                    {"error": str(e), "reason": f"Orchestrator failed: {type(e).__name__}"}
+                )
+            except:
+                pass
+            raise
+    
+    async def _send_orchestrator_status(
+        self,
+        userId: str,
+        sessionId: str,
+        status: str,
+        extra_data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Helper method to send orchestrator status updates in standardized format.
+        
+        Args:
+            userId: User identifier
+            sessionId: Session identifier
+            status: Status value ("starting", "processing", "finished", "error")
+            extra_data: Additional data to include in status message
+        """
+        status_data = {
+            "agentnumber": "Orchestrator",
+            "userID": userId,
+            "sessionID": sessionId,
+            "status": status,
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        if extra_data:
+            status_data.update(extra_data)
+        
+        try:
+            await self.websocket_manager.send_progress(sessionId, status_data)
+        except Exception as e:
+            logger.warning(f"Failed to send orchestrator status via WebSocket: {e}")
+            # Continue processing - WebSocket reconnection will be handled
