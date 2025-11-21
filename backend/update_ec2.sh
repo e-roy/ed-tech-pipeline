@@ -74,6 +74,21 @@ sudo -u ec2-user bash -c "
     alembic upgrade head
 "
 
+# Check if bun is installed (needed for Agent5 video rendering)
+echo "Checking for Bun installation..."
+if command -v bun &> /dev/null || [ -f "/home/ec2-user/.bun/bin/bun" ]; then
+    echo "✓ Bun is installed"
+    if [ -f "/home/ec2-user/.bun/bin/bun" ]; then
+        /home/ec2-user/.bun/bin/bun --version
+    else
+        bun --version
+    fi
+else
+    echo "⚠️  WARNING: Bun is not installed!"
+    echo "   Agent5 video rendering will fail without Bun."
+    echo "   Run: bash backend/install_bun_ec2.sh"
+fi
+
 # Restart the service
 echo "Restarting pipeline-backend service..."
 sudo systemctl restart pipeline-backend
