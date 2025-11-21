@@ -2976,7 +2976,7 @@ class VideoGenerationOrchestrator:
         from app.agents.agent_2 import agent_2_process
         from app.agents.agent_4 import agent_4_process
         from app.agents.agent_5 import agent_5_process
-        from sqlalchemy import text
+        from sqlalchemy import text as sql_text
         
         try:
             # Send orchestrator starting status
@@ -3068,7 +3068,7 @@ class VideoGenerationOrchestrator:
             # Query video_session table to verify it exists
             try:
                 result = db.execute(
-                    text(
+                    sql_text(
                         "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                     ),
                     {"session_id": sessionId, "user_id": userId},

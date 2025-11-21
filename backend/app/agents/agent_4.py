@@ -13,7 +13,7 @@ import time
 import logging
 from typing import Optional, Dict, Any, Callable, Awaitable
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text as sql_text
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
 from app.agents.audio_pipeline import AudioPipelineAgent
@@ -62,7 +62,7 @@ async def agent_4_process(
     if db is not None and video_session_data is None:
         try:
             result = db.execute(
-                text(
+                sql_text(
                     "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                 ),
                 {"session_id": session_id, "user_id": user_id},
@@ -137,7 +137,7 @@ async def agent_4_process(
             
             # Re-query database for updated script
             result = db.execute(
-                text(
+                sql_text(
                     "SELECT generated_script FROM video_session WHERE id = :session_id AND user_id = :user_id"
                 ),
                 {"session_id": session_id, "user_id": user_id},

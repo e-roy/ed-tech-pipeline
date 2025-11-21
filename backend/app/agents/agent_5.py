@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Awaitable
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text as sql_text
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
 from app.services.replicate_video import ReplicateVideoService
@@ -536,7 +536,7 @@ async def agent_5_process(
                 if db is not None:
                     try:
                         result = db.execute(
-                            text(
+                            sql_text(
                                 "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                             ),
                             {"session_id": session_id, "user_id": user_id},
