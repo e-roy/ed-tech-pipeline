@@ -113,7 +113,7 @@ Our current implementation is already optimized for this:
 ### EC2 Instance Details
 - **Instance ID**: `i-051a27d0f69e98ca2`
 - **Current IP**: `13.58.115.166` (⚠️ **NOT an Elastic IP** - will change on restart)
-- **Region**: `us-east-2` (not us-east-1)
+- **Region**: `us-east-2` (not us-east-2)
 - **Instance Type**: `t3.micro`
 - **Private IP**: `172.31.40.134`
 - **Security Group**: `launch-wizard-9` (sg-008d6dd819c207292)
@@ -122,7 +122,7 @@ Our current implementation is already optimized for this:
 
 ### S3 Bucket Details
 - **Bucket Name**: `pipeline-backend-assets`
-- **Current Region**: `us-east-1` ⚠️ **Needs migration to us-east-2**
+- **Current Region**: `us-east-2` ⚠️ **Needs migration to us-east-2**
 - **Data Size**: 3.39 GB (3,468 MB)
 - **Object Count**: 1,799 objects
 - **Migration Priority**: **HIGH** (large amount of data)
@@ -168,7 +168,7 @@ aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --profile default1
 - Scripts
 
 #### 0.2 S3 Bucket Migration (Optional - Can Do Later)
-**Status**: 3.39 GB of data needs migration from us-east-1 to us-east-2
+**Status**: 3.39 GB of data needs migration from us-east-2 to us-east-2
 
 **Options**:
 - **Option A**: Migrate now (recommended for clean setup)
@@ -177,7 +177,7 @@ aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --profile default1
 - **Option B**: Create new bucket in us-east-2, migrate gradually
 - **Option C**: Keep old bucket, create new one (not recommended - breaks existing URLs)
 
-**Recommendation**: For MVP, we can keep using us-east-1 bucket temporarily, but update code to use us-east-2 for new uploads. Full migration can happen later.
+**Recommendation**: For MVP, we can keep using us-east-2 bucket temporarily, but update code to use us-east-2 for new uploads. Full migration can happen later.
 
 ### Phase 1: Database SSL Fix (Already Completed)
 
