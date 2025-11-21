@@ -24,10 +24,17 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { useAgentCreateStore } from "@/stores/agent-create-store";
+import { ScriptGenerationChainOfThought } from "@/components/generation/ScriptGenerationChainOfThought";
 
 export default function Home() {
-  const { messages, isLoading, error, workflowStep, handleSubmit } =
-    useAgentCreateStore();
+  const {
+    messages,
+    isLoading,
+    error,
+    workflowStep,
+    thinkingStatus,
+    handleSubmit,
+  } = useAgentCreateStore();
 
   return (
     <div className="flex h-full max-h-screen w-full flex-col">
@@ -54,6 +61,16 @@ export default function Home() {
                         </MessageContent>
                       </Message>
                     ))}
+                    {thinkingStatus && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          <ScriptGenerationChainOfThought
+                            isVisible={true}
+                            operation={thinkingStatus.operation}
+                          />
+                        </MessageContent>
+                      </Message>
+                    )}
                   </>
                 )}
                 {error && (

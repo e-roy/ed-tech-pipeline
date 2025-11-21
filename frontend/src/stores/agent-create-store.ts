@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Fact, Narration } from "@/types";
+import { parseToolResult } from "@/lib/ai-utils";
 
 type WorkflowStep = "input" | "selection" | "review";
 
@@ -10,9 +11,13 @@ type Message = {
   id?: string;
 };
 
+type ThinkingStatus = {
+  operation: "extracting" | "narrating";
+  steps: string[];
+} | null;
+
 interface AgentCreateState {
   // State
-  documentContent: string;
   messages: Message[];
   isLoading: boolean;
   error: Error | null;
@@ -21,9 +26,10 @@ interface AgentCreateState {
   selectedFacts: Fact[];
   narration: Narration | null;
   sessionId: string | null;
+  thinkingStatus: ThinkingStatus;
+  factsLocked: boolean;
 
   // Actions
-  setDocumentContent: (content: string) => void;
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
   setIsLoading: (loading: boolean) => void;
@@ -34,6 +40,8 @@ interface AgentCreateState {
   setSelectedFacts: (facts: Fact[]) => void;
   setNarration: (narration: Narration | null) => void;
   setSessionId: (id: string | null) => void;
+  setThinkingStatus: (status: ThinkingStatus) => void;
+  setFactsLocked: (locked: boolean) => void;
   reset: () => void;
 
   // Complex actions
@@ -47,28 +55,93 @@ interface AgentCreateState {
   handleSubmit: (message: { text: string; files: unknown[] }) => Promise<void>;
 }
 
-// Helper: Read stream response
-const readStreamResponse = async (response: Response): Promise<string> => {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("No response body");
+// Helper: Parse JSON response directly (optimized)
+const parseJsonResponse = async (response: Response): Promise<unknown> => {
+  return response.json();
+};
 
-  const decoder = new TextDecoder();
-  let accumulatedResponse = "";
+/**
+ * Helper to parse tool response from API
+ * Handles both tool-result format and direct JSON format
+ */
+const parseToolResponse = (
+  jsonData: unknown,
+  state: {
+    handleFactExtractionResponse: (json: {
+      facts?: Fact[];
+      message?: string;
+    }) => void;
+    setNarration: (narration: Narration | null) => void;
+    setWorkflowStep: (step: WorkflowStep) => void;
+    addMessage: (message: Message) => void;
+  },
+): boolean => {
+  try {
+    const directJson = jsonData as {
+      type?: string;
+      toolName?: string;
+      output?: string;
+      facts?: Fact[];
+      narration?: Narration;
+      message?: string;
+    };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    accumulatedResponse += decoder.decode(value, { stream: true });
+    // Handle tool-result format with output field
+    if (directJson.type === "tool-result" && directJson.output) {
+      const parsedOutput = parseToolResult<{
+        facts?: Fact[];
+        narration?: Narration;
+        message?: string;
+      }>(directJson.output);
+
+      if (directJson.toolName === "extractFactsTool" && parsedOutput.facts) {
+        state.handleFactExtractionResponse(parsedOutput);
+        return true;
+      } else if (
+        directJson.toolName === "generateNarrationTool" &&
+        parsedOutput.narration
+      ) {
+        state.setNarration(parsedOutput.narration);
+        state.setWorkflowStep("review");
+        state.addMessage({
+          role: "assistant",
+          content:
+            parsedOutput.message ??
+            "I've created the narration. Please review it.",
+          id: Date.now().toString(),
+        });
+        return true;
+      }
+    }
+
+    // Handle direct formats
+    if (directJson.facts) {
+      state.handleFactExtractionResponse(directJson);
+      return true;
+    }
+
+    if (directJson.narration) {
+      state.setNarration(directJson.narration);
+      state.setWorkflowStep("review");
+      state.addMessage({
+        role: "assistant",
+        content:
+          directJson.message ?? "I've created the narration. Please review it.",
+        id: Date.now().toString(),
+      });
+      return true;
+    }
+  } catch {
+    // Silently fail and try alternative parsing
   }
 
-  return accumulatedResponse;
+  return false;
 };
 
 export const useAgentCreateStore = create<AgentCreateState>()(
   persist(
     (set, get) => ({
       // Initial state
-      documentContent: "",
       messages: [],
       isLoading: false,
       error: null,
@@ -77,9 +150,10 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       selectedFacts: [],
       narration: null,
       sessionId: null,
+      thinkingStatus: null,
+      factsLocked: false,
 
       // Simple setters
-      setDocumentContent: (content) => set({ documentContent: content }),
       addMessage: (message) =>
         set((state) => ({
           messages: [...state.messages, message],
@@ -103,9 +177,10 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       setSelectedFacts: (facts) => set({ selectedFacts: facts }),
       setNarration: (narration) => set({ narration }),
       setSessionId: (id) => set({ sessionId: id }),
+      setThinkingStatus: (status) => set({ thinkingStatus: status }),
+      setFactsLocked: (locked) => set({ factsLocked: locked }),
       reset: () =>
         set({
-          documentContent: "",
           messages: [],
           isLoading: false,
           error: null,
@@ -113,6 +188,8 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           facts: [],
           selectedFacts: [],
           narration: null,
+          thinkingStatus: null,
+          factsLocked: false,
           // Keep sessionId on reset
         }),
 
@@ -149,15 +226,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         try {
           state.setIsLoading(true);
           state.setError(null);
+          state.setThinkingStatus({
+            operation: "extracting",
+            steps: [
+              "Analyzing content...",
+              "Extracting key facts...",
+              "Validating results...",
+            ],
+          });
 
-          const response = await fetch("/api/agent-create", {
+          const response = await fetch("/api/agent-create/tools", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
               messages: messagesToSend,
-              mode: "extract",
               sessionId: state.sessionId,
             }),
           });
@@ -168,16 +252,19 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             throw new Error("Failed to fetch response");
           }
 
-          const accumulatedResponse = await readStreamResponse(response);
-          const json = JSON.parse(accumulatedResponse) as {
-            facts?: Fact[];
-            message?: string;
-          };
+          const jsonData = await parseJsonResponse(response);
 
-          state.handleFactExtractionResponse(json);
+          // Parse the response
+          if (parseToolResponse(jsonData, state)) {
+            state.setThinkingStatus(null);
+            return;
+          }
+
+          throw new Error("No facts extracted from response");
         } catch (e) {
           console.error("Failed to extract facts", e);
           state.setError(e as Error);
+          state.setThinkingStatus(null);
           throw e;
         } finally {
           state.setIsLoading(false);
@@ -188,12 +275,19 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         const state = get();
         state.setIsLoading(true);
         state.setError(null);
+        state.setFactsLocked(true);
+        state.setThinkingStatus({
+          operation: "narrating",
+          steps: [
+            "Processing selected facts...",
+            "Creating narrative structure...",
+            "Generating script segments...",
+          ],
+        });
 
         const confirmationMessage: Message = {
           role: "user",
-          content: `I confirm these facts:\n\n${state.selectedFacts
-            .map((f) => `- ${f.concept}: ${f.details}`)
-            .join("\n")}`,
+          content: `I've selected these facts. Please create a narration based on them.`,
         };
 
         const messagesWithConfirmation = [
@@ -201,15 +295,16 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           confirmationMessage,
         ];
 
+        state.addMessage(confirmationMessage);
+
         try {
-          const response = await fetch("/api/agent-create", {
+          const response = await fetch("/api/agent-create/tools", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
               messages: messagesWithConfirmation,
-              mode: "narrate",
               selectedFacts: state.selectedFacts,
               sessionId: state.sessionId,
             }),
@@ -218,30 +313,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           state.updateSessionIdFromResponse(response);
 
           if (!response.ok) {
-            throw new Error("Failed to fetch response");
+            throw new Error("Failed to generate narration");
           }
 
-          const accumulatedResponse = await readStreamResponse(response);
-          const json = JSON.parse(accumulatedResponse) as Narration & {
-            message?: string;
-          };
+          const jsonData = await parseJsonResponse(response);
 
-          const { message, ...narrationData } = json;
-          state.setNarration(narrationData as Narration);
-          state.setWorkflowStep("review");
-          state.addMessage({
-            ...confirmationMessage,
-            id: Date.now().toString() + "-user-confirm",
-          });
-          state.addMessage({
-            role: "assistant",
-            content:
-              message ?? "Here is the narration based on your selected facts.",
-            id: Date.now().toString(),
-          });
+          // Parse the response
+          if (parseToolResponse(jsonData, state)) {
+            state.setThinkingStatus(null);
+            return;
+          }
+
+          throw new Error("No narration extracted from response");
         } catch (e) {
-          console.error("Chat error:", e);
+          console.error("Failed to generate narration", e);
           state.setError(e as Error);
+          state.setThinkingStatus(null);
         } finally {
           state.setIsLoading(false);
         }
