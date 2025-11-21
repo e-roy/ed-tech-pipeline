@@ -476,7 +476,7 @@
                 <div class="status-light" id="light-agent5"></div>
                 <div class="status-text" id="status-agent5">Not triggered</div>
                 <div class="error-message" id="error-agent5"></div>
-                <button id="restart-agent5-btn" class="submit-btn" style="display: none; margin-top: 10px; font-size: 14px; padding: 10px;" onclick="restartAgent5FromRemotion()">
+                <button id="restart-agent5-btn" class="submit-btn" style="display: block; margin-top: 10px; font-size: 14px; padding: 10px;" onclick="restartAgent5FromRemotion()">
                     🔄 Restart from Remotion
                 </button>
             </div>
@@ -877,17 +877,17 @@
                 }
                 agent.text.textContent = statusText + costText;
                 
-                // Hide restart button when processing
+                // Keep restart button visible (users can restart anytime)
                 if (agentNumber === 'Agent5' && restartBtn) {
-                    restartBtn.style.display = 'none';
+                    restartBtn.style.display = 'block';
                 }
             } else if (status === 'finished') {
                 agent.light.classList.add('finished');
                 agent.text.textContent = 'Finished' + costText;
                 
-                // Hide restart button on success
+                // Keep restart button visible (users can re-render anytime)
                 if (agentNumber === 'Agent5' && restartBtn) {
-                    restartBtn.style.display = 'none';
+                    restartBtn.style.display = 'block';
                 }
             } else if (status === 'error') {
                 agent.light.classList.add('error');
@@ -908,23 +908,9 @@
                     agent.error.textContent = errorMsg;
                     agent.error.classList.add('show');
                     
-                    // Show restart button for Agent5 Remotion/rendering errors
+                    // Always show restart button for Agent5 (users can attempt restart anytime)
                     if (agentNumber === 'Agent5' && restartBtn) {
-                        // Show button if error is related to Remotion/rendering stage (bun, remotion keywords)
-                        // or if we have progress data indicating clips were generated (cost > 0)
-                        const errorText = error.toLowerCase();
-                        const reasonText = reason.toLowerCase();
-                        const showRestart = errorText.includes('remotion') || 
-                                          reasonText.includes('remotion') ||
-                                          errorText.includes('bun') ||
-                                          reasonText.includes('bun') ||
-                                          errorText.includes('rendering') ||
-                                          (window.agent5ClipsGenerated && window.agent5ClipsGenerated > 0) ||
-                                          (cost !== undefined && cost !== null && cost > 0);
-                        
-                        if (showRestart) {
-                            restartBtn.style.display = 'block';
-                        }
+                        restartBtn.style.display = 'block';
                     }
                 }
             }
@@ -1777,8 +1763,8 @@ ${JSON.stringify(result, null, 2)}`;
                 restartBtn.disabled = true;
                 restartBtn.textContent = '🔄 Restarting...';
                 
-                // Hide restart button
-                restartBtn.style.display = 'none';
+                // Keep button visible but disabled during restart
+                restartBtn.style.display = 'block';
                 
                 // Clear Agent5 error message
                 const agent5Error = document.getElementById('error-agent5');
@@ -1807,11 +1793,15 @@ ${JSON.stringify(result, null, 2)}`;
                 // Update status to show restart in progress
                 updateAgentStatus('Agent5', 'processing', null, null);
                 
+                // Re-enable button after initiating
+                restartBtn.disabled = false;
+                restartBtn.textContent = '🔄 Restart from Remotion';
+                
             } catch (error) {
                 console.error('Error restarting Agent5:', error);
                 alert(`Failed to restart Agent5: ${error.message}`);
                 
-                // Re-show button on error
+                // Re-enable button on error
                 restartBtn.style.display = 'block';
                 restartBtn.disabled = false;
                 restartBtn.textContent = '🔄 Restart from Remotion';
