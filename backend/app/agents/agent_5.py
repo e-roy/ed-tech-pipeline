@@ -565,6 +565,10 @@ async def agent_5_process(
                 if not script and not audio_files:
                     raise ValueError(f"No content found in S3 folders or database. Agent2: {len(agent2_files)} files, Agent4: {len(agent4_files)} files")
             
+            # Initialize agent data variables (needed for nested functions)
+            agent_2_data = {}
+            agent_4_data = {}
+            
             # If pipeline_data is provided, use it (for backwards compatibility)
             if pipeline_data:
                 agent_2_data = pipeline_data.get("agent_2_data", {})
