@@ -18,9 +18,25 @@ export class NarrativeBuilderAgent {
         details: string;
       }>;
       const targetDuration = (input.data.target_duration as number) ?? 60;
+      // New optional fields - backward compatible
+      const childAge = input.data.child_age as string | null | undefined;
+      const childInterest = input.data.child_interest as
+        | string
+        | null
+        | undefined;
 
-      const systemPrompt = this.buildSystemPrompt(targetDuration);
-      const userPrompt = this.buildUserPrompt(topic, facts, targetDuration);
+      const systemPrompt = this.buildSystemPrompt(
+        targetDuration,
+        childAge,
+        childInterest,
+      );
+      const userPrompt = this.buildUserPrompt(
+        topic,
+        facts,
+        targetDuration,
+        childAge,
+        childInterest,
+      );
 
       const result = await generateText({
         model: openai("gpt-4o-mini"),
@@ -71,17 +87,53 @@ export class NarrativeBuilderAgent {
     }
   }
 
-  private buildSystemPrompt(targetDuration: number): string {
-    return `You are an expert middle school science educator specializing in creating engaging, accurate educational video scripts.
+  private buildSystemPrompt(
+    targetDuration: number,
+    childAge?: string | null,
+    childInterest?: string | null,
+  ): string {
+    // Determine age-appropriate language
+    let ageContext = "grades 6-7 (reading level ~6.5)";
+    let readingLevel = "6.5";
+
+    if (childAge) {
+      // Parse age and adjust context
+      const ageNum = parseInt(childAge, 10);
+      if (!isNaN(ageNum)) {
+        if (ageNum < 6) {
+          ageContext = "early elementary (ages 4-6, reading level ~2-3)";
+          readingLevel = "2.5";
+        } else if (ageNum < 9) {
+          ageContext = "elementary (ages 6-8, reading level ~3-4)";
+          readingLevel = "3.5";
+        } else if (ageNum < 12) {
+          ageContext = "upper elementary (ages 9-11, reading level ~4-5)";
+          readingLevel = "4.5";
+        } else if (ageNum < 15) {
+          ageContext = "middle school (ages 12-14, reading level ~6-7)";
+          readingLevel = "6.5";
+        } else {
+          ageContext = "high school (ages 15+, reading level ~8-9)";
+          readingLevel = "8.5";
+        }
+      }
+    }
+
+    // Build interest context if provided
+    const interestContext = childInterest
+      ? `\n\nChild's Interest: ${childInterest}\n- Incorporate this interest into examples and connections where relevant\n- Make the content relatable to this interest`
+      : "";
+
+    return `You are an expert educational video script creator specializing in creating engaging, accurate educational content for ${ageContext}.
 
 Your task:
 
 1. Create a 4-part educational script (Hook → Concept → Process → Conclusion)
 2. Each part has specific timing and purpose
-3. Use age-appropriate language for grades 6-7 (reading level ~6.5)
+3. Use age-appropriate language for ${ageContext}
 4. Include all provided facts and key concepts
 5. Provide visual guidance for each segment
-6. Ensure scientific accuracy
+6. Ensure scientific accuracy${interestContext}
 
 Structure:
 
@@ -102,7 +154,7 @@ Rules:
 Required JSON structure:
 {
 "total_duration": ${targetDuration},
-"reading_level": "6.5",
+"reading_level": "${readingLevel}",
 "key_terms_count": <number>,
 "segments": [
 {
@@ -153,18 +205,29 @@ Required JSON structure:
     topic: string,
     facts: Array<{ concept: string; details: string }>,
     targetDuration: number,
+    childAge?: string | null,
+    childInterest?: string | null,
   ): string {
     const factsStr = facts
       .map((f) => `- ${f.concept}: ${f.details}`)
       .join("\n");
 
-    return `Topic: ${topic}
+    let ageInfo = "";
+    if (childAge) {
+      ageInfo = `\nChild's Age: ${childAge} years old`;
+    }
+
+    let interestInfo = "";
+    if (childInterest) {
+      interestInfo = `\nChild's Interest: ${childInterest}`;
+    }
+
+    return `Topic: ${topic}${ageInfo}${interestInfo}
 
 Key Facts to Include:
 ${factsStr}
 
 Target Duration: ${targetDuration} seconds
-Grade Level: 6-7
 
 Generate an engaging, scientifically accurate educational script in JSON format.`;
   }
