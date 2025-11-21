@@ -329,6 +329,7 @@
             <button type="button" class="tab-btn active" data-tab="pipeline">Full Pipeline</button>
             <button type="button" class="tab-btn" data-tab="agent4">Test Agent 4</button>
             <button type="button" class="tab-btn" data-tab="agent5">Test Agent 5</button>
+            <button type="button" class="tab-btn" data-tab="scenetest">Scene Test</button>
             <button type="button" class="tab-btn" data-tab="videotest">Video Test</button>
         </div>
 
@@ -631,6 +632,78 @@
             </div>
 
             <div class="connection-status disconnected" id="a5-status">
+                Ready
+            </div>
+        </div>
+
+        <!-- Scene Test Tab -->
+        <div id="scenetest-tab" class="tab-content">
+            <h2>Scene Test</h2>
+            <p style="margin-bottom: 15px; color: #666;">Generate continuous scene with perfect frame-to-frame continuity. Clips are generated <strong>sequentially</strong> - each clip starts from the last frame of the previous clip using image-to-video generation.</p>
+
+            <form id="sceneTestForm">
+                <div class="form-group">
+                    <label for="scene-text">Scene Text (narration):</label>
+                    <textarea id="scene-text" name="sceneText" rows="2" required placeholder="The narration text for this scene...">Welcome to the world of photosynthesis, where plants transform sunlight into energy.</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="scene-duration">Duration (seconds):</label>
+                    <input type="number" id="scene-duration" name="sceneDuration" value="12" min="5" max="60" step="1" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="scene-base">Base Scene (JSON - style, characters, setting for consistency):</label>
+                    <textarea id="scene-base" name="sceneBase" rows="15" placeholder="Optional: Leave empty or provide base scene structure...">{
+  "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic",
+  "color_palette": {
+    "primary": "warm yellows and soft blues, cream and sky blue tones",
+    "accent": "vibrant emerald greens, bright orange, warm wood tones",
+    "lighting": "warm golden afternoon sunlight streaming through windows"
+  },
+  "setting": {
+    "location": "bright modern elementary classroom",
+    "walls": "cream-colored walls with light blue trim",
+    "floor": "light honey-colored wood floors",
+    "windows": "large floor-to-ceiling windows showing animated green oak trees outside"
+  },
+  "characters": {
+    "teacher": "Ms. Rivera, animated woman in early 30s, warm medium tan skin, shoulder-length dark brown hair in ponytail, light sky blue cardigan over white shirt, friendly smile",
+    "students": "8 diverse animated 8-year-old children with signature Pixar big expressive eyes, various skin tones and hairstyles, casual school clothes, engaged and attentive"
+  }
+}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="scene-prompt">Scene Action (what happens in this scene):</label>
+                    <textarea id="scene-prompt" name="scenePrompt" rows="4" required placeholder="Describe the specific action/movement in this scene...">Teacher walks between desks gesturing with open palms, students look up with wide eyes, Maya with glasses raises hand eagerly, Oliver with curly orange hair leans forward curiously.</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="scene-previous-context">Previous Scene Context (optional, for continuity):</label>
+                    <textarea id="scene-previous-context" name="scenePreviousContext" rows="2" placeholder="Optional: Describe what happened in the previous scene..."></textarea>
+                </div>
+
+                <button type="submit" class="submit-btn" id="scene-submitBtn">Generate Scene</button>
+            </form>
+
+            <div class="result-section" id="scene-results" style="display: none;">
+                <h3>Generated Scene</h3>
+                <video id="scene-video-player" controls class="video-player">
+                    Your browser does not support video playback.
+                </video>
+                <div id="scene-video-info" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px; font-family: monospace; font-size: 12px;">
+                    Video info will appear here...
+                </div>
+                <p style="margin-top: 10px;">
+                    <a id="scene-video-download" href="#" download="scene.mp4" style="color: #667eea;">
+                        Download Video
+                    </a>
+                </p>
+                <div class="result-content" id="scene-result-json"></div>
+            </div>
+
+            <div class="connection-status disconnected" id="scene-status">
                 Ready
             </div>
         </div>
@@ -1460,6 +1533,122 @@ ${JSON.stringify(result, null, 2)}`;
             }
         });
 
+        // ==============================================
+        // Scene Test Tab functionality
+        // ==============================================
+        const sceneTestForm = document.getElementById('sceneTestForm');
+        const sceneSubmitBtn = document.getElementById('scene-submitBtn');
+        const sceneStatus = document.getElementById('scene-status');
+        const sceneResults = document.getElementById('scene-results');
+        const sceneVideoPlayer = document.getElementById('scene-video-player');
+        const sceneVideoInfo = document.getElementById('scene-video-info');
+        const sceneVideoDownload = document.getElementById('scene-video-download');
+        const sceneResultJson = document.getElementById('scene-result-json');
+
+        // Create video player for scene test
+        const loadSceneVideo = createVideoPlayer(sceneVideoPlayer, sceneVideoInfo, sceneVideoDownload);
+
+        sceneTestForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const sceneText = document.getElementById('scene-text').value.trim();
+            const sceneDuration = parseInt(document.getElementById('scene-duration').value);
+            const scenePrompt = document.getElementById('scene-prompt').value.trim();
+            const sceneBaseText = document.getElementById('scene-base').value.trim();
+            const scenePreviousContext = document.getElementById('scene-previous-context').value.trim();
+
+            if (!sceneText || !scenePrompt || !sceneDuration) {
+                alert('Please fill in required fields (Scene Text, Duration, Scene Action)');
+                return;
+            }
+
+            // Parse base scene JSON if provided
+            let baseScene = null;
+            if (sceneBaseText) {
+                try {
+                    baseScene = JSON.parse(sceneBaseText);
+                } catch (err) {
+                    alert('Invalid JSON in Base Scene field: ' + err.message);
+                    return;
+                }
+            }
+
+            // Disable button and show processing state
+            sceneSubmitBtn.disabled = true;
+            sceneSubmitBtn.textContent = 'Generating Scene...';
+            sceneStatus.className = 'connection-status connecting';
+            const numClips = Math.ceil(sceneDuration / 5);
+            sceneStatus.textContent = `Generating ${numClips} video clips sequentially for continuity... Clip 1 uses text-to-video, clips 2+ use image-to-video. This will take ${numClips * 2}-${numClips * 3} minutes.`;
+            sceneResults.style.display = 'none';
+            sceneVideoPlayer.style.display = 'none';
+
+            try {
+                const requestBody = {
+                    text: sceneText,
+                    duration: sceneDuration,
+                    visual_prompt: scenePrompt
+                };
+
+                if (baseScene) {
+                    requestBody.base_scene = baseScene;
+                }
+
+                if (scenePreviousContext) {
+                    requestBody.previous_scene_context = scenePreviousContext;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/api/scene/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    // Display success results
+                    sceneStatus.className = 'connection-status connected';
+                    sceneStatus.textContent = `Complete! ${result.data.numClips} clips stitched | Duration: ${result.duration.toFixed(1)}s | Cost: $${result.cost.toFixed(4)}`;
+                    sceneResults.style.display = 'block';
+
+                    // Display video
+                    if (result.data.videoUrl) {
+                        sceneVideoPlayer.style.display = 'block';
+                        loadSceneVideo(result.data.videoUrl);
+                    }
+
+                    // Display generation summary
+                    const summaryInfo = `
+<strong>Scene Generation Summary</strong>
+Text: ${result.data.text}
+Target Duration: ${result.data.targetDuration}s
+Actual Duration: ${result.data.actualDuration}s
+Number of Clips: ${result.data.numClips}
+Model: ${result.data.model}
+Cost: $${result.cost.toFixed(4)}
+Generation Time: ${result.duration.toFixed(1)}s
+
+<strong>Response Data:</strong>
+${JSON.stringify(result, null, 2)}`;
+                    sceneResultJson.innerHTML = '<pre>' + summaryInfo + '</pre>';
+                } else {
+                    throw new Error(result.error || result.detail || 'Scene generation failed');
+                }
+
+            } catch (error) {
+                console.error('Scene test error:', error);
+                sceneStatus.className = 'connection-status disconnected';
+                sceneStatus.textContent = `Error: ${error.message}`;
+                sceneResults.style.display = 'block';
+                sceneResultJson.textContent = `Error: ${error.message}`;
+                sceneVideoPlayer.style.display = 'none';
+            } finally {
+                sceneSubmitBtn.disabled = false;
+                sceneSubmitBtn.textContent = 'Generate Scene';
+            }
+        });
         // Track Agent5 clip generation progress
         window.agent5ClipsGenerated = 0;
         window.agent5TotalClips = 0;

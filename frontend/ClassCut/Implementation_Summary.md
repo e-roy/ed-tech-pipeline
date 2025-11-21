@@ -129,7 +129,7 @@ Check that the frontend `.env` has:
 AWS_ACCESS_KEY_ID=your-key
 AWS_SECRET_ACCESS_KEY=your-secret
 S3_BUCKET_NAME=pipeline-backend-assets
-AWS_REGION=us-east-1
+AWS_REGION=us-east-2
 ```
 
 ### 2. User Authentication
