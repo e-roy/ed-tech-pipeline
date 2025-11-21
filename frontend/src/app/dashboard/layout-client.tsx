@@ -15,9 +15,7 @@ export function DashboardLayoutClient({
   const pathname = usePathname();
 
   // Show double-sided panel for create and history routes
-  const showDoublePanel =
-    pathname === "/dashboard/create" ||
-    pathname.startsWith("/dashboard/history/");
+  const showDoublePanel = pathname === "/dashboard/create";
 
   return (
     <SidebarInset className="flex-1">

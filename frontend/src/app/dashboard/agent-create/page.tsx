@@ -67,6 +67,17 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
 
+    // Create the confirmation message
+    const confirmationMessage = {
+      role: "user" as const,
+      content: `I confirm these facts:\n\n${selectedFacts
+        .map((f) => `- ${f.concept}: ${f.details}`)
+        .join("\n")}`,
+    };
+
+    // Add confirmation message to messages array for the request
+    const messagesWithConfirmation = [...messages, confirmationMessage];
+
     try {
       const response = await fetch("/api/agent-create", {
         method: "POST",
@@ -74,7 +85,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages,
+          messages: messagesWithConfirmation,
           mode: "narrate",
           selectedFacts,
           sessionId,
@@ -83,7 +94,7 @@ export default function Home() {
 
       // Capture sessionId from response header if this is first request
       const responseSessionId =
-        response.headers.get("x-session-id") ||
+        response.headers.get("x-session-id") ??
         response.headers.get("X-Session-Id");
 
       console.log("[AgentCreate-SubmitFacts] Response Headers:", {
@@ -118,21 +129,24 @@ export default function Home() {
       }
 
       try {
-        const json = JSON.parse(accumulatedResponse) as Narration;
-        setNarration(json);
+        const json = JSON.parse(accumulatedResponse) as Narration & {
+          message?: string;
+        };
+        // Extract message and narration data separately
+        const { message, ...narrationData } = json;
+        setNarration(narrationData as Narration);
         setWorkflowStep("review");
+        // Update messages with confirmation and assistant response
         setMessages((prev) => [
           ...prev,
           {
-            role: "user",
-            content: `I confirm these facts:\n\n${selectedFacts
-              .map((f) => `- ${f.concept}: ${f.details}`)
-              .join("\n")}`,
+            ...confirmationMessage,
             id: Date.now().toString() + "-user-confirm",
           },
           {
             role: "assistant",
-            content: "Here is the narration based on your selected facts.",
+            content:
+              message ?? "Here is the narration based on your selected facts.",
             id: Date.now().toString(),
           },
         ]);
@@ -179,7 +193,7 @@ export default function Home() {
 
         // Capture sessionId from response header if this is first request
         const responseSessionId =
-          response.headers.get("x-session-id") ||
+          response.headers.get("x-session-id") ??
           response.headers.get("X-Session-Id");
 
         console.log("[AgentCreate] Response Headers:", {
@@ -213,7 +227,10 @@ export default function Home() {
         }
 
         try {
-          const json = JSON.parse(accumulatedResponse) as { facts?: Fact[] };
+          const json = JSON.parse(accumulatedResponse) as {
+            facts?: Fact[];
+            message?: string;
+          };
           if (json.facts) {
             setFacts(json.facts);
             setWorkflowStep("selection");
@@ -222,6 +239,7 @@ export default function Home() {
               {
                 role: "assistant",
                 content:
+                  json.message ??
                   "I've extracted these facts. Please select the ones you want to keep.",
                 id: Date.now().toString(),
               },
@@ -259,7 +277,7 @@ export default function Home() {
 
           // Capture sessionId from response header if this is first request
           const responseSessionId =
-            response.headers.get("x-session-id") ||
+            response.headers.get("x-session-id") ??
             response.headers.get("X-Session-Id");
 
           console.log("[AgentCreate-Review] Response Headers:", {
@@ -293,7 +311,10 @@ export default function Home() {
           }
 
           try {
-            const json = JSON.parse(accumulatedResponse) as { facts?: Fact[] };
+            const json = JSON.parse(accumulatedResponse) as {
+              facts?: Fact[];
+              message?: string;
+            };
             if (json.facts) {
               setFacts(json.facts);
               setWorkflowStep("selection");
@@ -302,6 +323,7 @@ export default function Home() {
                 {
                   role: "assistant",
                   content:
+                    json.message ??
                     "I've extracted these facts. Please select the ones you want to keep.",
                   id: Date.now().toString(),
                 },
