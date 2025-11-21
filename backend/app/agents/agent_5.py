@@ -917,13 +917,34 @@ async def agent_5_process(
             )
             
         else:
-            # Generate videos normally
-            results = await asyncio.gather(
-                *[generate_section_video(section) for section in sections]
-            )
-
-            # Map results back to sections
-            generated_visuals = {section: url for section, url in results}
+            # Generate videos in batches of 2 to reduce API load
+            generated_visuals = {}
+            
+            # Split sections into batches of 2
+            batch_size = 2
+            for i in range(0, len(sections), batch_size):
+                batch = sections[i:i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(sections) + batch_size - 1) // batch_size
+                
+                logger.info(f"[{session_id}] Processing batch {batch_num}/{total_batches}: {batch}")
+                
+                await send_status(
+                    "Agent5", "processing",
+                    supersessionID=supersessionid,
+                    message=f"Generating videos for batch {batch_num}/{total_batches} ({', '.join(batch)})..."
+                )
+                
+                # Process batch in parallel
+                batch_results = await asyncio.gather(
+                    *[generate_section_video(section) for section in batch]
+                )
+                
+                # Add batch results to generated_visuals
+                for section, url in batch_results:
+                    generated_visuals[section] = url
+                
+                logger.info(f"[{session_id}] Completed batch {batch_num}/{total_batches}")
 
         # Update scenes with generated video URLs
         for scene in scenes:
