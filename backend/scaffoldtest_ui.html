@@ -568,44 +568,10 @@
                     <textarea id="a5-pipeline-data" name="pipeline_data" rows="30" required>{
   "agent_2_data": {
     "base_scene": {
-      "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic, consistent character rigs and models throughout all scenes",
-      "color_palette": {
-        "primary": "warm yellows and soft blues, cream and sky blue tones",
-        "accent": "vibrant emerald greens for plants, bright orange for educational posters, warm wood tones",
-        "lighting": "warm golden afternoon sunlight streaming through windows, soft ambient classroom lighting"
-      },
-      "setting": {
-        "classroom": "bright modern elementary classroom, cream-colored walls with light blue trim along the bottom, light honey-colored wood floors with subtle grain, large floor-to-ceiling windows along left wall showing animated green oak trees and blue sky outside",
-        "furniture": "8 small wooden student desks in 2 rows of 4, light brown maple wood finish, each with small blue plastic chair, teacher's large wooden desk at front right with globe and small fern plant on top",
-        "decorations": "colorful alphabet poster and periodic table on front wall, potted green ferns on white windowsill, large world map above whiteboard on front wall, tall bookshelf with bright multicolored book spines against back wall, student artwork pinned to bulletin board on right wall"
-      },
-      "teacher": {
-        "name": "Ms. Rivera",
-        "appearance": "animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style",
-        "clothing": "light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings",
-        "personality": "enthusiastic hand gestures when teaching, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom"
-      },
-      "students": {
-        "count": 8,
-        "general": "diverse animated 8-year-old children with signature Pixar big expressive eyes and stylized features, various skin tones and hairstyles, all wearing casual school clothes, engaged and attentive expressions",
-        "key_characters": [
-          {"position": "front_row_left_seat_1", "name": "Maya", "description": "girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often"},
-          {"position": "front_row_right_seat_2", "name": "Oliver", "description": "boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression"},
-          {"position": "middle_row_left_seat_3", "name": "Sofia", "description": "girl with long blonde hair in ponytail, light skin, purple dress with white collar, thoughtful and takes notes"},
-          {"position": "middle_row_right_seat_4", "name": "James", "description": "boy with short black hair and darker skin, bright yellow t-shirt, wide smile and excited demeanor"},
-          {"position": "back_row_left_seat_5", "name": "Aisha", "description": "girl with brown skin and natural curly black hair in puffs, pink hoodie, asks questions"},
-          {"position": "back_row_right_seat_6", "name": "Ethan", "description": "boy with straight brown hair, medium skin, red sweater, focused and concentrating"}
-        ]
-      },
-      "camera": {
-        "primary_shot": "medium shot at eye level with slight warm tilt",
-        "movement": "smooth, gentle camera movements only - predominantly static with occasional slow push-in",
-        "framing": "maintain consistent spatial relationships between characters across all clips"
-      },
-      "animation": {
-        "motion_style": "gentle, natural movements - children subtly shifting in seats, teacher's cardigan moving softly with gestures, avoid rapid movements",
-        "continuity": "characters maintain consistent appearance and positioning across clips, continuous lighting angle throughout all clips, smooth frame-to-frame transitions"
-      }
+      "style": "Pixar/Disney-quality 3D animation with soft subsurface scattering on skin, detailed fabric textures, realistic hair dynamics, warm depth of field blur on background, smooth CGI quality, kid-friendly educational aesthetic, consistent character rigs and models throughout all scenes",
+      "setting": "Bright modern elementary classroom with cream-colored walls and light blue trim along the bottom, light honey-colored wood floors with subtle grain, large floor-to-ceiling windows along left wall showing animated green oak trees and blue sky outside, 8 small wooden student desks in 2 rows of 4 with light brown maple wood finish and blue plastic chairs, teacher's large wooden desk at front right with globe and small fern plant, colorful alphabet poster and periodic table on front wall, potted green ferns on white windowsill, large world map above whiteboard, tall bookshelf with bright multicolored book spines against back wall, student artwork pinned to bulletin board on right wall",
+      "teacher": "Ms. Rivera, animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style, light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings, enthusiastic hand gestures when teaching, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom",
+      "students": "8 diverse animated 8-year-old children with signature Pixar big expressive eyes and stylized features, various skin tones and hairstyles, all wearing casual school clothes (t-shirts, jeans, dresses), engaged and attentive expressions, seated in semi-circle facing teacher. Key students include: Maya (girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often), Oliver (boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression), Sofia (girl with long blonde hair in ponytail, light skin, purple dress with white collar, thoughtful and takes notes), James (boy with short black hair and darker skin, bright yellow t-shirt, wide smile and excited demeanor), Aisha (girl with brown skin and natural curly black hair in puffs, pink hoodie, asks questions), Ethan (boy with straight brown hair, medium skin, red sweater, focused and concentrating)"
     },
     "script": {
       "hook": {
@@ -874,7 +840,7 @@
         }
 
         // Update agent status based on WebSocket message
-        function updateAgentStatus(agentNumber, status, error, reason) {
+        function updateAgentStatus(agentNumber, status, error, reason, cost, costBreakdown, message) {
             const agent = agentStatuses[agentNumber];
             if (!agent) return;
 
@@ -884,12 +850,32 @@
             // Hide restart button by default
             const restartBtn = document.getElementById('restart-agent5-btn');
             
+            // Format cost display
+            let costText = '';
+            if (cost !== undefined && cost !== null) {
+                costText = ` | Cost: $${cost.toFixed(4)}`;
+                if (costBreakdown && Object.keys(costBreakdown).length > 0) {
+                    const breakdown = Object.entries(costBreakdown)
+                        .map(([section, sectionCost]) => `${section}: $${sectionCost.toFixed(4)}`)
+                        .join(', ');
+                    costText += ` (${breakdown})`;
+                }
+            }
+            
             if (status === 'starting') {
                 agent.light.classList.add('starting');
-                agent.text.textContent = 'Starting...';
+                agent.text.textContent = 'Starting...' + costText;
             } else if (status === 'processing') {
                 agent.light.classList.add('processing');
-                agent.text.textContent = 'Processing...';
+                let statusText = message || 'Processing...';
+                if (message && message.includes('clip')) {
+                    // Show clip progress
+                    const clipMatch = message.match(/(\d+)\/(\d+)/);
+                    if (clipMatch) {
+                        statusText = message;
+                    }
+                }
+                agent.text.textContent = statusText + costText;
                 
                 // Hide restart button when processing
                 if (agentNumber === 'Agent5' && restartBtn) {
@@ -897,7 +883,7 @@
                 }
             } else if (status === 'finished') {
                 agent.light.classList.add('finished');
-                agent.text.textContent = 'Finished';
+                agent.text.textContent = 'Finished' + costText;
                 
                 // Hide restart button on success
                 if (agentNumber === 'Agent5' && restartBtn) {
@@ -905,9 +891,21 @@
                 }
             } else if (status === 'error') {
                 agent.light.classList.add('error');
-                agent.text.textContent = 'Error';
+                // Always show cost on error if available
+                agent.text.textContent = 'Error' + costText;
                 if (error && reason) {
-                    agent.error.textContent = `${reason}: ${error}`;
+                    let errorMsg = `${reason}: ${error}`;
+                    // Add cost info to error message if available
+                    if (cost !== undefined && cost !== null && cost > 0) {
+                        errorMsg += ` | Cost incurred: $${cost.toFixed(4)}`;
+                        if (costBreakdown && Object.keys(costBreakdown).length > 0) {
+                            const breakdown = Object.entries(costBreakdown)
+                                .map(([section, sectionCost]) => `${section}: $${sectionCost.toFixed(4)}`)
+                                .join(', ');
+                            errorMsg += ` (${breakdown})`;
+                        }
+                    }
+                    agent.error.textContent = errorMsg;
                     agent.error.classList.add('show');
                     
                     // Show restart button for Agent5 Remotion errors
@@ -1036,7 +1034,10 @@
                                     message.agentnumber,
                                     message.status,
                                     message.error,
-                                    message.reason
+                                    message.reason,
+                                    message.cost,
+                                    message.cost_breakdown,
+                                    message.message
                                 );
                                 
                                 // Display video_session data if present (topic, confirmed_facts, generation_script)
@@ -1447,36 +1448,27 @@
             }
 
             // Extract base_scene and build scene configurations for all 4 parts
+            // base_scene now uses flat structure: style, setting, teacher, students (all strings)
             const baseScene = pipelineData.agent_2_data.base_scene;
             const script = pipelineData.agent_2_data.script;
             const audioFiles = pipelineData.agent_4_data.audio_files;
             const parts = ['hook', 'concept', 'process', 'conclusion'];
 
             // Build scene configurations
+            // For compatibility with /api/scene/generate, we'll use base_scene strings directly
             const sceneConfigs = parts.map(part => {
                 const scriptPart = script[part];
                 const audioFile = audioFiles.find(a => a.part === part);
 
                 return {
                     visual: {
-                        style: baseScene.style,
-                        color_palette: baseScene.color_palette,
-                        setting: {
-                            location: baseScene.setting.classroom,
-                            walls: "cream-colored walls with light blue trim",
-                            floor: "light honey-colored wood floors",
-                            windows: "large floor-to-ceiling windows showing animated green oak trees outside",
-                            props: baseScene.setting.furniture + " " + baseScene.setting.decorations
-                        },
-                        characters: {
-                            teacher: `${baseScene.teacher.appearance}, ${baseScene.teacher.clothing}`,
-                            students: `${baseScene.students.general}, key students: ${baseScene.students.key_characters.map(s => s.description).join(', ')}`
-                        },
-                        camera: baseScene.camera,
-                        animation: baseScene.animation,
+                        style: baseScene.style || "Pixar/Disney-quality 3D animation",
+                        setting: baseScene.setting || "Modern elementary classroom",
+                        teacher: baseScene.teacher || "Ms. Rivera, animated teacher",
+                        students: baseScene.students || "Diverse animated children",
                         duration: scriptPart.duration,
-                        scene_text: scriptPart.scene_text,
-                        scene_action: scriptPart.scene_action,
+                        scene_text: scriptPart.scene_text || scriptPart.text,
+                        scene_action: scriptPart.scene_action || scriptPart.visual_prompt,
                         previous_scene_context: scriptPart.previous_scene_context
                     },
                     audio: {
@@ -1510,7 +1502,12 @@
                                 text: config.visual.scene_text,
                                 duration: config.visual.duration,
                                 visual_prompt: config.visual.scene_action,
-                                base_scene: config,
+                                base_scene: {
+                                    style: config.visual.style,
+                                    setting: config.visual.setting,
+                                    teacher: config.visual.teacher,
+                                    students: config.visual.students
+                                },
                                 previous_scene_context: config.visual.previous_scene_context
                             })
                         });
@@ -1669,11 +1666,33 @@ Duration: ${concatResult.duration.toFixed(1)}s
             sceneVideoPlayer.style.display = 'none';
 
             try {
+                // Extract base_scene from visual config (support both old nested and new flat structure)
+                let baseScene = null;
+                if (sceneConfig.visual) {
+                    // Check if it's the new flat structure (style, setting, teacher, students as strings)
+                    if (sceneConfig.visual.style && typeof sceneConfig.visual.style === 'string') {
+                        baseScene = {
+                            style: sceneConfig.visual.style,
+                            setting: sceneConfig.visual.setting || "",
+                            teacher: sceneConfig.visual.teacher || "",
+                            students: sceneConfig.visual.students || ""
+                        };
+                    } else if (sceneConfig.visual.characters) {
+                        // Old nested structure - extract to flat structure
+                        baseScene = {
+                            style: sceneConfig.visual.style || "",
+                            setting: sceneConfig.visual.setting?.location || sceneConfig.visual.setting || "",
+                            teacher: sceneConfig.visual.characters?.teacher || "",
+                            students: sceneConfig.visual.characters?.students || ""
+                        };
+                    }
+                }
+                
                 const requestBody = {
                     text: sceneText,
                     duration: sceneDuration,
                     visual_prompt: scenePrompt,
-                    base_scene: sceneConfig
+                    base_scene: baseScene
                 };
 
                 if (scenePreviousContext) {

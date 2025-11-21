@@ -7,6 +7,7 @@ Functionality will be added between status states.
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Optional, Callable, Awaitable
 from sqlalchemy.orm import Session
@@ -73,6 +74,9 @@ async def agent_2_process(
                     "topic": getattr(result, "topic", None),
                     "confirmed_facts": getattr(result, "confirmed_facts", None),
                     "generated_script": getattr(result, "generated_script", None),
+                    "learning_objective": getattr(result, "learning_objective", None),
+                    "child_age": getattr(result, "child_age", None),
+                    "child_interest": getattr(result, "child_interest", None),
                 }
             logger.info(f"Agent2 loaded video_session data for session {session_id}")
         except Exception as e:
@@ -83,12 +87,18 @@ async def agent_2_process(
     topic = None
     confirmed_facts = None
     generation_script = None
+    learning_objective = None
+    child_age = None
+    child_interest = None
     generated_fields = []
     
     if video_session_data:
         topic = video_session_data.get("topic")
         confirmed_facts = video_session_data.get("confirmed_facts")
         generation_script = video_session_data.get("generated_script")
+        learning_objective = video_session_data.get("learning_objective")
+        child_age = video_session_data.get("child_age")
+        child_interest = video_session_data.get("child_interest")
         
         # Track what needs to be generated
         if not topic:
@@ -230,6 +240,54 @@ async def agent_2_process(
             except Exception as e:
                 logger.error(f"Agent2 failed to generate/upload storyboard.json: {e}", exc_info=True)
                 # Don't fail the pipeline if storyboard generation fails
+        
+        # Generate base_scene with detailed characters and visual direction
+        # Raise immediately and stop Agent2 if generation fails
+        base_scene = None
+        if script:
+            base_scene = generate_base_scene(
+                script=script,
+                storyboard=storyboard,
+                topic=topic,
+                confirmed_facts=confirmed_facts,
+                learning_objective=learning_objective,
+                child_age=child_age,
+                child_interest=child_interest
+            )
+            logger.info(f"Agent2 generated base_scene with style, setting, teacher, and students")
+            
+            # Validate base_scene has all required fields (empty strings are treated as valid)
+            if not isinstance(base_scene, dict):
+                raise ValueError(f"Agent2 base_scene generation failed: base_scene must be a dict, got {type(base_scene)}")
+            
+            required_fields = ["style", "setting", "teacher", "students"]
+            missing_fields = [field for field in required_fields if field not in base_scene]
+            if missing_fields:
+                raise ValueError(f"Agent2 base_scene generation failed: missing required fields: {missing_fields}")
+        
+        # Create and upload agent_2_data.json with script and base_scene
+        if script and storage_service.s3_client:
+            try:
+                # Ensure base_scene is always a dict (use empty dict if None, though this shouldn't happen after validation)
+                agent_2_data = {
+                    "script": script,
+                    "storyboard": storyboard,
+                    "base_scene": base_scene if isinstance(base_scene, dict) else {}
+                }
+                
+                # Upload agent_2_data.json to S3
+                s3_key = f"scaffold_test/{user_id}/{session_id}/agent2/agent_2_data.json"
+                agent_2_data_json = json.dumps(agent_2_data, indent=2).encode('utf-8')
+                storage_service.s3_client.put_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=s3_key,
+                    Body=agent_2_data_json,
+                    ContentType='application/json'
+                )
+                logger.info(f"Agent2 uploaded agent_2_data.json to S3: {s3_key}")
+            except Exception as e:
+                logger.error(f"Agent2 failed to upload agent_2_data.json: {e}", exc_info=True)
+                # Don't fail the pipeline if agent_2_data.json upload fails
 
         # Report finished status
         finished_kwargs = {}
@@ -482,4 +540,441 @@ def generate_script_structure() -> dict:
             "visual_guidance": "Visual guidance for conclusion"
         }
     }
+
+
+def generate_base_scene(
+    script: dict,
+    storyboard: Optional[dict] = None,
+    topic: Optional[str] = None,
+    confirmed_facts: Optional[list] = None,
+    learning_objective: Optional[str] = None,
+    child_age: Optional[str] = None,
+    child_interest: Optional[str] = None
+) -> dict:
+    """
+    Generate a base_scene object with detailed characters and visual direction.
+    This provides consistency across all video clips generated by Agent5.
+    
+    Derives information from:
+    - storyboard segments (visual_guidance, key_concepts)
+    - video_session_data (topic, confirmed_facts, learning_objective, child_age, child_interest)
+    - script (visual_prompt if available)
+    
+    Args:
+        script: Dict with hook, concept, process, conclusion keys
+        storyboard: Optional storyboard dict with segments
+        topic: Optional topic string for context
+        confirmed_facts: Optional list of confirmed facts
+        learning_objective: Optional learning objective
+        child_age: Optional child age (e.g., "6-7", "8-10", "11-12")
+        child_interest: Optional child interest
+        
+    Returns:
+        Dict with style, setting, teacher, and students as strings (as expected by Agent5)
+    """
+    # Style is always hardcoded
+    style = "Pixar/Disney-quality 3D animation with soft subsurface scattering on skin, detailed fabric textures, realistic hair dynamics, warm depth of field blur on background, smooth CGI quality, kid-friendly educational aesthetic, consistent character rigs and models throughout all scenes"
+    
+    # Derive setting from multiple sources
+    setting_parts = []
+    
+    # Validate storyboard structure
+    if storyboard and not storyboard.get("segments"):
+        raise ValueError("Storyboard exists but has no segments - cannot generate base_scene")
+    
+    # Extract visual guidance from storyboard segments (primary source)
+    # Use all segments, fill missing visual_guidance with narration text and segment-type defaults
+    visual_guidance_texts = []
+    if storyboard and storyboard.get("segments"):
+        segment_type_names = {
+            "hook": "Hook",
+            "concept_introduction": "Concept",
+            "process_explanation": "Process",
+            "conclusion": "Conclusion"
+        }
+        
+        for segment in storyboard["segments"]:
+            visual_guid = segment.get("visual_guidance", "")
+            segment_type = segment.get("type", "")
+            narration = segment.get("narration", "")
+            
+            # Get segment type name for separator
+            segment_name = segment_type_names.get(segment_type, "Segment")
+            
+            if visual_guid and isinstance(visual_guid, str) and visual_guid.strip():
+                visual_guidance_texts.append(f"{segment_name}: {visual_guid.strip()}")
+            else:
+                # Fill missing visual_guidance with narration text and segment-type default
+                guidance_parts = []
+                
+                # Use narration text if available
+                if narration and isinstance(narration, str) and narration.strip():
+                    guidance_parts.append(narration.strip())
+                
+                # Add segment-type based default
+                segment_defaults = {
+                    "hook": "Engaging opening scene that captures attention",
+                    "concept_introduction": "Clear visual introduction of the main concept",
+                    "process_explanation": "Step-by-step visual explanation of the process",
+                    "conclusion": "Summarizing visual that reinforces key points"
+                }
+                default_desc = segment_defaults.get(segment_type, "Educational scene appropriate for this segment")
+                guidance_parts.append(default_desc)
+                
+                if guidance_parts:
+                    combined_guidance = ". ".join(guidance_parts)
+                    visual_guidance_texts.append(f"{segment_name}: {combined_guidance}")
+    
+    # Extract visual prompts from script (secondary source, still considered)
+    visual_prompts = []
+    for part_key in ["hook", "concept", "process", "conclusion"]:
+        if part_key in script:
+            part_data = script[part_key]
+            if isinstance(part_data, dict):
+                visual_prompt = part_data.get("visual_prompt", "")
+                if visual_prompt and isinstance(visual_prompt, str) and visual_prompt.strip():
+                    visual_prompts.append(visual_prompt.strip())
+    
+    # Combine visual guidance information (visual_guidance takes precedence but visual_prompt still considered)
+    if visual_guidance_texts:
+        # Primary: Use visual guidance from storyboard
+        combined_visual = " ".join(visual_guidance_texts)
+        # Secondary: Add visual prompts as additional context if available
+        if visual_prompts:
+            combined_visual += ". Additional visual context: " + " ".join(visual_prompts)
+        setting_parts.append(combined_visual)
+    elif visual_prompts:
+        # Fallback: Use visual prompts from script if no visual guidance
+        setting_parts.append(" ".join(visual_prompts))
+    
+    # Add topic-specific classroom elements
+    classroom_base = "Bright modern elementary classroom with cream-colored walls and light blue trim along the bottom, light honey-colored wood floors with subtle grain, large floor-to-ceiling windows along left wall"
+    
+    # Enhance classroom based on topic and confirmed_facts
+    topic_elements = []
+    if topic:
+        topic_lower = topic.lower()
+        if "plant" in topic_lower or "photosynthesis" in topic_lower or "nature" in topic_lower:
+            topic_elements.append("showing animated green oak trees and blue sky outside, potted green ferns on white windowsill, small fern plant on teacher's desk")
+        elif "space" in topic_lower or "planet" in topic_lower or "astronomy" in topic_lower:
+            topic_elements.append("showing animated starry sky and planets visible outside, space-themed posters on walls, model solar system hanging from ceiling")
+        elif "animal" in topic_lower or "biology" in topic_lower:
+            topic_elements.append("showing animated nature scene outside, animal posters on walls, small terrarium on windowsill")
+        else:
+            topic_elements.append("showing animated green oak trees and blue sky outside")
+    
+    def extract_text_from_value(value, depth=0, max_depth=3):
+        """Recursively extract text from nested structures, with depth limit to avoid infinite loops."""
+        if depth > max_depth:
+            return []
+        
+        texts = []
+        if isinstance(value, str):
+            texts.append(value.lower())
+        elif isinstance(value, dict):
+            for v in value.values():
+                texts.extend(extract_text_from_value(v, depth + 1, max_depth))
+        elif isinstance(value, list):
+            for item in value:
+                texts.extend(extract_text_from_value(item, depth + 1, max_depth))
+        return texts
+    
+    if confirmed_facts:
+        # Extract key concepts from confirmed facts (handle various structures)
+        # Use depth-limited recursion to avoid infinite loops
+        concepts = []
+        if isinstance(confirmed_facts, list):
+            for fact in confirmed_facts:
+                if isinstance(fact, dict):
+                    # Try different possible keys
+                    concept = fact.get("concept", "") or fact.get("name", "") or fact.get("title", "")
+                    if concept:
+                        concepts.append(str(concept).lower())
+                    # Also check details field
+                    details = fact.get("details", "") or fact.get("description", "") or fact.get("text", "")
+                    if details:
+                        concepts.append(str(details).lower())
+                elif isinstance(fact, str):
+                    concepts.append(fact.lower())
+                else:
+                    # Handle nested structures with depth limit
+                    concepts.extend(extract_text_from_value(fact, max_depth=3))
+        elif isinstance(confirmed_facts, dict):
+            # Handle dict structure with depth limit
+            concepts.extend(extract_text_from_value(confirmed_facts, max_depth=3))
+        elif isinstance(confirmed_facts, str):
+            concepts.append(confirmed_facts.lower())
+        
+        # Add relevant classroom decorations based on concepts (aggressive deduplication)
+        plant_keywords = ["plant", "photo", "leaf", "tree", "fern", "flower", "garden"]
+        space_keywords = ["space", "planet", "astronaut", "solar", "star", "galaxy", "moon"]
+        animal_keywords = ["animal", "creature", "bird", "mammal", "fish", "insect", "reptile"]
+        
+        has_plant = any(any(kw in c for kw in plant_keywords) for c in concepts)
+        has_space = any(any(kw in c for kw in space_keywords) for c in concepts)
+        has_animal = any(any(kw in c for kw in animal_keywords) for c in concepts)
+        
+        # Check for duplicates more aggressively (check if similar content already exists)
+        if has_plant:
+            existing_plant = any(any(kw in e.lower() for kw in ["fern", "plant", "tree", "leaf", "flower"]) for e in topic_elements)
+            if not existing_plant:
+                topic_elements.append("potted green ferns on white windowsill")
+        if has_space:
+            existing_space = any(any(kw in e.lower() for kw in ["space", "planet", "solar", "star", "astronaut"]) for e in topic_elements)
+            if not existing_space:
+                topic_elements.append("space-themed educational posters")
+        if has_animal:
+            existing_animal = any(any(kw in e.lower() for kw in ["animal", "creature", "bird", "mammal"]) for e in topic_elements)
+            if not existing_animal:
+                topic_elements.append("animal posters on walls")
+    
+    if not topic_elements:
+        topic_elements.append("showing animated green oak trees and blue sky outside")
+    
+    classroom_details = f"{classroom_base}, {', '.join(topic_elements)}, 8 small wooden student desks in 2 rows of 4 with light brown maple wood finish and blue plastic chairs, teacher's large wooden desk at front right with globe"
+    
+    if topic_elements and "space" not in " ".join(topic_elements).lower():
+        classroom_details += " and small fern plant"
+    
+    classroom_details += ", colorful alphabet poster and periodic table on front wall, large world map above whiteboard, tall bookshelf with bright multicolored book spines against back wall, student artwork pinned to bulletin board on right wall"
+    
+    # Combine all setting information
+    if setting_parts:
+        visual_context = " ".join(setting_parts)
+        setting = f"{classroom_details}. Visual context: {visual_context}"
+    else:
+        setting = classroom_details
+    
+    # Truncate setting to max 90 words, prioritizing classroom description
+    setting_words = setting.split()
+    if len(setting_words) > 90:
+        # Count words in classroom_details
+        classroom_words = classroom_details.split()
+        classroom_word_count = len(classroom_words)
+        
+        # If classroom alone exceeds 90, truncate it
+        if classroom_word_count > 90:
+            setting = " ".join(classroom_words[:90]) + "..."
+        else:
+            # Preserve full classroom, truncate visual context
+            remaining_words = 90 - classroom_word_count - 2  # Reserve 2 words for "Visual context:"
+            if remaining_words > 0 and setting_parts:
+                visual_context_words = visual_context.split()
+                if len(visual_context_words) > remaining_words:
+                    truncated_visual = " ".join(visual_context_words[:remaining_words]) + "..."
+                    setting = f"{classroom_details}. Visual context: {truncated_visual}"
+                else:
+                    # Visual context fits, keep as is
+                    setting = f"{classroom_details}. Visual context: {visual_context}"
+            else:
+                # No room for visual context, just use classroom
+                setting = classroom_details
+    
+    # Derive child age and infer if not provided
+    inferred_age = child_age
+    if not inferred_age:
+        # Try to infer from learning_objective first
+        if learning_objective:
+            learning_lower = learning_objective.lower()
+            if "elementary" in learning_lower or "grade 1" in learning_lower or "grade 2" in learning_lower or "first grade" in learning_lower or "second grade" in learning_lower:
+                inferred_age = "6-7"
+            elif "grade 3" in learning_lower or "grade 4" in learning_lower or "third grade" in learning_lower or "fourth grade" in learning_lower:
+                inferred_age = "8-10"
+            elif "grade 5" in learning_lower or "grade 6" in learning_lower or "fifth grade" in learning_lower or "sixth grade" in learning_lower:
+                inferred_age = "11-12"
+            elif "preschool" in learning_lower or "pre-k" in learning_lower or "kindergarten" in learning_lower:
+                inferred_age = "4-5"
+            elif "middle school" in learning_lower or "grade 7" in learning_lower or "grade 8" in learning_lower:
+                inferred_age = "12-14"
+        
+        # Try to infer from topic if still not found
+        if not inferred_age and topic:
+            topic_lower = topic.lower()
+            # Look for age-related keywords in topic
+            if "preschool" in topic_lower or "kindergarten" in topic_lower:
+                inferred_age = "4-5"
+            elif "elementary" in topic_lower:
+                inferred_age = "8-10"
+            elif "middle school" in topic_lower:
+                inferred_age = "12-14"
+        
+        # Try to infer from confirmed_facts if still not found
+        if not inferred_age and confirmed_facts:
+            facts_text = ""
+            if isinstance(confirmed_facts, list):
+                for fact in confirmed_facts:
+                    if isinstance(fact, dict):
+                        facts_text += " " + str(fact.get("concept", "")) + " " + str(fact.get("details", ""))
+                    elif isinstance(fact, str):
+                        facts_text += " " + fact
+            elif isinstance(confirmed_facts, str):
+                facts_text = confirmed_facts
+            
+            facts_lower = facts_text.lower()
+            if "preschool" in facts_lower or "kindergarten" in facts_lower:
+                inferred_age = "4-5"
+            elif "elementary" in facts_lower or "grade 1" in facts_lower or "grade 2" in facts_lower:
+                inferred_age = "6-7"
+            elif "grade 3" in facts_lower or "grade 4" in facts_lower:
+                inferred_age = "8-10"
+            elif "grade 5" in facts_lower or "grade 6" in facts_lower:
+                inferred_age = "11-12"
+            elif "middle school" in facts_lower:
+                inferred_age = "12-14"
+        
+        # Default to middle elementary if can't infer
+        if not inferred_age:
+            inferred_age = "8-10"
+    
+    # Parse age range (handle various formats: "6-7", "6 to 7", "ages 6-7", "6-7 years", "6", "6+", "under 6", etc.)
+    # Take first pair if multiple pairs found
+    age_min = None
+    age_max = None
+    
+    # Look for age range patterns first (e.g., "6-7", "6 to 7", "ages 6-7")
+    age_range_pattern = re.search(r'(\d+)\s*[-_to]\s*(\d+)', str(inferred_age), re.IGNORECASE)
+    if age_range_pattern:
+        age_min = int(age_range_pattern.group(1))
+        age_max = int(age_range_pattern.group(2))
+    else:
+        # Extract all numbers from age string
+        age_numbers = re.findall(r'\d+', str(inferred_age))
+        
+        if age_numbers:
+            age_min = int(age_numbers[0])
+            if len(age_numbers) > 1:
+                # Multiple numbers but not in range format - take first pair
+                age_max = int(age_numbers[1])
+            else:
+                # Single number - check for modifiers
+                inferred_lower = str(inferred_age).lower()
+                if "+" in inferred_lower or "and up" in inferred_lower or "up" in inferred_lower:
+                    age_max = 12  # Assume up to 12 for "6+"
+                elif "under" in inferred_lower or "below" in inferred_lower or "less than" in inferred_lower:
+                    age_max = age_min
+                    age_min = max(4, age_min - 2)  # Assume 2 years below
+                else:
+                    age_max = age_min  # Single age, use as both min and max
+    
+    # Calculate average age
+    if age_min is not None and age_max is not None:
+        avg_age = (age_min + age_max) // 2
+    else:
+        # Default if parsing fails
+        avg_age = 8
+    
+    # Generate teacher description based on age
+    if avg_age <= 7:
+        teacher = "Ms. Rivera, animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style, light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings, enthusiastic hand gestures when teaching, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom, uses simple clear language appropriate for young learners"
+    elif avg_age <= 10:
+        teacher = "Ms. Rivera, animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style, light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings, enthusiastic hand gestures when teaching, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom"
+    else:
+        teacher = "Ms. Rivera, animated woman in early 30s, warm medium tan skin tone, shoulder-length dark brown hair in neat ponytail with side-swept bangs, warm brown eyes with expressive eyebrows, friendly smile showing white teeth, average height with professional build, animated in signature Pixar character style, light sky blue cardigan sweater over crisp white button-up shirt, dark navy blue dress pants, comfortable tan flat shoes, small silver stud earrings, confident teaching style with clear explanations, expressive animated eyebrows, warm and encouraging smile, uses open palm gestures, stands with confident posture, moves smoothly around classroom, engages students with thought-provoking questions"
+    
+    # Generate students description based on age and interest
+    if avg_age <= 5:
+        age_desc = f"{avg_age}-year-old"
+        student_count = 6
+        engagement = "wide-eyed wonder, eager to learn, sitting in small colorful chairs"
+    elif avg_age <= 7:
+        age_desc = f"{avg_age}-year-old"
+        student_count = 6
+        engagement = "wide-eyed wonder, eager to learn, sitting in small colorful chairs"
+    elif avg_age <= 10:
+        age_desc = f"{avg_age}-year-old"
+        student_count = 8
+        engagement = "engaged and attentive expressions, seated in semi-circle facing teacher"
+    elif avg_age <= 12:
+        age_desc = f"{avg_age}-year-old"
+        student_count = 8
+        engagement = "thoughtful and engaged expressions, taking notes, seated in organized rows facing teacher"
+    else:
+        age_desc = f"{avg_age}-year-old"
+        student_count = 8
+        engagement = "thoughtful and engaged expressions, taking detailed notes, seated in organized rows facing teacher"
+    
+    # Build student descriptions with interest-based details (combine multiple interests)
+    # Best practice: Split on common delimiters (and, &, comma, or) and detect each interest separately
+    interest_elements = []
+    if child_interest:
+        # Split on common delimiters to handle "science and art" or "music, sports"
+        interest_parts = re.split(r'\s+and\s+|\s*&\s*|\s*,\s*|\s+or\s+', str(child_interest), flags=re.IGNORECASE)
+        
+        # Check each part for interests
+        for interest_part in interest_parts:
+            interest_lower = interest_part.strip().lower()
+            if not interest_lower:
+                continue
+                
+            # Check for multiple interests and combine them
+            if "science" in interest_lower or "experiment" in interest_lower:
+                if not any("science" in elem for elem in interest_elements):
+                    interest_elements.append("wearing science-themed t-shirts with beakers or atoms")
+            if "art" in interest_lower or "draw" in interest_lower or "painting" in interest_lower:
+                if not any("art" in elem for elem in interest_elements):
+                    interest_elements.append("with colorful art supplies visible on desks")
+            if "sport" in interest_lower or "athletic" in interest_lower or "soccer" in interest_lower or "basketball" in interest_lower or "football" in interest_lower:
+                if not any("athletic" in elem or "sport" in elem for elem in interest_elements):
+                    interest_elements.append("wearing athletic wear or sports-themed clothing")
+            if "music" in interest_lower or "sing" in interest_lower or "instrument" in interest_lower:
+                if not any("music" in elem for elem in interest_elements):
+                    interest_elements.append("with musical instruments or music notes visible")
+            if "animal" in interest_lower or "nature" in interest_lower or "pet" in interest_lower:
+                if not any("animal" in elem or "nature" in elem for elem in interest_elements):
+                    interest_elements.append("wearing animal-themed clothing or nature-inspired accessories")
+            if "space" in interest_lower or "astronaut" in interest_lower or "planet" in interest_lower:
+                if not any("space" in elem for elem in interest_elements):
+                    interest_elements.append("with space-themed accessories or rocket designs")
+            if "reading" in interest_lower or "book" in interest_lower or "story" in interest_lower:
+                if not any("book" in elem for elem in interest_elements):
+                    interest_elements.append("with books visible on desks")
+    
+    students_base = f"{student_count} diverse animated {age_desc} children with signature Pixar big expressive eyes and stylized features, various skin tones and hairstyles, all wearing casual school clothes (t-shirts, jeans, dresses)"
+    
+    if interest_elements:
+        students_base += f", {', '.join(interest_elements)}"
+    
+    students_base += f", {engagement}"
+    
+    # Add key student characters (age-appropriate)
+    if avg_age <= 5:
+        key_students = [
+            "Maya (girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often)",
+            "Oliver (boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression)"
+        ]
+    elif avg_age <= 7:
+        key_students = [
+            "Maya (girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often)",
+            "Oliver (boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression)",
+            "Sofia (girl with long blonde hair in ponytail, light skin, purple dress with white collar, thoughtful and takes notes)"
+        ]
+    elif avg_age <= 10:
+        key_students = [
+            "Maya (girl with round glasses and black hair in two braids, light brown skin, green t-shirt with flower design, eager and raises hand often)",
+            "Oliver (boy with curly bright orange-red hair, pale skin with freckles, blue and white striped polo shirt, curious expression)",
+            "Sofia (girl with long blonde hair in ponytail, light skin, purple dress with white collar, thoughtful and takes notes)",
+            "James (boy with short black hair and darker skin, bright yellow t-shirt, wide smile and excited demeanor)",
+            "Aisha (girl with brown skin and natural curly black hair in puffs, pink hoodie, asks questions)",
+            "Ethan (boy with straight brown hair, medium skin, red sweater, focused and concentrating)"
+        ]
+    else:
+        key_students = [
+            "Maya (girl with round glasses and black hair in two braids, light brown skin, green t-shirt, focused and takes detailed notes)",
+            "Oliver (boy with curly bright orange-red hair, pale skin with freckles, blue polo shirt, analytical expression)",
+            "Sofia (girl with long blonde hair in ponytail, light skin, purple cardigan, thoughtful and asks insightful questions)",
+            "James (boy with short black hair and darker skin, bright yellow t-shirt, engaged and participates actively)",
+            "Aisha (girl with brown skin and natural curly black hair, pink hoodie, asks thoughtful questions)",
+            "Ethan (boy with straight brown hair, medium skin, red sweater, focused and concentrating)"
+        ]
+    
+    students = f"{students_base}. Key students include: {', '.join(key_students)}"
+    
+    base_scene = {
+        "style": style,
+        "setting": setting,
+        "teacher": teacher,
+        "students": students
+    }
+    
+    return base_scene
 
