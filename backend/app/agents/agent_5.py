@@ -158,7 +158,8 @@ async def render_video_with_remotion(
     websocket_manager: Optional[WebSocketManager] = None,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
-    supersessionid: Optional[str] = None
+    supersessionid: Optional[str] = None,
+    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
 ) -> str:
     """
     Render video using Remotion CLI.
@@ -327,7 +328,7 @@ async def render_video_with_remotion(
 
                 # Parse rendering progress: "Rendered 100/1800"
                 match = re.search(r'Rendered (\d+)/(\d+)', line)
-                if match and websocket_manager and session_id:
+                if match and session_id:
                     current = int(match.group(1))
                     total = int(match.group(2))
                     percent = int((current / total) * 100)
@@ -335,29 +336,73 @@ async def render_video_with_remotion(
                     # Only send updates every 5% to avoid flooding
                     if percent >= last_progress_update + 5 or current == total:
                         last_progress_update = percent
-                        # Schedule the async send in the event loop
+                        message = f"Rendering video: {percent}% ({current}/{total} frames)"
+                        
+                        # Use status_callback if available (preferred), otherwise fall back to websocket_manager
                         import asyncio
                         try:
                             loop = asyncio.get_event_loop()
                             if loop.is_running():
-                                asyncio.run_coroutine_threadsafe(
-                                    websocket_manager.send_progress(session_id, {
-                                        "agentnumber": "Agent5",
-                                        "userID": user_id or "",
-                                        "sessionID": session_id,
-                                        "supersessionID": supersessionid or "",
-                                        "status": "processing",
-                                        "message": f"Rendering video: {percent}% ({current}/{total} frames)",
-                                        "timestamp": int(time.time() * 1000),
-                                        "progress": {
-                                            "stage": "rendering",
-                                            "current": current,
-                                            "total": total,
-                                            "percent": percent
-                                        }
-                                    }),
-                                    loop
-                                )
+                                if status_callback:
+                                    # Use callback (preferred - goes through orchestrator)
+                                    # Pass message and progress as kwargs
+                                    asyncio.run_coroutine_threadsafe(
+                                        status_callback(
+                                            agentnumber="Agent5",
+                                            status="processing",
+                                            userID=user_id or "",
+                                            sessionID=session_id,
+                                            timestamp=int(time.time() * 1000),
+                                            message=message,
+                                            progress={
+                                                "stage": "rendering",
+                                                "current": current,
+                                                "total": total,
+                                                "percent": percent
+                                            }
+                                        ),
+                                        loop
+                                    )
+                                # Also send detailed progress via websocket if available (for backwards compatibility)
+                                if websocket_manager:
+                                    asyncio.run_coroutine_threadsafe(
+                                        websocket_manager.send_progress(session_id, {
+                                            "agentnumber": "Agent5",
+                                            "userID": user_id or "",
+                                            "sessionID": session_id,
+                                            "supersessionID": supersessionid or "",
+                                            "status": "processing",
+                                            "message": message,
+                                            "timestamp": int(time.time() * 1000),
+                                            "progress": {
+                                                "stage": "rendering",
+                                                "current": current,
+                                                "total": total,
+                                                "percent": percent
+                                            }
+                                        }),
+                                        loop
+                                    )
+                                elif websocket_manager:
+                                    # Fallback to websocket_manager only
+                                    asyncio.run_coroutine_threadsafe(
+                                        websocket_manager.send_progress(session_id, {
+                                            "agentnumber": "Agent5",
+                                            "userID": user_id or "",
+                                            "sessionID": session_id,
+                                            "supersessionID": supersessionid or "",
+                                            "status": "processing",
+                                            "message": message,
+                                            "timestamp": int(time.time() * 1000),
+                                            "progress": {
+                                                "stage": "rendering",
+                                                "current": current,
+                                                "total": total,
+                                                "percent": percent
+                                            }
+                                        }),
+                                        loop
+                                    )
                         except Exception as e:
                             print(f"Failed to send render progress: {e}")
 
@@ -1008,6 +1053,14 @@ async def agent_5_process(
             total_cost = 0.0
             cost_per_section = {}
             
+            # Send starting status
+            await send_status(
+                "Agent5", "starting",
+                supersessionID=supersessionid,
+                message="Restarting Agent5 from Remotion rendering stage...",
+                cost=total_cost
+            )
+            
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
@@ -1118,7 +1171,8 @@ async def agent_5_process(
             websocket_manager=websocket_manager,  # render_video_with_remotion may still use it
             session_id=session_id,
             user_id=user_id,
-            supersessionid=supersessionid
+            supersessionid=supersessionid,
+            status_callback=status_callback  # Pass callback for status updates during rendering
         )
 
         # Upload video to S3 - use scaffold_test/{userId}/{sessionId}/agent5/ path
