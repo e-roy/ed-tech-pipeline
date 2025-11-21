@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text as sql_text
 from app.config import get_settings
 from app.services.storage import StorageService
 from app.services.websocket_manager import WebSocketManager
@@ -418,7 +418,7 @@ async def get_video_session(session_id: str, db: Session = Depends(get_db)):
     """
     try:
         result = db.execute(
-            text("SELECT * FROM video_session WHERE id = :session_id"),
+            sql_text("SELECT * FROM video_session WHERE id = :session_id"),
             {"session_id": session_id}
         ).fetchone()
         
@@ -532,7 +532,7 @@ async def start_processing(
             user_id = request.userID.strip()
             try:
                 result = db.execute(
-                    text(
+                    sql_text(
                         "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                     ),
                     {"session_id": session_id, "user_id": user_id},
@@ -686,9 +686,8 @@ async def start_processing(
         # Query video_session table to get the same data Agent2 uses
         video_session_data = None
         try:
-            from sqlalchemy import text
             result = db.execute(
-                text(
+                sql_text(
                     "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                 ),
                 {"session_id": request.sessionID, "user_id": request.userID},
