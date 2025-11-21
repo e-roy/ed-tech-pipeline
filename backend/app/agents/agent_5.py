@@ -730,6 +730,149 @@ async def agent_5_process(
 
         total_clips = sum(clips_per_section.values())
         
+        # Define video generation function (used only if not restarting)
+        async def generate_section_video(section: str) -> tuple[str, str]:
+            """Generate multiple video clips for a section and return (section, concatenated_url)"""
+            import subprocess
+            import httpx
+
+            prompt = visual_prompts[section]
+            clips_needed = clips_per_section[section]
+
+            logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
+
+            # Extract base_scene parameters if present for consistency
+            # Check both new format (agent_2_data) and old format (root level)
+            if agent_2_data:
+                base_scene = agent_2_data.get("base_scene", {})
+            elif pipeline_data:
+                base_scene = pipeline_data.get("base_scene", {})
+            else:
+                base_scene = {}
+            style = base_scene.get("style", "")
+            setting = base_scene.get("setting", "")
+            teacher_desc = base_scene.get("teacher", "")
+            students_desc = base_scene.get("students", "")
+
+            # Build consistency anchor
+            consistency_anchor = ""
+            if style or setting or teacher_desc or students_desc:
+                consistency_parts = []
+                if style:
+                    consistency_parts.append(style)
+                if setting:
+                    consistency_parts.append(f"Setting: {setting}")
+                if teacher_desc:
+                    consistency_parts.append(f"Teacher: {teacher_desc}")
+                if students_desc:
+                    consistency_parts.append(f"Students: {students_desc}")
+                consistency_anchor = " | ".join(consistency_parts) + " | "
+
+            # Generate progressive prompts for each clip position
+            clip_prompts = []
+            for i in range(clips_needed):
+                # Create clip-specific temporal and action cues based on position
+                if clips_needed == 1:
+                    # Single clip: use full prompt as-is
+                    clip_prompt = f"{consistency_anchor}{prompt}, smooth cinematic movement, maintaining consistent visual style throughout"
+                elif i == 0:
+                    # First clip: Opening/beginning of action
+                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt}, camera slowly pushes in, characters beginning action, establishing shot with clear framing"
+                elif i == clips_needed - 1:
+                    # Final clip: Conclusion of action
+                    clip_prompt = f"{consistency_anchor}CONTINUING FINAL SHOT: {prompt}, camera holds steady from previous angle, characters completing action, maintaining exact same composition and lighting as previous clip"
+                else:
+                    # Middle clips: Progression of action
+                    clip_prompt = f"{consistency_anchor}MID-SEQUENCE SHOT {i+1}: {prompt}, camera maintains previous angle and framing, characters mid-action, same positioning and lighting"
+
+                clip_prompts.append(clip_prompt)
+
+            # Generate deterministic seed for this section
+            # Use hash of section name to get consistent seed per section
+            import hashlib
+            section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
+            section_seed = section_hash % 100000  # Keep seed in reasonable range
+
+            logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
+
+            # Generate all clips for this section with same seed
+            generated_clips = []
+            for clip_idx, clip_prompt in enumerate(clip_prompts):
+                video_url = await generate_video_replicate(
+                    clip_prompt,
+                    settings.REPLICATE_API_KEY,
+                    model="minimax",
+                    seed=section_seed  # Same seed for all clips in this section
+                )
+                generated_clips.append(video_url)
+
+                # Update progress
+                completed_videos.append(f"{section}_{clip_idx}")
+                await send_status(
+                    "Agent5",
+                    "processing",
+                    supersessionID=supersessionid,
+                    message=f"Generated clip {len(completed_videos)}/{total_clips} ({section} {clip_idx+1}/{clips_needed})",
+                    progress={
+                        "stage": "video_generation",
+                        "completed": len(completed_videos),
+                        "total": total_clips,
+                        "section": section
+                    }
+                )
+
+            # If only one clip, return it directly
+            if len(generated_clips) == 1:
+                return (section, generated_clips[0])
+
+            # Concatenate multiple clips
+            # Download all clips to temp files
+            clip_paths = []
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for i, clip_url in enumerate(generated_clips):
+                    response = await client.get(clip_url)
+                    response.raise_for_status()
+                    clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
+                    with open(clip_path, 'wb') as f:
+                        f.write(response.content)
+                    clip_paths.append(clip_path)
+
+            # Create concat list file
+            concat_list_path = os.path.join(temp_dir, f"{section}_concat_list.txt")
+            with open(concat_list_path, 'w') as f:
+                for clip_path in clip_paths:
+                    f.write(f"file '{clip_path}'\n")
+
+            # Concatenate clips using ffmpeg
+            output_path = os.path.join(temp_dir, f"{section}_concatenated.mp4")
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list_path,
+                "-c", "copy",
+                output_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
+                # Fallback to first clip
+                return (section, generated_clips[0])
+
+            # Upload concatenated video to S3 for Remotion to access
+            with open(output_path, 'rb') as f:
+                concat_content = f.read()
+
+            # Use scaffold_test/{userId}/{sessionId}/agent5/ path
+            concat_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_concat.mp4"
+            storage_service.upload_file_direct(concat_content, concat_s3_key, "video/mp4")
+            concat_url = storage_service.generate_presigned_url(concat_s3_key, expires_in=3600)
+
+            logger.info(f"[{session_id}] Concatenated {len(generated_clips)} clips for {section}")
+
+            return (section, concat_url)
+        
         # RESTART LOGIC: If restarting from Remotion, skip clip generation and load from S3
         if restart_from_remotion:
             logger.info(f"[{session_id}] Restarting from Remotion - loading existing clips from S3")
@@ -767,157 +910,8 @@ async def agent_5_process(
                 message=f"All {total_clips} clips verified, skipping to Remotion rendering..."
             )
             
-            # Skip to line 880 (update scenes with loaded URLs)
-            # We'll set a flag to skip the generation block
-            skip_generation = True
         else:
-            skip_generation = False
-
-        # Only generate videos if not restarting
-        if not skip_generation:
-            async def generate_section_video(section: str) -> tuple[str, str]:
-                """Generate multiple video clips for a section and return (section, concatenated_url)"""
-                import subprocess
-                import httpx
-
-                prompt = visual_prompts[section]
-                clips_needed = clips_per_section[section]
-
-                logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
-
-                # Extract base_scene parameters if present for consistency
-                # Check both new format (agent_2_data) and old format (root level)
-                if agent_2_data:
-                    base_scene = agent_2_data.get("base_scene", {})
-                elif pipeline_data:
-                    base_scene = pipeline_data.get("base_scene", {})
-                else:
-                    base_scene = {}
-                style = base_scene.get("style", "")
-                setting = base_scene.get("setting", "")
-                teacher_desc = base_scene.get("teacher", "")
-                students_desc = base_scene.get("students", "")
-
-                # Build consistency anchor
-                consistency_anchor = ""
-                if style or setting or teacher_desc or students_desc:
-                    consistency_parts = []
-                    if style:
-                        consistency_parts.append(style)
-                    if setting:
-                        consistency_parts.append(f"Setting: {setting}")
-                    if teacher_desc:
-                        consistency_parts.append(f"Teacher: {teacher_desc}")
-                    if students_desc:
-                        consistency_parts.append(f"Students: {students_desc}")
-                    consistency_anchor = " | ".join(consistency_parts) + " | "
-
-                # Generate progressive prompts for each clip position
-                clip_prompts = []
-                for i in range(clips_needed):
-                    # Create clip-specific temporal and action cues based on position
-                    if clips_needed == 1:
-                        # Single clip: use full prompt as-is
-                        clip_prompt = f"{consistency_anchor}{prompt}, smooth cinematic movement, maintaining consistent visual style throughout"
-                    elif i == 0:
-                        # First clip: Opening/beginning of action
-                        clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt}, camera slowly pushes in, characters beginning action, establishing shot with clear framing"
-                    elif i == clips_needed - 1:
-                        # Final clip: Conclusion of action
-                        clip_prompt = f"{consistency_anchor}CONTINUING FINAL SHOT: {prompt}, camera holds steady from previous angle, characters completing action, maintaining exact same composition and lighting as previous clip"
-                    else:
-                        # Middle clips: Progression of action
-                        clip_prompt = f"{consistency_anchor}MID-SEQUENCE SHOT {i+1}: {prompt}, camera maintains previous angle and framing, characters mid-action, same positioning and lighting"
-
-                    clip_prompts.append(clip_prompt)
-
-                # Generate deterministic seed for this section
-                # Use hash of section name to get consistent seed per section
-                import hashlib
-                section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
-                section_seed = section_hash % 100000  # Keep seed in reasonable range
-
-                logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
-
-                # Generate all clips for this section with same seed
-                generated_clips = []
-                for clip_idx, clip_prompt in enumerate(clip_prompts):
-                    video_url = await generate_video_replicate(
-                        clip_prompt,
-                        settings.REPLICATE_API_KEY,
-                        model="minimax",
-                        seed=section_seed  # Same seed for all clips in this section
-                    )
-                    generated_clips.append(video_url)
-
-                    # Update progress
-                    completed_videos.append(f"{section}_{clip_idx}")
-                    await send_status(
-                        "Agent5",
-                        "processing",
-                        supersessionID=supersessionid,
-                        message=f"Generated clip {len(completed_videos)}/{total_clips} ({section} {clip_idx+1}/{clips_needed})",
-                        progress={
-                            "stage": "video_generation",
-                            "completed": len(completed_videos),
-                            "total": total_clips,
-                            "section": section
-                        }
-                    )
-
-                # If only one clip, return it directly
-                if len(generated_clips) == 1:
-                    return (section, generated_clips[0])
-
-                # Concatenate multiple clips
-                # Download all clips to temp files
-                clip_paths = []
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    for i, clip_url in enumerate(generated_clips):
-                        response = await client.get(clip_url)
-                        response.raise_for_status()
-                        clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
-                        with open(clip_path, 'wb') as f:
-                            f.write(response.content)
-                        clip_paths.append(clip_path)
-
-                # Create concat list file
-                concat_list_path = os.path.join(temp_dir, f"{section}_concat_list.txt")
-                with open(concat_list_path, 'w') as f:
-                    for clip_path in clip_paths:
-                        f.write(f"file '{clip_path}'\n")
-
-                # Concatenate clips using ffmpeg
-                output_path = os.path.join(temp_dir, f"{section}_concatenated.mp4")
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-f", "concat",
-                    "-safe", "0",
-                    "-i", concat_list_path,
-                    "-c", "copy",
-                    output_path
-                ]
-
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
-                    # Fallback to first clip
-                    return (section, generated_clips[0])
-
-                # Upload concatenated video to S3 for Remotion to access
-                with open(output_path, 'rb') as f:
-                    concat_content = f.read()
-
-                # Use scaffold_test/{userId}/{sessionId}/agent5/ path
-                concat_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_concat.mp4"
-                storage_service.upload_file_direct(concat_content, concat_s3_key, "video/mp4")
-                concat_url = storage_service.generate_presigned_url(concat_s3_key, expires_in=3600)
-
-                logger.info(f"[{session_id}] Concatenated {len(generated_clips)} clips for {section}")
-
-                return (section, concat_url)
-
-            # Run all 4 video generations in parallel
+            # Generate videos normally
             results = await asyncio.gather(
                 *[generate_section_video(section) for section in sections]
             )
