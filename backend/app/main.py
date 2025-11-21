@@ -682,8 +682,34 @@ async def start_processing(
             raise HTTPException(status_code=400, detail="userID is required for Agent4")
         if not request.sessionID or not request.sessionID.strip():
             raise HTTPException(status_code=400, detail="sessionID is required for Agent4")
-        if not request.script:
-            raise HTTPException(status_code=400, detail="script is required for Agent4")
+        
+        # Query video_session table to get the same data Agent2 uses
+        video_session_data = None
+        try:
+            from sqlalchemy import text
+            result = db.execute(
+                text(
+                    "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                ),
+                {"session_id": request.sessionID, "user_id": request.userID},
+            ).fetchone()
+            
+            if result:
+                # Convert result to dict (same as orchestrator does)
+                if hasattr(result, "_mapping"):
+                    video_session_data = dict(result._mapping)
+                else:
+                    video_session_data = {
+                        "id": getattr(result, "id", None),
+                        "user_id": getattr(result, "user_id", None),
+                        "topic": getattr(result, "topic", None),
+                        "confirmed_facts": getattr(result, "confirmed_facts", None),
+                        "generated_script": getattr(result, "generated_script", None),
+                    }
+                logger.info(f"Loaded video_session data for Agent4 session {request.sessionID}")
+        except Exception as e:
+            logger.warning(f"Could not load video_session data for Agent4: {e}")
+            # Continue anyway - Agent4 can work with just the script parameter
         
         # Start Agent4 directly
         async def run_agent_4_with_error_handling():
@@ -703,11 +729,13 @@ async def start_processing(
                     websocket_manager=websocket_manager,
                     user_id=request.userID,
                     session_id=request.sessionID,
-                    script=request.script,
+                    script=request.script or {},  # Use provided script or empty dict (will be extracted from DB)
                     voice=request.voice or "alloy",
                     audio_option=request.audio_option or "tts",
                     storage_service=storage_service,
-                    agent2_data=None  # Deprecated
+                    agent2_data=None,  # Deprecated
+                    video_session_data=video_session_data,  # Pass same data as orchestrator
+                    db=db  # Pass database session so Agent4 can query if needed
                 )
             except Exception as e:
                 logger.exception(f"Error in agent_4_process: {e}")

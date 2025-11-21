@@ -252,11 +252,34 @@ async def agent_4_process(
                 f"Script must have all parts: hook, concept, process, conclusion"
             )
 
+        # Normalize script format: AudioPipelineAgent expects "text" field, but Agent2 generates "narration"
+        # Convert "narration" to "text" for each part if needed
+        normalized_script = {}
+        for part_name in required_parts:
+            part_data = script.get(part_name, {})
+            if isinstance(part_data, dict):
+                normalized_part = dict(part_data)
+                # If "text" doesn't exist but "narration" does, copy narration to text
+                if "text" not in normalized_part and "narration" in normalized_part:
+                    normalized_part["text"] = normalized_part["narration"]
+                normalized_script[part_name] = normalized_part
+            else:
+                normalized_script[part_name] = part_data
+        
+        # Log script format validation
+        logger.info(f"Agent4 normalized script format - checking text fields for audio generation")
+        for part_name in required_parts:
+            part_text = normalized_script.get(part_name, {}).get("text", "")
+            if not part_text:
+                logger.warning(f"Agent4: Part '{part_name}' has no text field after normalization - audio generation may fail")
+            else:
+                logger.info(f"Agent4: Part '{part_name}' has {len(part_text)} characters of text ready for TTS")
+
         # Create agent input
         agent_input = AgentInput(
             session_id=session_id,
             data={
-                "script": script,
+                "script": normalized_script,
                 "voice": voice,
                 "audio_option": audio_option,
                 "user_id": user_id
