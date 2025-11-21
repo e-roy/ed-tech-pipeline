@@ -237,6 +237,66 @@ await asyncio.to_thread(process.wait)
 - ALB target should remain healthy during video generation
 - Background tasks continue processing without blocking the main event loop
 
+## SSH Crashes When Agent5 Starts Remotion
+
+### Problem
+SSH connections were becoming unresponsive/timing out when Agent5 attempted to start Remotion rendering. This occurred consistently, suggesting a resource exhaustion issue.
+
+### Root Cause Analysis
+When Remotion starts via `bunx remotion render`, it spawns multiple child processes (bun, node, Chrome/headless browser, etc.). These processes can:
+- Exhaust file descriptors
+- Consume excessive memory/CPU
+- Create too many processes, hitting system limits
+- Leave zombie/orphaned processes after completion
+
+This resource exhaustion causes the system to become unresponsive, making SSH unable to accept new connections.
+
+### Solution Implemented
+**File**: `backend/app/agents/agent_5.py`
+
+**Changes Made:**
+
+1. **Resource Limits** (RLIMIT_NPROC):
+   ```python
+   def set_process_limits():
+       resource.setrlimit(resource.RLIMIT_NPROC, (100, 200))  # Soft: 100, Hard: 200
+   ```
+   - Limits the number of child processes Remotion can spawn
+   - Prevents process exhaustion that could affect SSH
+
+2. **Process Group Isolation**:
+   ```python
+   process = subprocess.Popen(
+       ...,
+       preexec_fn=set_process_limits,
+       start_new_session=True  # Create new process group
+   )
+   ```
+   - Creates isolated process group for Remotion and all its children
+   - Enables clean termination of entire process tree
+
+3. **Proper Cleanup**:
+   ```python
+   finally:
+       if process.poll() is None:
+           os.killpg(os.getpgid(process.pid), signal.SIGTERM)  # Kill process group
+           # Fallback to SIGKILL if needed
+   ```
+   - Ensures all child processes are terminated
+   - Prevents zombie/orphaned processes from consuming resources
+   - Uses process group termination to kill entire Remotion process tree
+
+**Key Benefits:**
+- Prevents Remotion from spawning unlimited child processes
+- Ensures proper cleanup of all processes
+- Maintains SSH responsiveness during Remotion rendering
+- Prevents resource exhaustion that could crash the system
+
+### Verification
+- SSH should remain responsive during Remotion rendering
+- System resources should not be exhausted
+- All Remotion child processes should be properly cleaned up
+
 ## Notes
 
 - Instance uses dynamic IP (not Elastic IP) - may change on restart
@@ -245,4 +305,5 @@ await asyncio.to_thread(process.wait)
 - Deployment requires SSH access to EC2 instance
 - Code is pulled from GitHub master branch
 - Single worker configuration requires careful async/threading to avoid blocking
+- Remotion subprocess has resource limits to prevent system resource exhaustion
 
