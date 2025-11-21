@@ -490,7 +490,7 @@
                     Kill All Active Agents
                 </button>
                 <button type="button" id="restart-agent5-btn" class="submit-btn">
-                    🔄 Restart from Remotion
+                    🔄 Restart from Concatenation
                 </button>
             </div>
             
@@ -1835,10 +1835,10 @@ ${JSON.stringify(result, null, 2)}`;
         document.getElementById('kill-all-agents-btn').addEventListener('click', killAllAgents);
 
         // Attach event listener to restart Agent5 button
-        document.getElementById('restart-agent5-btn').addEventListener('click', restartAgent5FromRemotion);
+        document.getElementById('restart-agent5-btn').addEventListener('click', restartAgent5FromConcat);
 
-        // Function to restart Agent5 from Remotion rendering
-        async function restartAgent5FromRemotion() {
+        // Function to restart Agent5 from concatenation
+        async function restartAgent5FromConcat() {
             const restartBtn = document.getElementById('restart-agent5-btn');
             const userID = document.getElementById('fullTestUserID').value;
             const sessionID = document.getElementById('fullTestSessionID').value;
@@ -1860,7 +1860,7 @@ ${JSON.stringify(result, null, 2)}`;
                 agent5Error.classList.remove('show');
                 
                 // Call restart endpoint
-                const response = await fetch(`${API_BASE_URL}/api/restart-agent5-remotion`, {
+                const response = await fetch(`${API_BASE_URL}/api/restart-agent5-concat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1884,7 +1884,7 @@ ${JSON.stringify(result, null, 2)}`;
                 
                 // Re-enable button after initiating
                 restartBtn.disabled = false;
-                restartBtn.textContent = '🔄 Restart from Remotion';
+                restartBtn.textContent = '🔄 Restart from Concatenation';
                 
             } catch (error) {
                 console.error('Error restarting Agent5:', error);
@@ -1893,7 +1893,7 @@ ${JSON.stringify(result, null, 2)}`;
                 // Re-enable button on error
                 restartBtn.style.display = 'block';
                 restartBtn.disabled = false;
-                restartBtn.textContent = '🔄 Restart from Remotion';
+                restartBtn.textContent = '🔄 Restart from Concatenation';
             }
         }
     </script>
