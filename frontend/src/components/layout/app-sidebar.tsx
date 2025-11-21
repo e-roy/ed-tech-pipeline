@@ -24,8 +24,12 @@ import {
   SidebarMenuItem,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Collapsible,
   CollapsibleContent,
@@ -33,6 +37,7 @@ import {
 } from "@/components/ui/collapsible";
 import { NavUser } from "./nav-user";
 import { api } from "@/trpc/react";
+import { Separator } from "@/components/ui/separator";
 
 const navItems = [
   {
@@ -103,7 +108,7 @@ export function AppSidebar({
 
   return (
     <Sidebar
-      style={{ "--sidebar-width": "12rem" } as React.CSSProperties}
+      style={{ "--sidebar-width": "16rem" } as React.CSSProperties}
       collapsible="none"
       className="border-r p-2 px-1"
       {...props}
@@ -159,18 +164,28 @@ export function AppSidebar({
                                 const isActive =
                                   pathname ===
                                   `/dashboard/history/${session.id}`;
+                                const topic = session.topic ?? "Untitled";
                                 return (
                                   <SidebarMenuSubItem key={session.id}>
-                                    <SidebarMenuSubButton
-                                      asChild
-                                      isActive={isActive}
-                                    >
-                                      <Link
-                                        href={`/dashboard/history/${session.id}`}
-                                      >
-                                        {session.topic ?? "Untitled"}
-                                      </Link>
-                                    </SidebarMenuSubButton>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <SidebarMenuSubButton
+                                          asChild
+                                          isActive={isActive}
+                                          className="min-w-0"
+                                        >
+                                          <Link
+                                            href={`/dashboard/history/${session.id}`}
+                                            className="block truncate"
+                                          >
+                                            {topic}
+                                          </Link>
+                                        </SidebarMenuSubButton>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>{topic}</p>
+                                      </TooltipContent>
+                                    </Tooltip>
                                   </SidebarMenuSubItem>
                                 );
                               })
@@ -205,7 +220,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarSeparator />
+        <Separator />
         <SidebarGroup>
           <SidebarGroupContent className="px-1.5 md:px-0">
             <SidebarMenu>

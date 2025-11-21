@@ -15,7 +15,7 @@ export function DashboardLayoutClient({
   const pathname = usePathname();
 
   // Show double-sided panel for create and history routes
-  const showDoublePanel = pathname === "/dashboard/create";
+  const showDoublePanel = pathname === "/dashboard/old-create";
 
   return (
     <SidebarInset className="flex-1">
@@ -32,9 +32,7 @@ export function DashboardLayoutClient({
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
-        <div className="">
-          <div className="flex h-full flex-col">{children}</div>
-        </div>
+        <div className="flex h-full flex-col">{children}</div>
       )}
     </SidebarInset>
   );
