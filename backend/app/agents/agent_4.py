@@ -31,6 +31,7 @@ async def agent_4_process(
     audio_option: str = "tts",
     storage_service: Optional[StorageService] = None,
     agent2_data: Optional[Dict[str, Any]] = None,
+    video_session_data: Optional[dict] = None,
     db: Optional[Session] = None,
     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
 ) -> Dict[str, Any]:
@@ -45,7 +46,8 @@ async def agent_4_process(
         voice: TTS voice to use (default: alloy)
         audio_option: Audio generation option (tts, upload, none, instrumental)
         storage_service: Storage service for S3 operations
-        agent2_data: Data passed from Agent2 (template_id, diagram_id, script_id, etc.)
+        agent2_data: Data passed from Agent2 (template_id, diagram_id, script_id, etc.) - deprecated
+        video_session_data: Optional dict with video_session row data (for Full Test mode) - same as Agent2 uses
         db: Database session for querying video_session table
         status_callback: Callback function for sending status updates to orchestrator
 
@@ -56,8 +58,8 @@ async def agent_4_process(
     if storage_service is None:
         storage_service = StorageService()
     
-    # Query video_session table if db is provided
-    if db is not None:
+    # Query video_session table if db is provided and video_session_data not passed in
+    if db is not None and video_session_data is None:
         try:
             result = db.execute(
                 text(
@@ -69,7 +71,7 @@ async def agent_4_process(
             if not result:
                 raise ValueError(f"Video session not found for session_id={session_id} and user_id={user_id}")
             
-            # Convert result to dict
+            # Convert result to dict (same as Agent2 does)
             if hasattr(result, "_mapping"):
                 video_session_data = dict(result._mapping)
             else:
@@ -80,18 +82,66 @@ async def agent_4_process(
                     "confirmed_facts": getattr(result, "confirmed_facts", None),
                     "generated_script": getattr(result, "generated_script", None),
                 }
-            
-            # Extract script from video_session if not provided
-            if not script and video_session_data.get("generated_script"):
-                from app.agents.agent_2 import extract_script_from_generated_script
-                extracted_script = extract_script_from_generated_script(video_session_data.get("generated_script"))
-                if extracted_script:
-                    script = extracted_script
-            
-            logger.info(f"Agent4 loaded video_session data for session {session_id}")
+            logger.info(f"Agent4 loaded video_session data from database for session {session_id}")
         except Exception as e:
             logger.error(f"Agent4 failed to query video_session: {e}")
             raise
+    
+    # Extract data from video_session (same as Agent2 does)
+    topic = None
+    confirmed_facts = None
+    generation_script = None
+    
+    if video_session_data:
+        topic = video_session_data.get("topic")
+        confirmed_facts = video_session_data.get("confirmed_facts")
+        generation_script = video_session_data.get("generated_script")
+        logger.info(f"Agent4 extracted data from video_session: topic={bool(topic)}, confirmed_facts={bool(confirmed_facts)}, generated_script={bool(generation_script)}")
+    
+    # Extract script from generation_script (same as Agent2 does)
+    if not script and generation_script:
+        from app.agents.agent_2 import extract_script_from_generated_script
+        script = extract_script_from_generated_script(generation_script)
+        if script:
+            logger.info(f"Agent4 extracted script from generation_script for session {session_id}")
+    
+    # If script is still empty, wait for Agent2 to write it (they run in parallel)
+    if not script and db is not None:
+        logger.info(f"Agent4 waiting for Agent2 to generate script for session {session_id}")
+        max_retries = 30  # Wait up to 30 seconds
+        retry_count = 0
+        while not script and retry_count < max_retries:
+            await asyncio.sleep(1)  # Wait 1 second between retries
+            retry_count += 1
+            
+            # Re-query database for updated script
+            result = db.execute(
+                text(
+                    "SELECT generated_script FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                ),
+                {"session_id": session_id, "user_id": user_id},
+            ).fetchone()
+            
+            if result:
+                if hasattr(result, "_mapping"):
+                    generated_script = dict(result._mapping).get("generated_script")
+                else:
+                    generated_script = getattr(result, "generated_script", None)
+                
+                if generated_script:
+                    from app.agents.agent_2 import extract_script_from_generated_script
+                    extracted_script = extract_script_from_generated_script(generated_script)
+                    if extracted_script:
+                        script = extracted_script
+                        logger.info(f"Agent4 found script after {retry_count} seconds")
+                        break
+        
+        if not script:
+            raise ValueError(
+                f"Agent4 could not find script in video_session after waiting {max_retries} seconds. "
+                f"Agent2 may not have generated the script yet or there was an error. "
+                f"Topic: {bool(topic)}, Confirmed Facts: {bool(confirmed_facts)}, Generation Script: {bool(generation_script)}"
+            )
 
     # Helper function to send status (via callback or websocket_manager)
     async def send_status(agentnumber: str, status: str, **kwargs):
@@ -187,6 +237,21 @@ async def agent_4_process(
             websocket_manager=websocket_manager
         )
 
+        # Validate script before processing
+        if not script:
+            raise ValueError(
+                "Agent4 cannot generate audio without a script. "
+                "Script must be provided or available in video_session.generated_script"
+            )
+        
+        required_parts = ["hook", "concept", "process", "conclusion"]
+        missing_parts = [p for p in required_parts if p not in script]
+        if missing_parts:
+            raise ValueError(
+                f"Agent4 script is missing required parts: {', '.join(missing_parts)}. "
+                f"Script must have all parts: hook, concept, process, conclusion"
+            )
+
         # Create agent input
         agent_input = AgentInput(
             session_id=session_id,
@@ -199,6 +264,7 @@ async def agent_4_process(
         )
 
         # Process audio generation
+        logger.info(f"Agent4 processing audio generation with script parts: {list(script.keys())}")
         audio_result = await audio_agent.process(agent_input)
 
         if not audio_result.success:
