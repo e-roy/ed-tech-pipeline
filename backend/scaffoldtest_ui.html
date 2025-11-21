@@ -564,11 +564,6 @@
 
             <form id="agent5Form">
                 <div class="form-group">
-                    <label for="a5-sessionID">Session ID:</label>
-                    <input type="text" id="a5-sessionID" name="sessionID" placeholder="Leave empty for auto-generated">
-                </div>
-
-                <div class="form-group">
                     <label for="a5-pipeline-data">Pipeline Data (JSON):</label>
                     <textarea id="a5-pipeline-data" name="pipeline_data" rows="30" required>{
   "agent_2_data": {
@@ -601,28 +596,49 @@
           {"position": "back_row_left_seat_5", "name": "Aisha", "description": "girl with brown skin and natural curly black hair in puffs, pink hoodie, asks questions"},
           {"position": "back_row_right_seat_6", "name": "Ethan", "description": "boy with straight brown hair, medium skin, red sweater, focused and concentrating"}
         ]
+      },
+      "camera": {
+        "primary_shot": "medium shot at eye level with slight warm tilt",
+        "movement": "smooth, gentle camera movements only - predominantly static with occasional slow push-in",
+        "framing": "maintain consistent spatial relationships between characters across all clips"
+      },
+      "animation": {
+        "motion_style": "gentle, natural movements - children subtly shifting in seats, teacher's cardigan moving softly with gestures, avoid rapid movements",
+        "continuity": "characters maintain consistent appearance and positioning across clips, continuous lighting angle throughout all clips, smooth frame-to-frame transitions"
       }
     },
     "script": {
       "hook": {
         "text": "Good morning class! Today we're going to discover one of nature's most amazing secrets.",
-        "duration": "14",
-        "visual_prompt": "Wide opening shot from back of classroom showing cream-colored walls with soft blue trim, honey-colored wood floors. Slow dolly forward toward Ms. Rivera (brown ponytail, sky-blue cardigan, white button-up shirt) walking between 8 wooden student desks gesturing with open palms. Students look up with wide expressive Pixar-style eyes - Maya with glasses and braids raises hand eagerly, Oliver with curly orange hair leans forward curiously, Sofia in purple dress takes notes. Warm golden afternoon light streams through large left-side windows showing animated green oak trees. Alphabet poster and periodic table visible on front wall, bookshelf with colorful spines against back wall. Vibrant Pixar 3D animation with consistent character rigs."
+        "scene_text": "Welcome to the world of photosynthesis, where plants transform sunlight into energy.",
+        "scene_action": "Teacher walks between desks gesturing with open palms, students look up with wide eyes, Maya with glasses raises hand eagerly, Oliver with curly orange hair leans forward curiously.",
+        "duration": 12,
+        "visual_prompt": "Wide opening shot from back of classroom showing cream-colored walls with soft blue trim, honey-colored wood floors. Slow dolly forward toward Ms. Rivera (brown ponytail, sky-blue cardigan, white button-up shirt) walking between 8 wooden student desks gesturing with open palms. Students look up with wide expressive Pixar-style eyes - Maya with glasses and braids raises hand eagerly, Oliver with curly orange hair leans forward curiously, Sofia in purple dress takes notes. Warm golden afternoon light streams through large left-side windows showing animated green oak trees. Alphabet poster and periodic table visible on front wall, bookshelf with colorful spines against back wall. Vibrant Pixar 3D animation with consistent character rigs.",
+        "previous_scene_context": "first scene"
       },
       "concept": {
         "text": "Let's look at how plants use sunlight to create their own food through photosynthesis.",
-        "duration": "16",
-        "visual_prompt": "Follow-cam behind Ms. Rivera (same brown ponytail, sky-blue cardigan) walking from desks toward bright window. Gentle depth-of-field shift focusing on small potted plant with vibrant green leaves she picks up. Same 8 diverse students (Maya, Oliver, Sofia, James in yellow shirt, Aisha in pink hoodie, Ethan in red sweater) stand and gather in semicircle around teacher near window. Brighter lighting near window area, same cream walls and honey wood floors. Students point and lean in with animated enthusiasm, same expressive Pixar character models. Smooth camera movement maintains continuity from previous scene."
+        "scene_text": "Plants capture sunlight and convert it into food through a process called photosynthesis.",
+        "scene_action": "Ms. Rivera holds up a small potted plant near the window, students gather in semicircle around her, pointing and leaning in with animated enthusiasm.",
+        "duration": 12,
+        "visual_prompt": "Follow-cam behind Ms. Rivera (same brown ponytail, sky-blue cardigan) walking from desks toward bright window. Gentle depth-of-field shift focusing on small potted plant with vibrant green leaves she picks up. Same 8 diverse students (Maya, Oliver, Sofia, James in yellow shirt, Aisha in pink hoodie, Ethan in red sweater) stand and gather in semicircle around teacher near window. Brighter lighting near window area, same cream walls and honey wood floors. Students point and lean in with animated enthusiasm, same expressive Pixar character models. Smooth camera movement maintains continuity from previous scene.",
+        "previous_scene_context": "hook"
       },
       "process": {
         "text": "Inside each leaf, tiny structures called chloroplasts capture sunlight and transform it into energy and oxygen.",
-        "duration": "18",
-        "visual_prompt": "Extreme close-up on vibrant green leaf, camera pushes through surface into microscopic world. Floating camera movement inside leaf showing soft glowing green textures. Tiny emerald orb-like chloroplasts softly glow and pulse. Gold sparkly particles (sunlight) swirl into chloroplasts which glow brighter and emit glowing energy trails. Blue wisps and silver sparkles (oxygen and energy molecules) combine and move gently along bright pathways. Magical but scientifically inspired Pixar-friendly CGI with smooth motion, educational science visualization aesthetic, vibrant colors."
+        "scene_text": "Inside leaves, chloroplasts capture sunlight and create energy and oxygen for the plant.",
+        "scene_action": "Close-up on green leaf, camera pushes through into microscopic world, glowing chloroplasts pulse with golden light particles swirling in, blue and silver sparkles flow along pathways.",
+        "duration": 12,
+        "visual_prompt": "Extreme close-up on vibrant green leaf, camera pushes through surface into microscopic world. Floating camera movement inside leaf showing soft glowing green textures. Tiny emerald orb-like chloroplasts softly glow and pulse. Gold sparkly particles (sunlight) swirl into chloroplasts which glow brighter and emit glowing energy trails. Blue wisps and silver sparkles (oxygen and energy molecules) combine and move gently along bright pathways. Magical but scientifically inspired Pixar-friendly CGI with smooth motion, educational science visualization aesthetic, vibrant colors.",
+        "previous_scene_context": "concept"
       },
       "conclusion": {
         "text": "And that's how every plant around us turns sunlight into the oxygen we breathe and the food we eat!",
-        "duration": "12",
-        "visual_prompt": "Pull-back transition from glowing chloroplasts to window view, rotate to front-facing shot of group. Same cream classroom with blue trim, Ms. Rivera smiles and gives thumbs-up. Same 8 students (Maya, Oliver, Sofia, James, Aisha, Ethan, plus two background students) point excitedly out window at bright school garden with flowers and plants visible outside. Students chat silently with animated enthusiasm, maintaining exact same Pixar character designs and rigs. Camera rises slightly for uplifting final shot, warm afternoon lighting, energetic happy ending."
+        "scene_text": "Plants everywhere turn sunlight into the oxygen we breathe and the food we eat.",
+        "scene_action": "Pull back from microscopic view to classroom, Ms. Rivera gives thumbs-up, students point excitedly out window at school garden, camera rises for uplifting final shot.",
+        "duration": 12,
+        "visual_prompt": "Pull-back transition from glowing chloroplasts to window view, rotate to front-facing shot of group. Same cream classroom with blue trim, Ms. Rivera smiles and gives thumbs-up. Same 8 students (Maya, Oliver, Sofia, James, Aisha, Ethan, plus two background students) point excitedly out window at bright school garden with flowers and plants visible outside. Students chat silently with animated enthusiasm, maintaining exact same Pixar character designs and rigs. Camera rises slightly for uplifting final shot, warm afternoon lighting, energetic happy ending.",
+        "previous_scene_context": "process"
       }
     }
   },
@@ -672,45 +688,46 @@
 
             <form id="sceneTestForm">
                 <div class="form-group">
-                    <label for="scene-text">Scene Text (narration):</label>
-                    <textarea id="scene-text" name="sceneText" rows="2" required placeholder="The narration text for this scene...">Welcome to the world of photosynthesis, where plants transform sunlight into energy.</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="scene-duration">Duration (seconds):</label>
-                    <input type="number" id="scene-duration" name="sceneDuration" value="12" min="5" max="60" step="1" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="scene-base">Base Scene (JSON - style, characters, setting for consistency):</label>
-                    <textarea id="scene-base" name="sceneBase" rows="15" placeholder="Optional: Leave empty or provide base scene structure...">{
-  "style": "Pixar-style 3D animation, vibrant colors, smooth CGI quality, kid-friendly educational aesthetic",
-  "color_palette": {
-    "primary": "warm yellows and soft blues, cream and sky blue tones",
-    "accent": "vibrant emerald greens, bright orange, warm wood tones",
-    "lighting": "warm golden afternoon sunlight streaming through windows"
+                    <label for="scene-base">Scene Configuration (JSON):</label>
+                    <textarea id="scene-base" name="sceneBase" rows="15" placeholder="Complete scene configuration as JSON...">{
+  "visual": {
+    "style": "Pixar/Disney-quality 3D animation with soft subsurface scattering on skin, detailed fabric textures, realistic hair dynamics, warm depth of field blur on background, smooth CGI quality, kid-friendly educational aesthetic",
+    "color_palette": {
+      "primary": "warm yellows and soft blues, cream and sky blue tones",
+      "accent": "vibrant emerald greens, bright orange, warm wood tones",
+      "lighting": "warm golden hour lighting (4pm afternoon), soft shadows, light streaming from left-side windows creating gentle rim lighting on characters, no harsh contrasts"
+    },
+    "setting": {
+      "location": "bright modern elementary classroom",
+      "walls": "cream-colored walls with light blue trim, colorful alphabet poster visible",
+      "floor": "light honey-colored wood floors",
+      "windows": "large floor-to-ceiling windows on left side showing animated green oak trees gently swaying outside",
+      "props": "student desks with pencils and notebooks, small potted succulent on teacher's desk, whiteboard in background"
+    },
+    "characters": {
+      "teacher": "Ms. Rivera, animated woman in early 30s, warm medium tan skin, shoulder-length dark brown hair in ponytail, light sky blue cardigan over white shirt, friendly warm smile, positioned center-left of frame",
+      "students": "8 diverse animated 8-year-old children with signature Pixar big expressive eyes, various skin tones and hairstyles, casual school clothes (t-shirts, jeans, dresses), engaged and attentive expressions, seated in semi-circle facing teacher"
+    },
+    "camera": {
+      "primary_shot": "medium shot at eye level with slight warm tilt",
+      "movement": "smooth, gentle camera movements only - predominantly static with occasional slow push-in",
+      "framing": "maintain consistent spatial relationships between characters across all clips"
+    },
+    "animation": {
+      "motion_style": "gentle, natural movements - children subtly shifting in seats, teacher's cardigan moving softly with gestures, avoid rapid movements",
+      "continuity": "characters maintain consistent appearance and positioning across clips, continuous lighting angle throughout all clips, smooth frame-to-frame transitions"
+    },
+    "duration": 12,
+    "scene_text": "Welcome to the world of photosynthesis, where plants transform sunlight into energy.",
+    "scene_action": "Teacher walks between desks gesturing with open palms, students look up with wide eyes, Maya with glasses raises hand eagerly, Oliver with curly orange hair leans forward curiously.",
+    "previous_scene_context": "first scene"
   },
-  "setting": {
-    "location": "bright modern elementary classroom",
-    "walls": "cream-colored walls with light blue trim",
-    "floor": "light honey-colored wood floors",
-    "windows": "large floor-to-ceiling windows showing animated green oak trees outside"
-  },
-  "characters": {
-    "teacher": "Ms. Rivera, animated woman in early 30s, warm medium tan skin, shoulder-length dark brown hair in ponytail, light sky blue cardigan over white shirt, friendly smile",
-    "students": "8 diverse animated 8-year-old children with signature Pixar big expressive eyes, various skin tones and hairstyles, casual school clothes, engaged and attentive"
+  "audio": {
+    "part": "hook",
+    "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052",
+    "duration": 4.4
   }
 }</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="scene-prompt">Scene Action (what happens in this scene):</label>
-                    <textarea id="scene-prompt" name="scenePrompt" rows="4" required placeholder="Describe the specific action/movement in this scene...">Teacher walks between desks gesturing with open palms, students look up with wide eyes, Maya with glasses raises hand eagerly, Oliver with curly orange hair leans forward curiously.</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="scene-previous-context">Previous Scene Context (optional, for continuity):</label>
-                    <textarea id="scene-previous-context" name="scenePreviousContext" rows="2" placeholder="Optional: Describe what happened in the previous scene..."></textarea>
                 </div>
 
                 <button type="submit" class="submit-btn" id="scene-submitBtn">Generate Scene</button>
@@ -1301,6 +1318,8 @@
         // Agent 4 Form Submission
         const agent4Form = document.getElementById('agent4Form');
         const a4SubmitBtn = document.getElementById('a4-submitBtn');
+
+        // Agent 4 Test Tab elements and handler
         const a4Status = document.getElementById('a4-status');
         const a4Results = document.getElementById('a4-results');
         const a4AudioFiles = document.getElementById('a4-audio-files');
@@ -1416,7 +1435,6 @@
         agent5Form.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const sessionId = document.getElementById('a5-sessionID').value.trim() || Date.now().toString();
             const pipelineDataText = document.getElementById('a5-pipeline-data').value.trim();
 
             // Parse and validate pipeline data JSON
@@ -1428,132 +1446,142 @@
                 return;
             }
 
-            // Disable button and show processing state
-            a5SubmitBtn.disabled = true;
-            a5SubmitBtn.textContent = 'Generating AI Videos...';
-            a5Status.className = 'connection-status connecting';
-            a5Status.textContent = 'Connecting to WebSocket for progress updates...';
-            a5Results.style.display = 'none';
+            // Extract base_scene and build scene configurations for all 4 parts
+            const baseScene = pipelineData.agent_2_data.base_scene;
+            const script = pipelineData.agent_2_data.script;
+            const audioFiles = pipelineData.agent_4_data.audio_files;
+            const parts = ['hook', 'concept', 'process', 'conclusion'];
 
-            // Connect to WebSocket for progress updates
-            // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
-            let wsUrl, wsPath;
-            if (window.location.hostname.includes('execute-api')) {
-                // API Gateway: use WebSocket API Gateway with query parameter
-                wsUrl = WS_API_GATEWAY_URL;
-                wsPath = `${wsUrl}?session_id=${sessionId}`;
-            } else {
-                // Direct connection: use path parameter
-                wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
-                wsPath = `${wsUrl}/ws/${sessionId}`;
-            }
-            // Wait for WebSocket to be ready before making API call
-            let connectionReady = false;
-            let wsResolve, wsReject;
-            const wsPromise = new Promise((resolve, reject) => {
-                wsResolve = resolve;
-                wsReject = reject;
+            // Build scene configurations
+            const sceneConfigs = parts.map(part => {
+                const scriptPart = script[part];
+                const audioFile = audioFiles.find(a => a.part === part);
+
+                return {
+                    visual: {
+                        style: baseScene.style,
+                        color_palette: baseScene.color_palette,
+                        setting: {
+                            location: baseScene.setting.classroom,
+                            walls: "cream-colored walls with light blue trim",
+                            floor: "light honey-colored wood floors",
+                            windows: "large floor-to-ceiling windows showing animated green oak trees outside",
+                            props: baseScene.setting.furniture + " " + baseScene.setting.decorations
+                        },
+                        characters: {
+                            teacher: `${baseScene.teacher.appearance}, ${baseScene.teacher.clothing}`,
+                            students: `${baseScene.students.general}, key students: ${baseScene.students.key_characters.map(s => s.description).join(', ')}`
+                        },
+                        camera: baseScene.camera,
+                        animation: baseScene.animation,
+                        duration: scriptPart.duration,
+                        scene_text: scriptPart.scene_text,
+                        scene_action: scriptPart.scene_action,
+                        previous_scene_context: scriptPart.previous_scene_context
+                    },
+                    audio: {
+                        part: audioFile.part,
+                        url: audioFile.url,
+                        duration: audioFile.duration
+                    }
+                };
             });
 
-            const timeout = setTimeout(() => {
-                wsReject(new Error('WebSocket connection timeout'));
-            }, 10000);
-
-            a5Websocket = new WebSocket(wsPath);
-
-            a5Websocket.onerror = (err) => {
-                console.error('WebSocket error:', err);
-            };
-
-            a5Websocket.onopen = () => {
-                console.log('WebSocket opened');
-                a5Status.textContent = 'WebSocket opened, waiting for confirmation...';
-            };
-
-            // Set up message handler that handles both connection_ready and progress updates
-            a5Websocket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    console.log('WebSocket message:', data);
-
-                    // Handle connection ready confirmation
-                    if (data.type === 'connection_ready' && data.status === 'connected') {
-                        clearTimeout(timeout);
-                        connectionReady = true;
-                        a5Status.textContent = 'Connected. Generating AI Videos in parallel... This may take 2-5 minutes.';
-                        wsResolve();
-                        return;
-                    }
-
-                    // Handle Agent5 progress updates
-                    if (data.agentnumber === 'Agent5') {
-                        const msg = data.message || data.status;
-                        a5Status.textContent = `${data.status}: ${msg}`;
-
-                        // Display the generation payload if present
-                        if (data.generationPayload) {
-                            a5ResultJson.innerHTML = '<pre><strong>Generation Payload (sent to Remotion):</strong>\n' + JSON.stringify(data.generationPayload, null, 2) + '</pre>';
-                            a5Results.style.display = 'block';
-                            // Hide video player until generation completes
-                            a5VideoPlayer.style.display = 'none';
-                        }
-
-                        if (data.status === 'error') {
-                            a5Status.className = 'connection-status disconnected';
-                        }
-                    }
-                } catch (err) {
-                    console.log('WebSocket message (raw):', event.data);
-                }
-            };
-
-            await wsPromise;
+            // Disable button and show processing state
+            a5SubmitBtn.disabled = true;
+            a5SubmitBtn.textContent = 'Generating 4 Scenes in Parallel...';
+            a5Status.className = 'connection-status connecting';
+            a5Status.textContent = 'Generating 4 scenes in parallel... This will take 8-12 minutes total.';
+            a5Results.style.display = 'none';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/agent5/test`, {
+                // Generate all 4 scenes in parallel
+                a5Status.textContent = 'Generating hook, concept, process, and conclusion scenes in parallel...';
+
+                const scenePromises = sceneConfigs.map(async (config, index) => {
+                    const part = parts[index];
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/api/scene/generate`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                text: config.visual.scene_text,
+                                duration: config.visual.duration,
+                                visual_prompt: config.visual.scene_action,
+                                base_scene: config,
+                                previous_scene_context: config.visual.previous_scene_context
+                            })
+                        });
+
+                        const result = await response.json();
+
+                        if (!response.ok || !result.success) {
+                            throw new Error(`Scene ${part} failed: ${result.error || 'Unknown error'}`);
+                        }
+
+                        return {
+                            part: part,
+                            videoUrl: result.data.videoUrl,
+                            duration: result.duration,
+                            cost: result.cost
+                        };
+                    } catch (err) {
+                        throw new Error(`Scene ${part} error: ${err.message}`);
+                    }
+                });
+
+                const sceneResults = await Promise.all(scenePromises);
+
+                // Calculate totals
+                const totalDuration = sceneResults.reduce((sum, r) => sum + r.duration, 0);
+                const totalCost = sceneResults.reduce((sum, r) => sum + r.cost, 0);
+
+                a5Status.textContent = 'All 4 scenes generated! Now composing final video...';
+
+                // Concatenate the 4 scene videos
+                const videoUrls = sceneResults.map(r => r.videoUrl);
+                const concatResponse = await fetch(`${API_BASE_URL}/api/videos/concatenate`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        session_id: sessionId,
-                        pipeline_data: pipelineData,
-                        generation_mode: 'video'
+                        video_urls: videoUrls
                     })
                 });
 
-                const result = await response.json();
+                const concatResult = await concatResponse.json();
 
-                if (response.ok && result.success) {
-                    // Display success results
-                    a5Status.className = 'connection-status connected';
-                    a5Status.textContent = `Complete! Duration: ${result.duration.toFixed(1)}s | Cost: $${(result.cost || 0).toFixed(4)}`;
-                    a5Results.style.display = 'block';
-
-                    // Display video if URL is available
-                    if (result.data && result.data.videoUrl) {
-                        a5VideoPlayer.style.display = 'block';
-                        loadA5Video(result.data.videoUrl);
-                    } else {
-                        a5VideoPlayer.style.display = 'none';
-                        a5VideoInfo.textContent = 'No video URL returned';
-                    }
-
-                    // Display generation summary
-                    const costInfo = `
-<strong>Generation Summary</strong>
-Mode: AI Video (Replicate Minimax)
-Duration: ${result.duration.toFixed(1)}s
-Cost: $${(result.cost || 0).toFixed(4)}
-Model: ${result.data.model || 'N/A'}
-Videos Generated: ${result.data.videosGenerated || 4}
-
-<strong>Response Data:</strong>
-${JSON.stringify(result, null, 2)}`;
-                    a5ResultJson.innerHTML = '<pre>' + costInfo + '</pre>';
-                } else {
-                    throw new Error(result.error || result.detail || 'AI video generation failed');
+                if (!concatResponse.ok || !concatResult.success) {
+                    throw new Error(`Video concatenation failed: ${concatResult.error || 'Unknown error'}`);
                 }
+
+                a5Status.className = 'connection-status connected';
+                a5Status.textContent = `Complete! 4 scenes generated and composed | Total Duration: ${totalDuration.toFixed(1)}s | Total Cost: $${totalCost.toFixed(4)}`;
+                a5Results.style.display = 'block';
+
+                // Display final composed video
+                a5VideoPlayer.style.display = 'block';
+                loadA5Video(concatResult.data.videoUrl);
+
+                // Display generation summary
+                const summaryInfo = `
+<strong>Generation Summary</strong>
+Mode: Scene Generator (Minimax) + Composition
+Scenes Generated: 4 (${parts.join(', ')})
+Total Duration: ${totalDuration.toFixed(1)}s
+Total Cost: $${totalCost.toFixed(4)}
+
+<strong>Individual Scene Results:</strong>
+${sceneResults.map(r => `${r.part}: ${r.duration.toFixed(1)}s, $${r.cost.toFixed(4)}`).join('\n')}
+
+<strong>Final Video:</strong>
+${concatResult.data.videoUrl}
+Duration: ${concatResult.duration.toFixed(1)}s
+`;
+                a5ResultJson.innerHTML = '<pre>' + summaryInfo + '</pre>';
             } catch (error) {
                 console.error('Agent 5 error:', error);
                 a5Status.className = 'connection-status disconnected';
@@ -1564,10 +1592,6 @@ ${JSON.stringify(result, null, 2)}`;
             } finally {
                 a5SubmitBtn.disabled = false;
                 a5SubmitBtn.textContent = 'Generate AI Video';
-                // Close WebSocket
-                if (a5Websocket && a5Websocket.readyState === WebSocket.OPEN) {
-                    a5Websocket.close();
-                }
             }
         });
 
@@ -1608,26 +1632,31 @@ ${JSON.stringify(result, null, 2)}`;
         sceneTestForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const sceneText = document.getElementById('scene-text').value.trim();
-            const sceneDuration = parseInt(document.getElementById('scene-duration').value);
-            const scenePrompt = document.getElementById('scene-prompt').value.trim();
             const sceneBaseText = document.getElementById('scene-base').value.trim();
-            const scenePreviousContext = document.getElementById('scene-previous-context').value.trim();
 
-            if (!sceneText || !scenePrompt || !sceneDuration) {
-                alert('Please fill in required fields (Scene Text, Duration, Scene Action)');
+            if (!sceneBaseText) {
+                alert('Please provide the scene configuration JSON');
                 return;
             }
 
-            // Parse base scene JSON if provided
-            let baseScene = null;
-            if (sceneBaseText) {
-                try {
-                    baseScene = JSON.parse(sceneBaseText);
-                } catch (err) {
-                    alert('Invalid JSON in Base Scene field: ' + err.message);
-                    return;
-                }
+            // Parse scene configuration JSON
+            let sceneConfig = null;
+            try {
+                sceneConfig = JSON.parse(sceneBaseText);
+            } catch (err) {
+                alert('Invalid JSON in Scene Configuration field: ' + err.message);
+                return;
+            }
+
+            // Extract values from the visual section
+            const sceneText = sceneConfig.visual?.scene_text;
+            const sceneDuration = sceneConfig.visual?.duration;
+            const scenePrompt = sceneConfig.visual?.scene_action;
+            const scenePreviousContext = sceneConfig.visual?.previous_scene_context;
+
+            if (!sceneText || !scenePrompt || !sceneDuration) {
+                alert('JSON must include visual.scene_text, visual.duration, and visual.scene_action');
+                return;
             }
 
             // Disable button and show processing state
@@ -1643,12 +1672,9 @@ ${JSON.stringify(result, null, 2)}`;
                 const requestBody = {
                     text: sceneText,
                     duration: sceneDuration,
-                    visual_prompt: scenePrompt
+                    visual_prompt: scenePrompt,
+                    base_scene: sceneConfig
                 };
-
-                if (baseScene) {
-                    requestBody.base_scene = baseScene;
-                }
 
                 if (scenePreviousContext) {
                     requestBody.previous_scene_context = scenePreviousContext;
