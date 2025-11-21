@@ -824,6 +824,142 @@ async def start_processing(
 
 
 # =============================================================================
+# Agent5 Restart Endpoint - Restart from Remotion rendering
+# =============================================================================
+
+class RestartAgent5Request(BaseModel):
+    """Request to restart Agent5 from Remotion rendering stage."""
+    userID: str
+    sessionID: str
+    supersessionid: Optional[str] = None
+
+
+@app.post("/api/restart-agent5-remotion")
+async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = Depends(get_db)):
+    """
+    Restart Agent5 from the Remotion rendering stage.
+    
+    This endpoint allows restarting video generation from the Remotion rendering step,
+    skipping video clip generation by reusing clips already stored in S3.
+    
+    Use case: When Remotion rendering fails but video clips were successfully generated.
+    """
+    logger.info(f"Restart Agent5 Remotion request for session {request.sessionID}")
+    
+    # Verify clips exist in S3 before starting
+    try:
+        sections = ["hook", "concept", "process", "conclusion"]
+        agent5_prefix = f"scaffold_test/{request.userID}/{request.sessionID}/agent5/"
+        
+        missing_clips = []
+        for section in sections:
+            concat_key = f"{agent5_prefix}{section}_concat.mp4"
+            try:
+                storage_service.s3_client.head_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=concat_key
+                )
+            except Exception:
+                missing_clips.append(section)
+        
+        if missing_clips:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot restart - missing video clips for sections: {', '.join(missing_clips)}. Please regenerate from scratch."
+            )
+        
+        logger.info(f"All clips verified for session {request.sessionID}, starting restart")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying clips: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to verify clips: {str(e)}")
+    
+    # Generate new supersessionid if not provided
+    import secrets
+    if not request.supersessionid:
+        supersessionid = f"{request.sessionID}_restart_{secrets.token_urlsafe(8)[:12]}"
+    else:
+        supersessionid = request.supersessionid
+    
+    # Start Agent5 with restart flag
+    async def run_agent_5_restart():
+        try:
+            from app.agents.agent_5 import agent_5_process
+            from app.services.orchestrator import VideoGenerationOrchestrator
+            
+            # Create orchestrator for status callback
+            orchestrator = VideoGenerationOrchestrator(websocket_manager)
+            
+            async def status_callback(agentnumber: str, status: str, userID: str, sessionID: str, timestamp: int, **kwargs):
+                """Forward status to WebSocket."""
+                status_data = {
+                    "agentnumber": agentnumber,
+                    "userID": userID,
+                    "sessionID": sessionID,
+                    "status": status,
+                    "timestamp": timestamp,
+                    **kwargs
+                }
+                await websocket_manager.send_progress(sessionID, status_data)
+            
+            # Call agent_5_process with restart flag
+            result = await agent_5_process(
+                websocket_manager=None,
+                user_id=request.userID,
+                session_id=request.sessionID,
+                supersessionid=supersessionid,
+                storage_service=storage_service,
+                pipeline_data=None,
+                db=db,
+                status_callback=status_callback,
+                restart_from_remotion=True  # KEY: Skip clip generation
+            )
+            
+            # Send completion status
+            await websocket_manager.send_progress(request.sessionID, {
+                "agentnumber": "Agent5",
+                "userID": request.userID,
+                "sessionID": request.sessionID,
+                "status": "finished",
+                "message": "Remotion rendering completed successfully",
+                "videoUrl": result,
+                "timestamp": int(time.time() * 1000)
+            })
+            
+        except Exception as e:
+            logger.exception(f"Error in agent_5_process restart: {e}")
+            try:
+                await websocket_manager.send_progress(request.sessionID, {
+                    "agentnumber": "Agent5",
+                    "userID": request.userID,
+                    "sessionID": request.sessionID,
+                    "status": "error",
+                    "error": str(e),
+                    "reason": f"Agent5 restart failed: {type(e).__name__}",
+                    "timestamp": int(time.time() * 1000)
+                })
+            except Exception:
+                pass
+    
+    # Run in background
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(run_agent_5_restart())
+    if not hasattr(app.state, 'background_tasks'):
+        app.state.background_tasks = set()
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
+    
+    return {
+        "success": True,
+        "message": "Agent5 restart from Remotion initiated",
+        "sessionID": request.sessionID,
+        "supersessionid": supersessionid
+    }
+
+
+# =============================================================================
 # Agent Test Endpoints - Test individual agents with custom input
 # =============================================================================
 

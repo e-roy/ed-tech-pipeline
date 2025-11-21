@@ -233,6 +233,7 @@ async def render_video_with_remotion(
         cmd = f"bunx remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
 
         # Use Popen to stream output and send progress updates
+        # Use system PATH (includes bun from systemd service or current environment)
         process = subprocess.Popen(
             cmd,
             cwd=str(REMOTION_DIR),
@@ -240,7 +241,7 @@ async def render_video_with_remotion(
             stderr=subprocess.STDOUT,
             text=True,
             shell=True,
-            env={**os.environ, "PATH": f"/Users/mfuechec/.bun/bin:{os.environ.get('PATH', '')}"},
+            env=os.environ.copy(),  # Use current environment PATH as-is
             bufsize=1
         )
 
@@ -326,7 +327,8 @@ async def agent_5_process(
     pipeline_data: Optional[Dict[str, Any]] = None,
     generation_mode: str = "video",  # Kept for backwards compatibility, always uses video
     db: Optional[Session] = None,
-    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
+    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None,
+    restart_from_remotion: bool = False
 ) -> Optional[str]:
     """
     Agent5: Video generation agent using Remotion.
@@ -343,6 +345,7 @@ async def agent_5_process(
         generation_mode: Deprecated - always uses AI video generation
         db: Database session for querying video_session table
         status_callback: Callback function for sending status updates to orchestrator
+        restart_from_remotion: If True, skip clip generation and restart from Remotion rendering
 
     Returns:
         The presigned URL of the uploaded video, or None on error
@@ -726,14 +729,59 @@ async def agent_5_process(
             clips_per_section[part] = clips_needed
 
         total_clips = sum(clips_per_section.values())
+        
+        # RESTART LOGIC: If restarting from Remotion, skip clip generation and load from S3
+        if restart_from_remotion:
+            logger.info(f"[{session_id}] Restarting from Remotion - loading existing clips from S3")
+            
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"Verifying {total_clips} clips in S3 for restart..."
+            )
+            
+            # Verify and load clips from S3
+            generated_visuals = {}
+            agent5_prefix = f"scaffold_test/{user_id}/{session_id}/agent5/"
+            
+            for section in sections:
+                concat_key = f"{agent5_prefix}{section}_concat.mp4"
+                
+                # Check if concatenated clip exists
+                try:
+                    storage_service.s3_client.head_object(
+                        Bucket=storage_service.bucket_name,
+                        Key=concat_key
+                    )
+                    # Generate presigned URL
+                    concat_url = storage_service.generate_presigned_url(concat_key, expires_in=3600)
+                    generated_visuals[section] = concat_url
+                    logger.info(f"[{session_id}] Found existing clip for {section}: {concat_key}")
+                except Exception as e:
+                    logger.error(f"[{session_id}] Missing clip for {section}: {e}")
+                    raise ValueError(f"Cannot restart - missing video clip for section '{section}'. Please regenerate from scratch.")
+            
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"All {total_clips} clips verified, skipping to Remotion rendering..."
+            )
+            
+            # Skip to line 880 (update scenes with loaded URLs)
+            # We'll set a flag to skip the generation block
+            skip_generation = True
+        else:
+            skip_generation = False
 
-        async def generate_section_video(section: str) -> tuple[str, str]:
-            """Generate multiple video clips for a section and return (section, concatenated_url)"""
-            import subprocess
-            import httpx
+        # Only generate videos if not restarting
+        if not skip_generation:
+            async def generate_section_video(section: str) -> tuple[str, str]:
+                """Generate multiple video clips for a section and return (section, concatenated_url)"""
+                import subprocess
+                import httpx
 
-            prompt = visual_prompts[section]
-            clips_needed = clips_per_section[section]
+                prompt = visual_prompts[section]
+                clips_needed = clips_per_section[section]
 
             logger.info(f"[{session_id}] Generating {clips_needed} clips for {section}")
 
@@ -869,13 +917,13 @@ async def agent_5_process(
 
             return (section, concat_url)
 
-        # Run all 4 video generations in parallel
-        results = await asyncio.gather(
-            *[generate_section_video(section) for section in sections]
-        )
+            # Run all 4 video generations in parallel
+            results = await asyncio.gather(
+                *[generate_section_video(section) for section in sections]
+            )
 
-        # Map results back to sections
-        generated_visuals = {section: url for section, url in results}
+            # Map results back to sections
+            generated_visuals = {section: url for section, url in results}
 
         # Update scenes with generated video URLs
         for scene in scenes:
