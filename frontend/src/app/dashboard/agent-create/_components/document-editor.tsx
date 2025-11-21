@@ -5,37 +5,31 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { FileTextIcon, CheckCircle2, Circle } from "lucide-react";
 import type { HTMLAttributes } from "react";
-import { type Fact, type Narration } from "@/types";
 import { Button } from "@/components/ui/button";
 import { NarrationEditor } from "./narration-editor";
+import { useAgentCreateStore } from "@/stores/agent-create-store";
 
-export type DocumentEditorProps = HTMLAttributes<HTMLDivElement> & {
-  content: string;
-  onContentChange: (content: string) => void;
-  isUpdating?: boolean;
-  mode?: "edit" | "select-facts" | "edit-narration";
-  facts?: Fact[];
-  selectedFacts?: Fact[];
-  onFactToggle?: (fact: Fact) => void;
-  onSubmitFacts?: () => void;
-  narration?: Narration | null;
-  onNarrationChange?: (narration: Narration) => void;
-};
+export type DocumentEditorProps = HTMLAttributes<HTMLDivElement>;
 
-export function DocumentEditor({
-  content,
-  onContentChange,
-  isUpdating = false,
-  mode = "edit",
-  facts = [],
-  selectedFacts = [],
-  onFactToggle,
-  onSubmitFacts,
-  narration,
-  onNarrationChange,
-  className,
-  ...props
-}: DocumentEditorProps) {
+export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
+  const {
+    documentContent,
+    isLoading,
+    workflowStep,
+    facts,
+    selectedFacts,
+    narration,
+    setDocumentContent,
+    toggleFact,
+    handleSubmitFacts,
+  } = useAgentCreateStore();
+
+  const mode =
+    workflowStep === "selection"
+      ? "select-facts"
+      : workflowStep === "review"
+        ? "edit-narration"
+        : "edit";
   return (
     <div
       className={cn("bg-background flex h-full flex-col border-l", className)}
@@ -50,17 +44,17 @@ export function DocumentEditor({
               ? "Select Facts"
               : "Edit Narration"}
         </h2>
-        {isUpdating && (
+        {isLoading && (
           <span className="text-muted-foreground ml-auto text-xs">
             Updating...
           </span>
         )}
-        {mode === "select-facts" && onSubmitFacts && (
+        {mode === "select-facts" && (
           <Button
             size="sm"
-            onClick={onSubmitFacts}
+            onClick={handleSubmitFacts}
             className="ml-auto"
-            disabled={selectedFacts.length === 0 || isUpdating}
+            disabled={selectedFacts.length === 0 || isLoading}
           >
             Submit Selected Facts ({selectedFacts.length})
           </Button>
@@ -70,11 +64,11 @@ export function DocumentEditor({
         <div className="h-full p-4">
           {mode === "edit" ? (
             <Textarea
-              value={content}
-              onChange={(e) => onContentChange(e.target.value)}
+              value={documentContent}
+              onChange={(e) => setDocumentContent(e.target.value)}
               placeholder="Your markdown document content will appear here. Use the chat to edit it."
               className="min-h-[calc(100vh-8rem)] resize-none border-0 bg-transparent font-mono text-sm focus-visible:ring-0"
-              disabled={isUpdating}
+              disabled={isLoading}
             />
           ) : mode === "select-facts" ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -85,7 +79,7 @@ export function DocumentEditor({
                 return (
                   <div
                     key={index}
-                    onClick={() => onFactToggle?.(fact)}
+                    onClick={() => toggleFact(fact)}
                     className={cn(
                       "hover:bg-accent cursor-pointer rounded-lg border p-4 transition-all",
                       isSelected
@@ -112,13 +106,7 @@ export function DocumentEditor({
               })}
             </div>
           ) : (
-            narration &&
-            onNarrationChange && (
-              <NarrationEditor
-                narration={narration}
-                onNarrationChange={onNarrationChange}
-              />
-            )
+            narration && <NarrationEditor />
           )}
         </div>
       </ScrollArea>

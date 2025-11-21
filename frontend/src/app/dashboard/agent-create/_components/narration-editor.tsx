@@ -1,22 +1,19 @@
 "use client";
 
-import { type Narration, type NarrationSegment } from "@/types";
+import { type NarrationSegment } from "@/types";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Clock, BookOpen, Hash } from "lucide-react";
+import { useAgentCreateStore } from "@/stores/agent-create-store";
 
-interface NarrationEditorProps {
-  narration: Narration;
-  onNarrationChange: (narration: Narration) => void;
-}
+export function NarrationEditor() {
+  const { narration, setNarration } = useAgentCreateStore();
 
-export function NarrationEditor({
-  narration,
-  onNarrationChange,
-}: NarrationEditorProps) {
+  if (!narration) return null;
+
   const handleSegmentChange = (
     index: number,
     field: keyof NarrationSegment,
@@ -27,7 +24,7 @@ export function NarrationEditor({
       ...newSegments[index],
       [field]: value,
     } as NarrationSegment;
-    onNarrationChange({
+    setNarration({
       ...narration,
       segments: newSegments,
     });
