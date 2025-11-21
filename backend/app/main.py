@@ -67,6 +67,10 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Include video editor router
+from app.routes.video_editor import router as video_editor_router
+app.include_router(video_editor_router)
+
 
 # Request/Response models
 class ProcessRequest(BaseModel):

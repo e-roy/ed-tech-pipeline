@@ -28,11 +28,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Download, Scissors, ArrowLeft, Loader2, TestTube } from "lucide-react";
 import { api } from "@/trpc/react";
+import { EditorLayout } from "@/components/video-editor/EditorLayout";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Hardcoded test video S3 key for testing purposes
-const TEST_VIDEO_S3_KEY = "users/7302d0b7-f093-4063-947f-73ca799ef5d5/Sv75fpt8L8S75jSNKVPXg/final_video_dae6d4f1.mp4";
+const TEST_VIDEO_S3_KEY = "users/f218067b-e198-45ae-888a-cf45979bc57d/kYd20Q5WaK-b27v31a1eE/final_video_dae6d4f1.mp4";
 
 interface EditingPageClientProps {
   sessionId: string;
@@ -65,6 +66,7 @@ export function EditingPageClient({
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
   const [useTestVideo, setUseTestVideo] = useState(false);
   const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
+  const [isEditorMode, setIsEditorMode] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -184,6 +186,14 @@ export function EditingPageClient({
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Editor mode - render the full video editor
+  if (isEditorMode) {
+    const videoUrl = testVideoUrl || sessionData?.final_video_url;
+    return (
+      <EditorLayout sessionId={sessionId} videoUrl={videoUrl || undefined} />
+    );
+  }
 
   // Error state
   if (error) {
@@ -325,35 +335,10 @@ export function EditingPageClient({
           Download Video
         </Button>
 
-        <TooltipProvider>
-          <AlertDialog>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline">
-                    <Scissors className="mr-2 h-4 w-4" />
-                    Edit Video
-                  </Button>
-                </AlertDialogTrigger>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Coming Soon</p>
-              </TooltipContent>
-            </Tooltip>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Coming Soon</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Video editing features are currently in development. Stay tuned
-                  for updates!
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogAction>Got it</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </TooltipProvider>
+        <Button variant="outline" onClick={() => setIsEditorMode(true)}>
+          <Scissors className="mr-2 h-4 w-4" />
+          Open Editor
+        </Button>
 
         <Link href="/dashboard/hardcode-create">
           <Button variant="ghost">
