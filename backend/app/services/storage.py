@@ -60,39 +60,31 @@ class StorageService:
         expires_in: int = 3600
     ) -> str:
         """
-        Generate a presigned URL for accessing a file in S3.
+        Generate a public URL for accessing a file in S3.
+        
+        Note: This returns a regular S3 URL, not a presigned URL, since the bucket
+        is configured with public read access. The expires_in parameter is kept
+        for backwards compatibility but is not used.
 
         Args:
             s3_key: S3 object key
-            expires_in: URL expiration time in seconds (default 1 hour)
+            expires_in: URL expiration time in seconds (kept for backwards compatibility, not used)
 
         Returns:
-            Presigned URL string
+            Public S3 URL string
 
         Raises:
             ValueError: If storage service not configured
-            Exception: If URL generation fails
         """
         if not self.s3_client:
             raise ValueError("Storage service not configured")
 
-        try:
-            url = self.s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': self.bucket_name,
-                    'Key': s3_key
-                },
-                ExpiresIn=expires_in
-            )
+        # Generate regular S3 URL (bucket is publicly readable)
+        url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
 
-            logger.debug(f"Generated presigned URL for {s3_key} (expires in {expires_in}s)")
+        logger.debug(f"Generated public S3 URL for {s3_key}")
 
-            return url
-
-        except ClientError as e:
-            logger.error(f"Failed to generate presigned URL: {e}")
-            raise Exception(f"Presigned URL generation failed: {e}")
+        return url
 
     def upload_file_direct(
         self,

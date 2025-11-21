@@ -573,18 +573,40 @@ async def agent_5_process(
                     filename = key.split("/")[-1]
                     if filename.startswith("audio_"):
                         part = filename.replace("audio_", "").replace(".mp3", "")
-                        audio_url = storage_service.generate_presigned_url(key, expires_in=86400)
-                        audio_files.append({
-                            "part": part,
-                            "url": audio_url,
-                            "duration": 5.0  # Default duration, could be extracted from metadata
-                        })
+                        # Verify object exists before generating presigned URL
+                        try:
+                            storage_service.s3_client.head_object(
+                                Bucket=storage_service.bucket_name,
+                                Key=key
+                            )
+                            audio_url = storage_service.generate_presigned_url(key, expires_in=86400)
+                            audio_files.append({
+                                "part": part,
+                                "url": audio_url,
+                                "s3_key": key,  # Store S3 key for error handling
+                                "duration": 5.0  # Default duration, could be extracted from metadata
+                            })
+                            logger.debug(f"Added audio file for part '{part}': {key}")
+                        except Exception as e:
+                            logger.warning(f"Failed to verify/generate URL for audio file {key}: {e}")
+                            # Continue with other files
                 elif "background_music" in key.lower() or "music" in key.lower():
-                    background_music_url = storage_service.generate_presigned_url(key, expires_in=86400)
-                    background_music = {
-                        "url": background_music_url,
-                        "duration": 60  # Default duration
-                    }
+                    # Verify object exists before generating presigned URL
+                    try:
+                        storage_service.s3_client.head_object(
+                            Bucket=storage_service.bucket_name,
+                            Key=key
+                        )
+                        background_music_url = storage_service.generate_presigned_url(key, expires_in=86400)
+                        background_music = {
+                            "url": background_music_url,
+                            "s3_key": key,  # Store S3 key for error handling
+                            "duration": 60  # Default duration
+                        }
+                        logger.debug(f"Added background music: {key}")
+                    except Exception as e:
+                        logger.warning(f"Failed to verify/generate URL for background music {key}: {e}")
+                        # Continue without background music
             
             # If no pipeline_data provided and we couldn't find files, try querying database
             if not pipeline_data and not script and not audio_files:
@@ -965,6 +987,9 @@ async def agent_5_process(
         # AUDIO CONCATENATION
         # ====================
 
+        # Track if we need to regenerate audio (separate from restart_from_concat flag)
+        need_to_regenerate_audio = True
+        
         if restart_from_concat:
             # In restart mode, try to download existing final audio from S3
             logger.info(f"[{session_id}] Restart mode: Attempting to load existing final audio from S3")
@@ -985,12 +1010,13 @@ async def agent_5_process(
                     with open(final_audio_path, 'wb') as f:
                         f.write(response.content)
                 logger.info(f"[{session_id}] Restart mode: Loaded existing final audio from S3")
+                need_to_regenerate_audio = False  # Audio loaded successfully, skip regeneration
             except Exception as e:
                 logger.warning(f"[{session_id}] Restart mode: Could not load existing audio, regenerating: {e}")
                 # Fall through to normal audio processing
-                restart_from_concat = False  # Temporarily disable restart flag for audio processing
+                need_to_regenerate_audio = True  # Need to regenerate audio
         
-        if not restart_from_concat:
+        if need_to_regenerate_audio:
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
@@ -1002,16 +1028,40 @@ async def agent_5_process(
             # Download all audio files to temp directory (reuse single HTTP client)
             import httpx
             audio_file_paths = []
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
                 for audio_file in audio_files:
                     part = audio_file["part"]
                     url = audio_file["url"]
-                    response = await client.get(url)
-                    response.raise_for_status()
-                    audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
-                    with open(audio_path, 'wb') as f:
-                        f.write(response.content)
-                    audio_file_paths.append(audio_path)
+                    s3_key = audio_file.get("s3_key", "unknown")
+                    
+                    try:
+                        logger.debug(f"[{session_id}] Downloading audio for part '{part}' from {s3_key}")
+                        response = await client.get(url)
+                        response.raise_for_status()
+                        audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
+                        with open(audio_path, 'wb') as f:
+                            f.write(response.content)
+                        audio_file_paths.append(audio_path)
+                        logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' ({len(response.content)} bytes)")
+                    except httpx.HTTPStatusError as e:
+                        # If presigned URL fails, try regenerating it
+                        logger.warning(f"[{session_id}] Failed to download audio for part '{part}' from presigned URL (status {e.response.status_code}), attempting to regenerate URL...")
+                        try:
+                            # Regenerate presigned URL and retry
+                            new_url = storage_service.generate_presigned_url(s3_key, expires_in=86400)
+                            response = await client.get(new_url)
+                            response.raise_for_status()
+                            audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
+                            with open(audio_path, 'wb') as f:
+                                f.write(response.content)
+                            audio_file_paths.append(audio_path)
+                            logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' after URL regeneration")
+                        except Exception as retry_error:
+                            logger.error(f"[{session_id}] Failed to download audio for part '{part}' even after URL regeneration: {retry_error}")
+                            raise ValueError(f"Failed to download audio file for part '{part}' from S3: {retry_error}")
+                    except Exception as e:
+                        logger.error(f"[{session_id}] Unexpected error downloading audio for part '{part}': {e}")
+                        raise ValueError(f"Failed to download audio file for part '{part}': {e}")
 
             # Concatenate all narration audio files
             concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
@@ -1033,12 +1083,33 @@ async def agent_5_process(
             # Download background music
             background_music_url = background_music.get("url", "")
             if background_music_url:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    response = await client.get(background_music_url)
-                    response.raise_for_status()
-                    background_music_path = os.path.join(temp_dir, "background_music.mp3")
-                    with open(background_music_path, 'wb') as f:
-                        f.write(response.content)
+                background_music_s3_key = background_music.get("s3_key", "unknown")
+                async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                    try:
+                        logger.debug(f"[{session_id}] Downloading background music from {background_music_s3_key}")
+                        response = await client.get(background_music_url)
+                        response.raise_for_status()
+                        background_music_path = os.path.join(temp_dir, "background_music.mp3")
+                        with open(background_music_path, 'wb') as f:
+                            f.write(response.content)
+                        logger.info(f"[{session_id}] Successfully downloaded background music ({len(response.content)} bytes)")
+                    except httpx.HTTPStatusError as e:
+                        # If presigned URL fails, try regenerating it
+                        logger.warning(f"[{session_id}] Failed to download background music from presigned URL (status {e.response.status_code}), attempting to regenerate URL...")
+                        try:
+                            new_url = storage_service.generate_presigned_url(background_music_s3_key, expires_in=86400)
+                            response = await client.get(new_url)
+                            response.raise_for_status()
+                            background_music_path = os.path.join(temp_dir, "background_music.mp3")
+                            with open(background_music_path, 'wb') as f:
+                                f.write(response.content)
+                            logger.info(f"[{session_id}] Successfully downloaded background music after URL regeneration")
+                        except Exception as retry_error:
+                            logger.warning(f"[{session_id}] Failed to download background music even after URL regeneration: {retry_error}, continuing without background music")
+                            background_music_url = ""  # Continue without background music
+                    except Exception as e:
+                        logger.warning(f"[{session_id}] Unexpected error downloading background music: {e}, continuing without background music")
+                        background_music_url = ""  # Continue without background music
 
                 # Mix narration with background music
                 final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
@@ -1140,8 +1211,8 @@ async def agent_5_process(
             supersessionID=supersessionid,
             videoUrl=video_url,
             progress=100,
-            cost=total_cost,
-            cost_breakdown=cost_per_section
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
         )
         status_data = {
             "agentnumber": "Agent5",
