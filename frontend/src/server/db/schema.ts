@@ -15,7 +15,11 @@ export {
 } from "./auth/schema";
 
 // Re-export video generation tables
-export { videoSessions, videoAssets } from "./video-generation/schema";
+export {
+  videoSessions,
+  videoAssets,
+  conversationMessages,
+} from "./video-generation/schema";
 
 // Re-export webhook tables
 export { webhookLogs } from "./webhooks/schema";

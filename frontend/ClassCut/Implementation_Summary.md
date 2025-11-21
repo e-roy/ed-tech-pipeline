@@ -109,15 +109,15 @@ Implement a new video editing page at `/dashboard/editing/[id]` that:
 
 The hardcoded test video S3 key:
 ```typescript
-const TEST_VIDEO_S3_KEY = "scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4";
+const TEST_VIDEO_S3_KEY = "users/7302d0b7-f093-4063-947f-73ca799ef5d5/Sv75fpt8L8S75jSNKVPXg/final_video_dae6d4f1.mp4";
 ```
 
 Full S3 URL:
 ```
-https://pipeline-backend-assets.s3.us-east-2.amazonaws.com/scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4
+https://pipeline-backend-assets.s3.us-east-1.amazonaws.com/users/7302d0b7-f093-4063-947f-73ca799ef5d5/Sv75fpt8L8S75jSNKVPXg/final_video_dae6d4f1.mp4
 ```
 
-**Note**: The tRPC `getPresignedUrl` endpoint has been updated to allow both `users/{userId}/` and `scaffold_test/` prefixed paths. Test videos under `scaffold_test/` can be accessed by any authenticated user.
+**Note**: The tRPC `getPresignedUrl` endpoint validates that files start with `users/{userId}/`. The test video will only work when logged in as user `7302d0b7-f093-4063-947f-73ca799ef5d5`. The endpoint also allows `scaffold_test/` prefixed paths for any authenticated user.
 
 ---
 
@@ -133,8 +133,9 @@ AWS_REGION=us-east-2
 ```
 
 ### 2. User Authentication
-- Simply ensure you're logged in with any authenticated user
-- Test videos under `scaffold_test/` bypass user ID validation
+- Ensure you're logged in as user ID `7302d0b7-f093-4063-947f-73ca799ef5d5`
+- OR update `TEST_VIDEO_S3_KEY` to match your actual user ID
+- Alternatively, use a `scaffold_test/` prefixed path which works for any authenticated user
 
 ### 3. Run Backend (Optional)
 ```bash

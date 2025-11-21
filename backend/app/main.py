@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text as sql_text
 from app.config import get_settings
 from app.services.storage import StorageService
 from app.services.websocket_manager import WebSocketManager
@@ -419,7 +419,7 @@ async def get_video_session(session_id: str, db: Session = Depends(get_db)):
     """
     try:
         result = db.execute(
-            text("SELECT * FROM video_session WHERE id = :session_id"),
+            sql_text("SELECT * FROM video_session WHERE id = :session_id"),
             {"session_id": session_id}
         ).fetchone()
         
@@ -533,7 +533,7 @@ async def start_processing(
             user_id = request.userID.strip()
             try:
                 result = db.execute(
-                    text(
+                    sql_text(
                         "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
                     ),
                     {"session_id": session_id, "user_id": user_id},
@@ -565,26 +565,22 @@ async def start_processing(
             raise HTTPException(status_code=400, detail="Missing session ID for Full Test")
         if not user_id:
             raise HTTPException(status_code=400, detail="Missing user ID for Full Test")
-        if not video_session_data:
+        if not session_id or not user_id:
             raise HTTPException(
-                status_code=500,
-                detail="Failed to resolve video_session_data for Full Test",
+                status_code=400,
+                detail="sessionID and userID are required for Full Test",
             )
 
-        # Start Agent2 with video_session_data
-        async def run_agent_2_with_error_handling():
+        # Use orchestrator to coordinate the Full Test process
+        async def run_orchestrator():
             """Wrapper to catch and log errors in background task."""
             import logging
             logger = logging.getLogger(__name__)
             logger.info(
-                "Starting Agent2 background task for Full Test, session %s, user %s",
+                "Starting orchestrator for Full Test, session %s, user %s",
                 session_id,
                 user_id,
             )
-
-            # Copy data into task scope
-            local_video_session_data = video_session_data
-            local_user_id = user_id
 
             # Wait for WebSocket connection
             logger.info(f"Waiting for WebSocket connection for session {session_id}...")
@@ -594,59 +590,27 @@ async def start_processing(
                 check_interval=0.1
             )
             
-            if connection_ready:
-                logger.info("WebSocket connection confirmed for session %s", session_id)
-                try:
-                    await websocket_manager.send_progress(
-                        session_id,
-                        {
-                            "type": "video_session_loaded",
-                            "sessionID": session_id,
-                            "userID": local_user_id,
-                            "generated_script": local_video_session_data.get("generated_script"),
-                            "videoSession": local_video_session_data,
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to send video_session data for session %s: %s",
-                        session_id,
-                        e,
-                    )
-            else:
+            if not connection_ready:
                 logger.warning(
                     "No WebSocket connection found for session %s after waiting. Proceeding anyway.",
                     session_id,
                 )
             
             try:
-                await agent_2_process_impl(
-                    websocket_manager=websocket_manager,
-                    user_id=local_user_id,
-                    session_id=session_id,
-                    template_id="",  # Not used in Full Test
-                    chosen_diagram_id="",  # Not used in Full Test
-                    script_id="",  # Not used in Full Test
-                    storage_service=storage_service,
-                    video_session_data=local_video_session_data
+                from app.services.orchestrator import VideoGenerationOrchestrator
+                orchestrator = VideoGenerationOrchestrator(websocket_manager)
+                await orchestrator.start_full_test_process(
+                    userId=user_id,
+                    sessionId=session_id,
+                    db=db
                 )
-                logger.info(f"Agent2 background task completed for session {session_id}")
+                logger.info(f"Orchestrator completed for session {session_id}")
             except Exception as e:
-                logger.exception(f"Error in agent_2_process for session {session_id}: {e}")
-                try:
-                    await websocket_manager.send_progress(session_id, {
-                        "agentnumber": "Agent2",
-                        "userID": local_user_id,
-                        "sessionID": session_id,
-                        "status": "error",
-                        "error": str(e),
-                        "reason": f"Agent2 failed: {type(e).__name__}"
-                    })
-                except Exception as ws_error:
-                    logger.error(f"Failed to send error status via WebSocket: {ws_error}")
+                logger.exception(f"Error in orchestrator for session {session_id}: {e}")
+                # Error status will be sent by orchestrator
         
         loop = asyncio.get_event_loop()
-        task = loop.create_task(run_agent_2_with_error_handling())
+        task = loop.create_task(run_orchestrator())
         if not hasattr(app.state, 'background_tasks'):
             app.state.background_tasks = set()
         app.state.background_tasks.add(task)
@@ -719,8 +683,33 @@ async def start_processing(
             raise HTTPException(status_code=400, detail="userID is required for Agent4")
         if not request.sessionID or not request.sessionID.strip():
             raise HTTPException(status_code=400, detail="sessionID is required for Agent4")
-        if not request.script:
-            raise HTTPException(status_code=400, detail="script is required for Agent4")
+        
+        # Query video_session table to get the same data Agent2 uses
+        video_session_data = None
+        try:
+            result = db.execute(
+                sql_text(
+                    "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                ),
+                {"session_id": request.sessionID, "user_id": request.userID},
+            ).fetchone()
+            
+            if result:
+                # Convert result to dict (same as orchestrator does)
+                if hasattr(result, "_mapping"):
+                    video_session_data = dict(result._mapping)
+                else:
+                    video_session_data = {
+                        "id": getattr(result, "id", None),
+                        "user_id": getattr(result, "user_id", None),
+                        "topic": getattr(result, "topic", None),
+                        "confirmed_facts": getattr(result, "confirmed_facts", None),
+                        "generated_script": getattr(result, "generated_script", None),
+                    }
+                logger.info(f"Loaded video_session data for Agent4 session {request.sessionID}")
+        except Exception as e:
+            logger.warning(f"Could not load video_session data for Agent4: {e}")
+            # Continue anyway - Agent4 can work with just the script parameter
         
         # Start Agent4 directly
         async def run_agent_4_with_error_handling():
@@ -735,20 +724,18 @@ async def start_processing(
             
             try:
                 from app.agents.agent_4 import agent_4_process
-                # Generate a supersessionid for Agent4
-                import secrets
-                supersessionid = f"{request.sessionID}_{secrets.token_urlsafe(12)[:16]}"
                 
                 await agent_4_process(
                     websocket_manager=websocket_manager,
                     user_id=request.userID,
                     session_id=request.sessionID,
-                    supersessionid=supersessionid,
-                    script=request.script,
+                    script=request.script or {},  # Use provided script or empty dict (will be extracted from DB)
                     voice=request.voice or "alloy",
                     audio_option=request.audio_option or "tts",
                     storage_service=storage_service,
-                    agent2_data=None  # Deprecated
+                    agent2_data=None,  # Deprecated
+                    video_session_data=video_session_data,  # Pass same data as orchestrator
+                    db=db  # Pass database session so Agent4 can query if needed
                 )
             except Exception as e:
                 logger.exception(f"Error in agent_4_process: {e}")
@@ -835,6 +822,142 @@ async def start_processing(
     
     else:
         raise HTTPException(status_code=400, detail=f"Invalid agent_selection: {agent_selection}. Must be 'Full Test', 'Agent2', 'Agent4', or 'Agent5'")
+
+
+# =============================================================================
+# Agent5 Restart Endpoint - Restart from Remotion rendering
+# =============================================================================
+
+class RestartAgent5Request(BaseModel):
+    """Request to restart Agent5 from Remotion rendering stage."""
+    userID: str
+    sessionID: str
+    supersessionid: Optional[str] = None
+
+
+@app.post("/api/restart-agent5-remotion")
+async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = Depends(get_db)):
+    """
+    Restart Agent5 from the Remotion rendering stage.
+    
+    This endpoint allows restarting video generation from the Remotion rendering step,
+    skipping video clip generation by reusing clips already stored in S3.
+    
+    Use case: When Remotion rendering fails but video clips were successfully generated.
+    """
+    logger.info(f"Restart Agent5 Remotion request for session {request.sessionID}")
+    
+    # Verify clips exist in S3 before starting
+    try:
+        sections = ["hook", "concept", "process", "conclusion"]
+        agent5_prefix = f"scaffold_test/{request.userID}/{request.sessionID}/agent5/"
+        
+        missing_clips = []
+        for section in sections:
+            concat_key = f"{agent5_prefix}{section}_concat.mp4"
+            try:
+                storage_service.s3_client.head_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=concat_key
+                )
+            except Exception:
+                missing_clips.append(section)
+        
+        if missing_clips:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot restart - missing video clips for sections: {', '.join(missing_clips)}. Please regenerate from scratch."
+            )
+        
+        logger.info(f"All clips verified for session {request.sessionID}, starting restart")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying clips: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to verify clips: {str(e)}")
+    
+    # Generate new supersessionid if not provided
+    import secrets
+    if not request.supersessionid:
+        supersessionid = f"{request.sessionID}_restart_{secrets.token_urlsafe(8)[:12]}"
+    else:
+        supersessionid = request.supersessionid
+    
+    # Start Agent5 with restart flag
+    async def run_agent_5_restart():
+        try:
+            from app.agents.agent_5 import agent_5_process
+            from app.services.orchestrator import VideoGenerationOrchestrator
+            
+            # Create orchestrator for status callback
+            orchestrator = VideoGenerationOrchestrator(websocket_manager)
+            
+            async def status_callback(agentnumber: str, status: str, userID: str, sessionID: str, timestamp: int, **kwargs):
+                """Forward status to WebSocket."""
+                status_data = {
+                    "agentnumber": agentnumber,
+                    "userID": userID,
+                    "sessionID": sessionID,
+                    "status": status,
+                    "timestamp": timestamp,
+                    **kwargs
+                }
+                await websocket_manager.send_progress(sessionID, status_data)
+            
+            # Call agent_5_process with restart flag
+            result = await agent_5_process(
+                websocket_manager=None,
+                user_id=request.userID,
+                session_id=request.sessionID,
+                supersessionid=supersessionid,
+                storage_service=storage_service,
+                pipeline_data=None,
+                db=db,
+                status_callback=status_callback,
+                restart_from_remotion=True  # KEY: Skip clip generation
+            )
+            
+            # Send completion status
+            await websocket_manager.send_progress(request.sessionID, {
+                "agentnumber": "Agent5",
+                "userID": request.userID,
+                "sessionID": request.sessionID,
+                "status": "finished",
+                "message": "Remotion rendering completed successfully",
+                "videoUrl": result,
+                "timestamp": int(time.time() * 1000)
+            })
+            
+        except Exception as e:
+            logger.exception(f"Error in agent_5_process restart: {e}")
+            try:
+                await websocket_manager.send_progress(request.sessionID, {
+                    "agentnumber": "Agent5",
+                    "userID": request.userID,
+                    "sessionID": request.sessionID,
+                    "status": "error",
+                    "error": str(e),
+                    "reason": f"Agent5 restart failed: {type(e).__name__}",
+                    "timestamp": int(time.time() * 1000)
+                })
+            except Exception:
+                pass
+    
+    # Run in background
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(run_agent_5_restart())
+    if not hasattr(app.state, 'background_tasks'):
+        app.state.background_tasks = set()
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
+    
+    return {
+        "success": True,
+        "message": "Agent5 restart from Remotion initiated",
+        "sessionID": request.sessionID,
+        "supersessionid": supersessionid
+    }
 
 
 # =============================================================================
