@@ -3110,7 +3110,7 @@ class VideoGenerationOrchestrator:
                 status_callback=status_callback
             )
             
-            # Agent4 will extract script from video_session if needed
+            # Agent4 will extract script from video_session (same data as Agent2)
             agent4_task = agent_4_process(
                 websocket_manager=None,  # Not used - using callback instead
                 user_id=userId,
@@ -3120,6 +3120,7 @@ class VideoGenerationOrchestrator:
                 audio_option="tts",
                 storage_service=self.storage_service,
                 agent2_data=None,
+                video_session_data=video_session_data,  # Pass same data as Agent2
                 db=db,
                 status_callback=status_callback
             )
