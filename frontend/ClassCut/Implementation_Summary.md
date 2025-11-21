@@ -114,7 +114,7 @@ const TEST_VIDEO_S3_KEY = "scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4
 
 Full S3 URL:
 ```
-https://pipeline-backend-assets.s3.us-east-1.amazonaws.com/scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4
+https://pipeline-backend-assets.s3.us-east-2.amazonaws.com/scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4
 ```
 
 **Note**: The tRPC `getPresignedUrl` endpoint has been updated to allow both `users/{userId}/` and `scaffold_test/` prefixed paths. Test videos under `scaffold_test/` can be accessed by any authenticated user.
@@ -129,7 +129,7 @@ Check that the frontend `.env` has:
 AWS_ACCESS_KEY_ID=your-key
 AWS_SECRET_ACCESS_KEY=your-secret
 S3_BUCKET_NAME=pipeline-backend-assets
-AWS_REGION=us-east-1
+AWS_REGION=us-east-2
 ```
 
 ### 2. User Authentication

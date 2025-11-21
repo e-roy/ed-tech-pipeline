@@ -96,7 +96,7 @@ class ReplicateVideoService:
         elif "kling" in model_id:
             input_data = {
                 "prompt": prompt,
-                "duration": str(duration),
+                "duration": duration,
                 "aspect_ratio": "16:9",
             }
             # Add seed if provided (Kling supports seed)
@@ -141,6 +141,7 @@ class ReplicateVideoService:
         prompt: str,
         image_url: str,
         model: str = "minimax",
+        seed: Optional[int] = None,
     ) -> str:
         """
         Generate a video from an image and text prompt.
@@ -149,6 +150,7 @@ class ReplicateVideoService:
             prompt: Text description of the motion/action
             image_url: URL of the source image
             model: Model to use
+            seed: Optional random seed for reproducibility
 
         Returns:
             URL of the generated video
@@ -159,12 +161,13 @@ class ReplicateVideoService:
             self._run_image_to_video,
             model_id,
             prompt,
-            image_url
+            image_url,
+            seed
         )
 
         return output
 
-    def _run_image_to_video(self, model_id: str, prompt: str, image_url: str) -> str:
+    def _run_image_to_video(self, model_id: str, prompt: str, image_url: str, seed: Optional[int] = None) -> str:
         """
         Run image-to-video prediction synchronously.
         """
@@ -173,17 +176,23 @@ class ReplicateVideoService:
                 "prompt": prompt,
                 "first_frame_image": image_url,
             }
+            if seed is not None:
+                input_data["seed"] = seed
         elif "kling" in model_id:
             input_data = {
                 "prompt": prompt,
                 "start_image": image_url,
                 "aspect_ratio": "16:9",
             }
+            if seed is not None:
+                input_data["seed"] = seed
         else:
             input_data = {
                 "prompt": prompt,
                 "image": image_url,
             }
+            if seed is not None:
+                input_data["seed"] = seed
 
         output = replicate.run(model_id, input=input_data)
 

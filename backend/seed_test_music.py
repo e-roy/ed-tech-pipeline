@@ -19,7 +19,7 @@ TEST_TRACKS = [
         "mood": "peaceful",
         "duration": 120,  # 2 minutes - plenty for testing
         "bpm": 75,
-        "s3_url": "https://pipeline-backend-assets.s3.us-east-1.amazonaws.com/music/library/test_calm_01.mp3",
+        "s3_url": "https://pipeline-backend-assets.s3.us-east-2.amazonaws.com/music/library/test_calm_01.mp3",
         "license_type": "test",
         "attribution": "Test track for development",
         "suitable_for": ["general", "science", "math"]
@@ -31,7 +31,7 @@ TEST_TRACKS = [
         "mood": "energetic",
         "duration": 120,
         "bpm": 120,
-        "s3_url": "https://pipeline-backend-assets.s3.us-east-1.amazonaws.com/music/library/test_upbeat_01.mp3",
+        "s3_url": "https://pipeline-backend-assets.s3.us-east-2.amazonaws.com/music/library/test_upbeat_01.mp3",
         "license_type": "test",
         "attribution": "Test track for development",
         "suitable_for": ["general", "science"]
@@ -43,7 +43,7 @@ TEST_TRACKS = [
         "mood": "motivational",
         "duration": 120,
         "bpm": 95,
-        "s3_url": "https://pipeline-backend-assets.s3.us-east-1.amazonaws.com/music/library/test_inspiring_01.mp3",
+        "s3_url": "https://pipeline-backend-assets.s3.us-east-2.amazonaws.com/music/library/test_inspiring_01.mp3",
         "license_type": "test",
         "attribution": "Test track for development",
         "suitable_for": ["general"]
