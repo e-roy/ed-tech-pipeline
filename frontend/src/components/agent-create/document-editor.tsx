@@ -2,13 +2,21 @@
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { FileTextIcon, CheckCircle2, Circle } from "lucide-react";
-import type { HTMLAttributes } from "react";
+import {
+  FileTextIcon,
+  CheckCircle2,
+  Circle,
+  ListChecks,
+  FileText,
+} from "lucide-react";
+import { useState, type HTMLAttributes } from "react";
 import { Button } from "@/components/ui/button";
 import { NarrationEditor } from "./narration-editor";
 import { useAgentCreateStore } from "@/stores/agent-create-store";
 
 export type DocumentEditorProps = HTMLAttributes<HTMLDivElement>;
+
+type ViewMode = "facts" | "script";
 
 export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
   const {
@@ -22,12 +30,21 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
     handleSubmitFacts,
   } = useAgentCreateStore();
 
+  const [viewMode, setViewMode] = useState<ViewMode>("script");
+
   const mode =
     workflowStep === "selection"
       ? "select-facts"
       : workflowStep === "review"
         ? "edit-narration"
         : "edit";
+
+  // Show toggle buttons when both confirmed facts and script exist
+  const hasConfirmedFacts = selectedFacts.length > 0;
+  const hasScript = narration !== null;
+  const showToggleButtons =
+    hasConfirmedFacts && hasScript && mode !== "select-facts";
+
   return (
     <div
       className={cn("bg-background flex h-full flex-col border-l", className)}
@@ -35,13 +52,28 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
     >
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <FileTextIcon className="text-muted-foreground size-5" />
-        <h2 className="text-sm font-semibold">
-          {mode === "edit"
-            ? "Create Educational Video"
-            : mode === "select-facts"
-              ? "Select Facts"
-              : "Edit Narration"}
-        </h2>
+        {showToggleButtons ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant={viewMode === "facts" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("facts")}
+              className="h-8"
+            >
+              <ListChecks className="mr-2 size-4" />
+              Facts ({selectedFacts.length})
+            </Button>
+            <Button
+              variant={viewMode === "script" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("script")}
+              className="h-8"
+            >
+              <FileText className="mr-2 size-4" />
+              Script
+            </Button>
+          </div>
+        ) : null}
         {isLoading && (
           <span className="text-muted-foreground ml-auto text-xs">
             Updating...
@@ -102,6 +134,30 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
                 );
               })}
             </div>
+          ) : showToggleButtons ? (
+            viewMode === "facts" ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {selectedFacts.map((fact, index) => (
+                  <div
+                    key={index}
+                    className="border-border bg-card rounded-lg border p-4"
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-semibold">{fact.concept}</h3>
+                      <CheckCircle2 className="text-primary size-4" />
+                    </div>
+                    <p className="text-muted-foreground text-sm">
+                      {fact.details}
+                    </p>
+                    <div className="text-muted-foreground mt-2 text-xs">
+                      Confidence: {Math.round(fact.confidence * 100)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              narration && <NarrationEditor />
+            )
           ) : (
             narration && <NarrationEditor />
           )}
