@@ -773,17 +773,25 @@
         const maxReconnectAttempts = 5;
         const reconnectDelay = 3000; // 3 seconds
 
-        // Determine API base URL - support both direct EC2 and API Gateway
-        // API Gateway URLs
+        // Determine API base URL - support ALB, API Gateway, and direct EC2
+        // Production URLs (via ALB)
+        const ALB_API_URL = 'https://api.classclipscohort3.com';
+        const ALB_WS_URL = 'wss://api.classclipscohort3.com';
+        
+        // API Gateway URLs (fallback)
         const WS_API_GATEWAY_URL = 'wss://927uc04ep5.execute-api.us-east-2.amazonaws.com/prod';
         const REST_API_GATEWAY_URL = 'https://w8d3k51hg6.execute-api.us-east-2.amazonaws.com/prod';
         
-        // Detect if we're accessing through API Gateway
+        // Detect environment
+        const isALB = window.location.hostname.includes('classclipscohort3.com');
         const isApiGateway = window.location.hostname.includes('execute-api');
         
         // Set API base URL
         let API_BASE_URL;
-        if (isApiGateway) {
+        if (isALB) {
+            // Accessing through ALB (production) - use ALB URL
+            API_BASE_URL = ALB_API_URL;
+        } else if (isApiGateway) {
             // Accessing through REST API Gateway - use API Gateway URL for REST calls
             API_BASE_URL = REST_API_GATEWAY_URL;
         } else {
@@ -911,9 +919,14 @@
                 currentSessionId = sessionId;
                 console.log(`Setting current session ID to: ${currentSessionId}`);
 
-                // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
+                // Determine WebSocket URL based on environment
                 let wsUrl, wsPath;
-                if (window.location.hostname.includes('execute-api')) {
+                if (isALB) {
+                    // ALB (production): use query parameter for session_id
+                    // Format: wss://api.classclipscohort3.com/ws?session_id=xxx
+                    wsUrl = ALB_WS_URL;
+                    wsPath = `${wsUrl}/ws?session_id=${sessionId}`;
+                } else if (isApiGateway) {
                     // API Gateway: use query parameter for session_id
                     // Format: wss://.../prod?session_id=xxx
                     wsUrl = WS_API_GATEWAY_URL;
