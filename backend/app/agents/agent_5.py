@@ -383,32 +383,16 @@ async def render_video_with_remotion(
                                         }),
                                         loop
                                     )
-                                elif websocket_manager:
-                                    # Fallback to websocket_manager only
-                                    asyncio.run_coroutine_threadsafe(
-                                        websocket_manager.send_progress(session_id, {
-                                            "agentnumber": "Agent5",
-                                            "userID": user_id or "",
-                                            "sessionID": session_id,
-                                            "supersessionID": supersessionid or "",
-                                            "status": "processing",
-                                            "message": message,
-                                            "timestamp": int(time.time() * 1000),
-                                            "progress": {
-                                                "stage": "rendering",
-                                                "current": current,
-                                                "total": total,
-                                                "percent": percent
-                                            }
-                                        }),
-                                        loop
-                                    )
                         except Exception as e:
                             print(f"Failed to send render progress: {e}")
 
-        # Run the output reading in a thread
+        # Run the output reading in a thread to avoid blocking the event loop
+        # This allows health checks to continue responding during long Remotion renders
         await asyncio.to_thread(read_output)
-        process.wait()
+        
+        # Wait for process to complete without blocking the event loop
+        # CRITICAL: This prevents the single worker from being blocked during health checks
+        await asyncio.to_thread(process.wait)
 
         if process.returncode != 0:
             raise RuntimeError(f"Remotion render failed:\n{''.join(output_lines)}")
