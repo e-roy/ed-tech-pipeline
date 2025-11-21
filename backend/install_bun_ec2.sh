@@ -83,14 +83,26 @@ echo "Installing Remotion packages..."
 
 echo ""
 echo "======================================"
+echo "Making Bun available system-wide"
+echo "======================================"
+
+# Create symlinks so systemd services can find bun
+sudo ln -sf /home/ec2-user/.bun/bin/bun /usr/local/bin/bun
+sudo ln -sf /home/ec2-user/.bun/bin/bunx /usr/local/bin/bunx
+
+echo "Created symlinks:"
+ls -l /usr/local/bin/bun /usr/local/bin/bunx
+
+echo ""
+echo "======================================"
 echo "Installation complete!"
 echo "======================================"
 echo ""
 echo "Bun version:"
-~/.bun/bin/bun --version
+bun --version
 echo ""
 echo "Bun location:"
-which bun || echo "Bun location: ~/.bun/bin/bun"
+which bun
 
 ENDSSH
 
