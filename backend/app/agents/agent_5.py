@@ -230,7 +230,47 @@ async def render_video_with_remotion(
         print(f"Remotion dir: {REMOTION_DIR}")
         print(f"Public dir contents: {list(remotion_public.iterdir()) if remotion_public.exists() else 'not found'}")
 
-        cmd = f"bunx remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
+        # Try to find bun/bunx in common locations
+        import shutil
+        
+        bunx_cmd = None
+        # First try to find bunx in PATH
+        bunx_full = shutil.which('bunx')
+        if bunx_full:
+            bunx_cmd = bunx_full
+        else:
+            # Try common installation paths
+            bun_paths = [
+                '/home/ec2-user/.bun/bin/bunx',
+                '/usr/local/bin/bunx',
+                '/opt/homebrew/bin/bunx',
+            ]
+            for path in bun_paths:
+                if os.path.exists(path) and os.access(path, os.X_OK):
+                    bunx_cmd = path
+                    break
+        
+        # If bunx not found, try using 'bun x' as fallback
+        if not bunx_cmd:
+            bun_full = shutil.which('bun')
+            if bun_full:
+                bunx_cmd = f"{bun_full} x"
+            else:
+                # Try common bun paths
+                bun_paths_bun = [
+                    '/home/ec2-user/.bun/bin/bun',
+                    '/usr/local/bin/bun',
+                    '/opt/homebrew/bin/bun',
+                ]
+                for path in bun_paths_bun:
+                    if os.path.exists(path) and os.access(path, os.X_OK):
+                        bunx_cmd = f"{path} x"
+                        break
+        
+        if not bunx_cmd:
+            raise RuntimeError("Could not find bun or bunx. Please ensure bun is installed. Tried: bunx, bun x, and common installation paths.")
+        
+        cmd = f"{bunx_cmd} remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
 
         # Use Popen to stream output and send progress updates
         # Explicitly set PATH to ensure bun is accessible
@@ -410,10 +450,14 @@ async def agent_5_process(
 
     video_url = None
     temp_dir = None
+    
+    # Initialize cost tracking early (before any operations that might fail)
+    total_cost = 0.0
+    cost_per_section = {}
 
     try:
         # Report starting status
-        await send_status("Agent5", "starting", supersessionID=supersessionid)
+        await send_status("Agent5", "starting", supersessionID=supersessionid, cost=total_cost)
         status_data = {
             "agentnumber": "Agent5",
             "userID": user_id,
@@ -742,6 +786,11 @@ async def agent_5_process(
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
         completed_videos = []
+        
+        # Cost tracking
+        # Minimax video-01: ~$0.035 per 5-6 second clip
+        COST_PER_CLIP = 0.035  # USD per clip (5-6 seconds)
+        # Note: total_cost and cost_per_section are already initialized at function start (line 453-454)
 
         # Constants for video generation
         CLIP_DURATION = 6.0  # Minimax generates 6-second clips
@@ -821,19 +870,29 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
 
-            # Generate all clips for this section with same seed
-            generated_clips = []
+            # Generate all clips for this section with same seed (in parallel for this section)
+            clip_tasks = []
             for clip_idx, clip_prompt in enumerate(clip_prompts):
-                video_url = await generate_video_replicate(
-                    clip_prompt,
-                    settings.REPLICATE_API_KEY,
-                    model="minimax",
-                    seed=section_seed  # Same seed for all clips in this section
+                clip_tasks.append(
+                    generate_video_replicate(
+                        clip_prompt,
+                        settings.REPLICATE_API_KEY,
+                        model="minimax",
+                        seed=section_seed  # Same seed for all clips in this section
+                    )
                 )
-                generated_clips.append(video_url)
-
-                # Update progress
+            
+            # Generate all clips for this section in parallel
+            generated_clips = await asyncio.gather(*clip_tasks)
+            
+            # Calculate cost for this section
+            section_cost = len(generated_clips) * COST_PER_CLIP
+            cost_per_section[section] = section_cost
+            
+            # Update progress with cost info
+            for clip_idx in range(len(generated_clips)):
                 completed_videos.append(f"{section}_{clip_idx}")
+                total_cost = sum(cost_per_section.values())
                 await send_status(
                     "Agent5",
                     "processing",
@@ -844,7 +903,9 @@ async def agent_5_process(
                         "completed": len(completed_videos),
                         "total": total_clips,
                         "section": section
-                    }
+                    },
+                    cost=total_cost,
+                    cost_breakdown=cost_per_section
                 )
 
             # If only one clip, return it directly
@@ -906,10 +967,15 @@ async def agent_5_process(
         if restart_from_remotion:
             logger.info(f"[{session_id}] Restarting from Remotion - loading existing clips from S3")
             
+            # Initialize cost tracking for restart (no new generation cost)
+            total_cost = 0.0
+            cost_per_section = {}
+            
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message=f"Verifying {total_clips} clips in S3 for restart..."
+                message=f"Verifying {total_clips} clips in S3 for restart...",
+                cost=total_cost
             )
             
             # Verify and load clips from S3
@@ -936,38 +1002,43 @@ async def agent_5_process(
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message=f"All {total_clips} clips verified, skipping to Remotion rendering..."
+                message=f"All {total_clips} clips verified, skipping to Remotion rendering...",
+                cost=total_cost
             )
             
         else:
-            # Generate videos in batches of 2 to reduce API load
+            # Generate all videos in parallel (fully parallelized)
             generated_visuals = {}
             
-            # Split sections into batches of 2
-            batch_size = 2
-            for i in range(0, len(sections), batch_size):
-                batch = sections[i:i + batch_size]
-                batch_num = (i // batch_size) + 1
-                total_batches = (len(sections) + batch_size - 1) // batch_size
-                
-                logger.info(f"[{session_id}] Processing batch {batch_num}/{total_batches}: {batch}")
-                
-                await send_status(
-                    "Agent5", "processing",
-                    supersessionID=supersessionid,
-                    message=f"Generating videos for batch {batch_num}/{total_batches} ({', '.join(batch)})..."
-                )
-                
-                # Process batch in parallel
-                batch_results = await asyncio.gather(
-                    *[generate_section_video(section) for section in batch]
-                )
-                
-                # Add batch results to generated_visuals
-                for section, url in batch_results:
-                    generated_visuals[section] = url
-                
-                logger.info(f"[{session_id}] Completed batch {batch_num}/{total_batches}")
+            logger.info(f"[{session_id}] Generating all {len(sections)} sections in parallel")
+            
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"Generating all {len(sections)} videos in parallel...",
+                cost=0.0
+            )
+            
+            # Process all sections in parallel
+            section_results = await asyncio.gather(
+                *[generate_section_video(section) for section in sections]
+            )
+            
+            # Add all results to generated_visuals
+            for section, url in section_results:
+                generated_visuals[section] = url
+            
+            # Calculate final total cost
+            total_cost = sum(cost_per_section.values())
+            logger.info(f"[{session_id}] Completed all sections. Total cost: ${total_cost:.4f}")
+            
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"All videos generated. Total cost: ${total_cost:.4f}",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
+            )
 
         # Update scenes with generated video URLs
         for scene in scenes:
@@ -977,11 +1048,13 @@ async def agent_5_process(
             if "visualPrompt" in scene:
                 del scene["visualPrompt"]
 
-        # Update status for rendering
+        # Update status for rendering (include cost)
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,
-            message="Rendering video with Remotion (this may take 2-4 minutes)..."
+            message="Rendering video with Remotion (this may take 2-4 minutes)...",
+            cost=total_cost,
+            cost_breakdown=cost_per_section
         )
         status_data = {
             "agentnumber": "Agent5",
@@ -990,7 +1063,9 @@ async def agent_5_process(
             "supersessionID": supersessionid,
             "status": "processing",
             "message": "Rendering video with Remotion (this may take 2-4 minutes)...",
-            "timestamp": int(time.time() * 1000)
+            "timestamp": int(time.time() * 1000),
+            "cost": total_cost,
+            "cost_breakdown": cost_per_section
         }
 
         # Get background music URL
@@ -1029,12 +1104,14 @@ async def agent_5_process(
         video_url = storage_service.generate_presigned_url(video_s3_key, expires_in=86400)  # 24 hours for testing
         print(f"Video uploaded successfully: {video_url}")
 
-        # Report finished status with video link
+        # Report finished status with video link and cost
         await send_status(
             "Agent5", "finished",
             supersessionID=supersessionid,
             videoUrl=video_url,
-            progress=100
+            progress=100,
+            cost=total_cost,
+            cost_breakdown=cost_per_section
         )
         status_data = {
             "agentnumber": "Agent5",
@@ -1043,19 +1120,27 @@ async def agent_5_process(
             "supersessionID": supersessionid,
             "status": "finished",
             "timestamp": int(time.time() * 1000),
-            "videoUrl": video_url
+            "videoUrl": video_url,
+            "cost": total_cost,
+            "cost_breakdown": cost_per_section
         }
         await create_status_json("5", "finished", status_data)
 
         return video_url
 
     except Exception as e:
-        # Report error status
+        # Report error status with cost information (even if failed)
         error_kwargs = {
             "error": str(e),
             "reason": f"Agent5 failed: {type(e).__name__}",
             "supersessionID": supersessionid if 'supersessionid' in locals() else None
         }
+        
+        # Include cost information (always available, initialized at function start)
+        error_kwargs["cost"] = total_cost
+        if cost_per_section:
+            error_kwargs["cost_breakdown"] = cost_per_section
+        
         await send_status("Agent5", "error", **error_kwargs)
         error_data = {
             "agentnumber": "Agent5",
