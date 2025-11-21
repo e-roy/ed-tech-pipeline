@@ -33,7 +33,7 @@ REPLICATE_API_KEY=r8_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxxxxx
 AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 S3_BUCKET_NAME=pipeline-backend-assets
-AWS_REGION=us-east-1
+AWS_REGION=us-east-2
 ```
 
 ### Optional (has defaults, only change if needed)
@@ -63,7 +63,7 @@ REPLICATE_API_KEY=r8_your-replicate-key-here
 AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
 S3_BUCKET_NAME=pipeline-backend-assets
-AWS_REGION=us-east-1
+AWS_REGION=us-east-2
 
 # JWT (OPTIONAL - has default)
 JWT_SECRET_KEY=dev-secret-key-change-in-production
