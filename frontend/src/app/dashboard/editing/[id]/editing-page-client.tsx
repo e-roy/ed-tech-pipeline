@@ -32,7 +32,7 @@ import { api } from "@/trpc/react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Hardcoded test video S3 key for testing purposes
-const TEST_VIDEO_S3_KEY = "scaffold_test/8/8_WJnEQ84oFbmFeAUJ/final_video_dae6d4f1.mp4";
+const TEST_VIDEO_S3_KEY = "users/7302d0b7-f093-4063-947f-73ca799ef5d5/Sv75fpt8L8S75jSNKVPXg/final_video_dae6d4f1.mp4";
 
 interface EditingPageClientProps {
   sessionId: string;

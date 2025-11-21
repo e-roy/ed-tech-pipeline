@@ -422,6 +422,13 @@
             <h2>Agent Status</h2>
             
             <div class="agent-status">
+                <span class="agent-label">Orchestrator</span>
+                <div class="status-light" id="light-orchestrator"></div>
+                <div class="status-text" id="status-orchestrator">Not triggered</div>
+                <div class="error-message" id="error-orchestrator"></div>
+            </div>
+            
+            <div class="agent-status">
                 <span class="agent-label">Agent2</span>
                 <div class="status-light" id="light-agent2"></div>
                 <div class="status-text" id="status-agent2">Not triggered</div>
@@ -440,6 +447,9 @@
                 <div class="status-light" id="light-agent5"></div>
                 <div class="status-text" id="status-agent5">Not triggered</div>
                 <div class="error-message" id="error-agent5"></div>
+                <button id="restart-agent5-btn" class="submit-btn" style="display: none; margin-top: 10px; font-size: 14px; padding: 10px;" onclick="restartAgent5FromRemotion()">
+                    🔄 Restart from Remotion
+                </button>
             </div>
 
             <div class="connection-status disconnected" id="connectionStatus">
@@ -589,13 +599,13 @@
   },
   "agent_4_data": {
     "audio_files": [
-      {"part": "hook", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=91tvjAImnrGa7FWaR2cJDzw45ek%3D&Expires=1763694052", "duration": 4.4},
-      {"part": "concept", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_concept.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=jmu1yhped49w15E2QiDTnf1LB20%3D&Expires=1763694052", "duration": 7.6},
-      {"part": "process", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_process.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=G3bmQ%2F0iea362AdbuJqsuaHNYho%3D&Expires=1763694052", "duration": 11.6},
-      {"part": "conclusion", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_conclusion.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=ebS38PDfSla7dPB6PZllVAyAFqI%3D&Expires=1763694052", "duration": 5.8}
+      {"part": "hook", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_hook.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052", "duration": 4.4},
+      {"part": "concept", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_concept.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052", "duration": 7.6},
+      {"part": "process", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_process.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052", "duration": 11.6},
+      {"part": "conclusion", "url": "https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/1/1_HwdchTTEusJSdQ_s/audio_conclusion.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052", "duration": 5.8}
     ],
     "background_music": {
-      "url": "https://pipeline-backend-assets.s3.amazonaws.com/music/library/test_calm_01.mp3?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=MOJrd%2BP%2B5Ky%2FAYNkcvBvZUWz8yw%3D&Expires=1763694052",
+      "url": "https://pipeline-backend-assets.s3.amazonaws.com/music/library/test_calm_01.mp3?AWSAccessKeyId=PLACEHOLDER&Signature=PLACEHOLDER&Expires=1763694052",
       "duration": 60
     }
   }
@@ -705,7 +715,7 @@
 
             <div class="form-group">
                 <label for="video-url-input">S3 Video URL</label>
-                <input type="text" id="video-url-input" value="https://pipeline-backend-assets.s3.amazonaws.com/scaffold_test/test_user/1_test/final_video_b36961b2.mp4?AWSAccessKeyId=AKIA6ELKOKYDEGNFZQXH&Signature=KtGJDMY2cGPfrM1%2BNwUWeDj%2Frds%3D&Expires=1763668508" placeholder="Paste S3 video URL here...">
+                <input type="text" id="video-url-input" value="" placeholder="Paste S3 video URL here...">
             </div>
 
             <button type="button" class="submit-btn" id="load-video-btn">Load Video</button>
@@ -757,13 +767,14 @@
 
         // Agent status tracking
         const agentStatuses = {
+            'Orchestrator': { light: null, text: null, error: null },
             'Agent2': { light: null, text: null, error: null },
             'Agent4': { light: null, text: null, error: null },
             'Agent5': { light: null, text: null, error: null }
         };
 
         // Initialize agent status elements
-        ['Agent2', 'Agent4', 'Agent5'].forEach(agent => {
+        ['Orchestrator', 'Agent2', 'Agent4', 'Agent5'].forEach(agent => {
             agentStatuses[agent] = {
                 light: document.getElementById(`light-${agent.toLowerCase()}`),
                 text: document.getElementById(`status-${agent.toLowerCase()}`),
@@ -777,12 +788,14 @@
 
         // Reset all agent status lights to black
         function resetAgentStatuses() {
-            ['Agent2', 'Agent4', 'Agent5'].forEach(agent => {
+            ['Orchestrator', 'Agent2', 'Agent4', 'Agent5'].forEach(agent => {
                 const status = agentStatuses[agent];
-                status.light.className = 'status-light';
-                status.text.textContent = 'Not triggered';
-                status.error.textContent = '';
-                status.error.classList.remove('show');
+                if (status.light && status.text && status.error) {
+                    status.light.className = 'status-light';
+                    status.text.textContent = 'Not triggered';
+                    status.error.textContent = '';
+                    status.error.classList.remove('show');
+                }
             });
             // Hide video result
             const videoResult = document.getElementById('video-result');
@@ -799,21 +812,46 @@
             agent.light.className = 'status-light';
             agent.text.textContent = 'Not triggered';
 
+            // Hide restart button by default
+            const restartBtn = document.getElementById('restart-agent5-btn');
+            
             if (status === 'starting') {
                 agent.light.classList.add('starting');
                 agent.text.textContent = 'Starting...';
             } else if (status === 'processing') {
                 agent.light.classList.add('processing');
                 agent.text.textContent = 'Processing...';
+                
+                // Hide restart button when processing
+                if (agentNumber === 'Agent5' && restartBtn) {
+                    restartBtn.style.display = 'none';
+                }
             } else if (status === 'finished') {
                 agent.light.classList.add('finished');
                 agent.text.textContent = 'Finished';
+                
+                // Hide restart button on success
+                if (agentNumber === 'Agent5' && restartBtn) {
+                    restartBtn.style.display = 'none';
+                }
             } else if (status === 'error') {
                 agent.light.classList.add('error');
                 agent.text.textContent = 'Error';
                 if (error && reason) {
                     agent.error.textContent = `${reason}: ${error}`;
                     agent.error.classList.add('show');
+                    
+                    // Show restart button for Agent5 Remotion errors
+                    if (agentNumber === 'Agent5' && restartBtn) {
+                        // Show button if error mentions Remotion or if we have progress data indicating clips were generated
+                        const showRestart = error.toLowerCase().includes('remotion') || 
+                                          reason.toLowerCase().includes('remotion') ||
+                                          (window.agent5ClipsGenerated && window.agent5ClipsGenerated > 0);
+                        
+                        if (showRestart) {
+                            restartBtn.style.display = 'block';
+                        }
+                    }
                 }
             }
         }
@@ -824,6 +862,10 @@
                 if (websocket && websocket.readyState === WebSocket.OPEN) {
                     websocket.close();
                 }
+
+                // Set current session ID immediately
+                currentSessionId = sessionId;
+                console.log(`Setting current session ID to: ${currentSessionId}`);
 
                 // Use API Gateway WebSocket if we're on API Gateway REST, otherwise use direct connection
                 let wsUrl, wsPath;
@@ -866,6 +908,12 @@
                             console.log('WebSocket connection confirmed ready');
                             updateConnectionStatus('connected', 'WebSocket: Connected');
                             
+                            // Update current session ID from message if provided (backup)
+                            if (message.sessionID && message.sessionID !== currentSessionId) {
+                                console.log(`Updating current session ID from ${currentSessionId} to ${message.sessionID}`);
+                                currentSessionId = message.sessionID;
+                            }
+                            
                             // Start ping interval to keep connection alive
                             if (websocket && websocket.readyState === WebSocket.OPEN) {
                                 // Send ping every 30 seconds to keep connection alive
@@ -895,11 +943,21 @@
                             return;
                         }
 
-                        // Handle agent status updates
-                        if (message.agentnumber && message.sessionID && message.status) {
+                        // Handle agent status updates (standardized format)
+                        if (message.agentnumber && message.userID && message.sessionID && message.status) {
                             // Verify it matches current session
                             if (message.sessionID === currentSessionId) {
                                 console.log(`Updating status for ${message.agentnumber}: ${message.status}`);
+                                
+                                // Track Agent5 clip generation progress
+                                if (message.agentnumber === 'Agent5' && message.progress) {
+                                    if (message.progress.stage === 'video_generation') {
+                                        window.agent5ClipsGenerated = message.progress.completed || 0;
+                                        window.agent5TotalClips = message.progress.total || 0;
+                                        console.log(`Agent5 clips: ${window.agent5ClipsGenerated}/${window.agent5TotalClips}`);
+                                    }
+                                }
+                                
                                 updateAgentStatus(
                                     message.agentnumber,
                                     message.status,
@@ -926,8 +984,9 @@
                                     }
                                 }
                                 
-                                // If Agent5 finished and has videoUrl, display it
-                                if (message.agentnumber === 'Agent5' && message.status === 'finished' && message.videoUrl) {
+                                // If Agent5 or Orchestrator finished and has videoUrl, display it
+                                if ((message.agentnumber === 'Agent5' || message.agentnumber === 'Orchestrator') && 
+                                    message.status === 'finished' && message.videoUrl) {
                                     console.log('Video URL received:', message.videoUrl);
                                     const videoResult = document.getElementById('video-result');
                                     const videoPlayer = document.getElementById('video-player');
@@ -935,6 +994,18 @@
                                     const proxyUrl = `/api/video/proxy?url=${encodeURIComponent(message.videoUrl)}`;
                                     videoPlayer.src = proxyUrl;
                                     videoResult.style.display = 'block';
+                                    submitBtn.disabled = false;
+                                    submitBtn.textContent = 'Start Processing';
+                                }
+                                
+                                // If Orchestrator finished, re-enable submit button
+                                if (message.agentnumber === 'Orchestrator' && message.status === 'finished') {
+                                    submitBtn.disabled = false;
+                                    submitBtn.textContent = 'Start Processing';
+                                }
+                                
+                                // If Orchestrator error, re-enable submit button
+                                if (message.agentnumber === 'Orchestrator' && message.status === 'error') {
                                     submitBtn.disabled = false;
                                     submitBtn.textContent = 'Start Processing';
                                 }
@@ -1578,6 +1649,65 @@ ${JSON.stringify(result, null, 2)}`;
                 sceneSubmitBtn.textContent = 'Generate Scene';
             }
         });
+        // Track Agent5 clip generation progress
+        window.agent5ClipsGenerated = 0;
+        window.agent5TotalClips = 0;
+        
+        // Function to restart Agent5 from Remotion rendering
+        async function restartAgent5FromRemotion() {
+            const restartBtn = document.getElementById('restart-agent5-btn');
+            const userID = document.getElementById('fullTestUserID').value;
+            const sessionID = document.getElementById('fullTestSessionID').value;
+            
+            if (!userID || !sessionID) {
+                alert('User ID and Session ID are required');
+                return;
+            }
+            
+            try {
+                restartBtn.disabled = true;
+                restartBtn.textContent = '🔄 Restarting...';
+                
+                // Hide restart button
+                restartBtn.style.display = 'none';
+                
+                // Clear Agent5 error message
+                const agent5Error = document.getElementById('error-agent5');
+                agent5Error.classList.remove('show');
+                
+                // Call restart endpoint
+                const response = await fetch(`${apiBaseUrl}/api/restart-agent5-remotion`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userID: userID,
+                        sessionID: sessionID
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to restart Agent5');
+                }
+                
+                console.log('Agent5 restart initiated:', data);
+                
+                // Update status to show restart in progress
+                updateAgentStatus('Agent5', 'processing', null, null);
+                
+            } catch (error) {
+                console.error('Error restarting Agent5:', error);
+                alert(`Failed to restart Agent5: ${error.message}`);
+                
+                // Re-show button on error
+                restartBtn.style.display = 'block';
+                restartBtn.disabled = false;
+                restartBtn.textContent = '🔄 Restart from Remotion';
+            }
+        }
     </script>
 </body>
 </html>
