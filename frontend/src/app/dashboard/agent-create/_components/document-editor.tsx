@@ -1,6 +1,5 @@
 "use client";
 
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { FileTextIcon, CheckCircle2, Circle } from "lucide-react";
@@ -13,13 +12,12 @@ export type DocumentEditorProps = HTMLAttributes<HTMLDivElement>;
 
 export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
   const {
-    documentContent,
     isLoading,
     workflowStep,
     facts,
     selectedFacts,
     narration,
-    setDocumentContent,
+    factsLocked,
     toggleFact,
     handleSubmitFacts,
   } = useAgentCreateStore();
@@ -63,25 +61,24 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
       <ScrollArea className="flex-1">
         <div className="h-full p-4">
           {mode === "edit" ? (
-            <Textarea
-              value={documentContent}
-              onChange={(e) => setDocumentContent(e.target.value)}
-              placeholder="Your markdown document content will appear here. Use the chat to edit it."
-              className="min-h-[calc(100vh-8rem)] resize-none border-0 bg-transparent font-mono text-sm focus-visible:ring-0"
-              disabled={isLoading}
-            />
+            <div className="text-muted-foreground text-sm">
+              Use the chat to provide content for fact extraction.
+            </div>
           ) : mode === "select-facts" ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {facts.map((fact, index) => {
+              {(factsLocked ? selectedFacts : facts).map((fact, index) => {
                 const isSelected = selectedFacts.some(
                   (f) => f.concept === fact.concept,
                 );
                 return (
                   <div
                     key={index}
-                    onClick={() => toggleFact(fact)}
+                    onClick={() => !factsLocked && toggleFact(fact)}
                     className={cn(
-                      "hover:bg-accent cursor-pointer rounded-lg border p-4 transition-all",
+                      "rounded-lg border p-4 transition-all",
+                      factsLocked
+                        ? "cursor-default opacity-75"
+                        : "hover:bg-accent cursor-pointer",
                       isSelected
                         ? "border-primary bg-accent"
                         : "border-border bg-card",

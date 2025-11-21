@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Brain, FileText, PenTool } from "lucide-react";
+import { Brain, FileText, PenTool, CheckCircle2 } from "lucide-react";
 import {
   ChainOfThought,
   ChainOfThoughtHeader,
@@ -11,8 +11,10 @@ import {
 
 export function ScriptGenerationChainOfThought({
   isVisible,
+  operation = "narrating",
 }: {
   isVisible: boolean;
+  operation?: "extracting" | "narrating";
 }) {
   const [visibleSteps, setVisibleSteps] = useState<boolean[]>([
     false,
@@ -57,31 +59,51 @@ export function ScriptGenerationChainOfThought({
     };
   }, [isVisible]);
 
+  const isExtracting = operation === "extracting";
+
   return (
     <ChainOfThought defaultOpen={true}>
-      <ChainOfThoughtHeader>Generating your script</ChainOfThoughtHeader>
+      <ChainOfThoughtHeader>
+        {isExtracting ? "Extracting facts" : "Generating your script"}
+      </ChainOfThoughtHeader>
       <ChainOfThoughtContent>
         {visibleSteps[0] && (
           <ChainOfThoughtStep
             icon={Brain}
-            label="Analyzing facts"
-            description="Reviewing confirmed educational facts and key concepts"
+            label={isExtracting ? "Analyzing content" : "Analyzing facts"}
+            description={
+              isExtracting
+                ? "Reading and understanding the provided content"
+                : "Reviewing confirmed educational facts and key concepts"
+            }
             status="active"
           />
         )}
         {visibleSteps[1] && (
           <ChainOfThoughtStep
             icon={FileText}
-            label="Structuring narrative"
-            description="Organizing content into a coherent educational flow"
+            label={
+              isExtracting ? "Extracting key facts" : "Structuring narrative"
+            }
+            description={
+              isExtracting
+                ? "Identifying key educational concepts and facts"
+                : "Organizing content into a coherent educational flow"
+            }
             status="active"
           />
         )}
         {visibleSteps[2] && (
           <ChainOfThoughtStep
-            icon={PenTool}
-            label="Generating script segments"
-            description="Creating narration and visual guidance for each segment"
+            icon={isExtracting ? CheckCircle2 : PenTool}
+            label={
+              isExtracting ? "Validating results" : "Generating script segments"
+            }
+            description={
+              isExtracting
+                ? "Validating extracted information for accuracy"
+                : "Creating narration and visual guidance for each segment"
+            }
             status="active"
           />
         )}
@@ -89,4 +111,3 @@ export function ScriptGenerationChainOfThought({
     </ChainOfThought>
   );
 }
-
