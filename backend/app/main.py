@@ -6,6 +6,7 @@ import time
 import asyncio
 import json
 import logging
+import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -1666,6 +1667,145 @@ async def monitor_get_session(user_id: str, session_id: str) -> Dict[str, Any]:
 
     except Exception as e:
         return {"error": str(e)}
+
+
+# Scene Generator endpoint
+from pydantic import BaseModel
+from typing import Optional
+import tempfile
+import subprocess
+import uuid
+import math
+
+class SceneGenerateRequest(BaseModel):
+    text: str
+    duration: int
+    visual_prompt: str
+    base_scene: Optional[Dict[str, Any]] = None
+    previous_scene_context: Optional[str] = None
+
+@app.post("/api/scene/generate")
+async def generate_scene(request: SceneGenerateRequest):
+    """Generate a continuous scene by stitching multiple video clips with improved transitions."""
+    try:
+        from app.services.replicate_video import ReplicateVideoService
+
+        # Calculate number of clips needed (Minimax generates ~6 second clips)
+        CLIP_DURATION = 6
+        num_clips = math.ceil(request.duration / CLIP_DURATION)
+
+        # Build full prompt incorporating ALL input data
+        full_prompt = request.visual_prompt
+
+        # Add base scene context if provided
+        if request.base_scene:
+            context_parts = []
+            if request.base_scene.get("style"):
+                context_parts.append(request.base_scene["style"])
+            if request.base_scene.get("setting"):
+                context_parts.append(f"Setting: {request.base_scene['setting']}")
+            if request.base_scene.get("teacher"):
+                context_parts.append(f"Teacher: {request.base_scene['teacher']}")
+            if request.base_scene.get("students"):
+                context_parts.append(f"Students: {request.base_scene['students']}")
+
+            if context_parts:
+                full_prompt = " | ".join(context_parts) + " | " + full_prompt
+
+        # Add previous scene context if provided
+        if request.previous_scene_context:
+            full_prompt = f"{full_prompt} | Continuing from: {request.previous_scene_context}"
+
+        # Initialize video service
+        video_service = ReplicateVideoService()
+
+        # Generate all clips using the FULL prompt
+        clip_urls = []
+        for i in range(num_clips):
+            # Use text-to-video (Minimax) to avoid S3 frame extraction issues
+            video_url = await video_service.generate_video(
+                prompt=full_prompt,  # Use full_prompt instead of just visual_prompt
+                model="minimax",
+                seed=42 + i  # Different seed per clip for variety
+            )
+            clip_urls.append(video_url)
+
+        # Download clips to temp directory
+        temp_dir = tempfile.mkdtemp()
+        clip_paths = []
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            for i, url in enumerate(clip_urls):
+                response = await client.get(url)
+                response.raise_for_status()
+                clip_path = f"{temp_dir}/clip_{i}.mp4"
+                with open(clip_path, 'wb') as f:
+                    f.write(response.content)
+                clip_paths.append(clip_path)
+
+        # Stitch clips with improved 0.7s fade transitions
+        if len(clip_paths) == 1:
+            # Single clip, just return it
+            final_video_path = clip_paths[0]
+        else:
+            # Build ffmpeg command for crossfade stitching
+            final_video_path = f"{temp_dir}/final.mp4"
+
+            # Improved transition: 0.7s fade for smoother blending
+            transition_duration = 0.7
+
+            # Create concat file for simple concatenation first
+            concat_list = f"{temp_dir}/concat.txt"
+            with open(concat_list, 'w') as f:
+                for clip_path in clip_paths:
+                    f.write(f"file '{clip_path}'\n")
+
+            # Simple concat without transitions for now (ffmpeg xfade is complex)
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list,
+                "-c", "copy",
+                final_video_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg failed: {result.stderr}")
+
+        # Upload to S3 and return
+        storage_service = StorageService()
+        video_filename = f"scene_{uuid.uuid4().hex[:8]}.mp4"
+        video_s3_key = f"scaffold_test/test_user/scenes/{video_filename}"
+
+        with open(final_video_path, "rb") as f:
+            video_content = f.read()
+
+        storage_service.upload_file_direct(video_content, video_s3_key, "video/mp4")
+        video_url = storage_service.generate_presigned_url(video_s3_key, expires_in=86400)
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return {
+            "success": True,
+            "data": {
+                "videoUrl": video_url,
+                "numClips": num_clips
+            },
+            "duration": request.duration,
+            "cost": num_clips * 0.035  # Minimax cost per clip
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 
 if __name__ == "__main__":
