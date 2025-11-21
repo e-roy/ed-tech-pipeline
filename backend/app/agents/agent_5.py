@@ -234,20 +234,26 @@ async def render_video_with_remotion(
         import shutil
         
         bunx_cmd = None
+        checked_paths = []
+        
         # First try to find bunx in PATH
         bunx_full = shutil.which('bunx')
         if bunx_full:
             bunx_cmd = bunx_full
+            logger.info(f"Found bunx in PATH: {bunx_full}")
         else:
-            # Try common installation paths
+            # Try common installation paths for bunx
             bun_paths = [
                 '/home/ec2-user/.bun/bin/bunx',
                 '/usr/local/bin/bunx',
                 '/opt/homebrew/bin/bunx',
+                os.path.expanduser('~/.bun/bin/bunx'),
             ]
             for path in bun_paths:
+                checked_paths.append(path)
                 if os.path.exists(path) and os.access(path, os.X_OK):
                     bunx_cmd = path
+                    logger.info(f"Found bunx at: {path}")
                     break
         
         # If bunx not found, try using 'bun x' as fallback
@@ -255,27 +261,48 @@ async def render_video_with_remotion(
             bun_full = shutil.which('bun')
             if bun_full:
                 bunx_cmd = f"{bun_full} x"
+                logger.info(f"Found bun in PATH, using 'bun x': {bun_full}")
             else:
                 # Try common bun paths
                 bun_paths_bun = [
                     '/home/ec2-user/.bun/bin/bun',
                     '/usr/local/bin/bun',
                     '/opt/homebrew/bin/bun',
+                    os.path.expanduser('~/.bun/bin/bun'),
                 ]
                 for path in bun_paths_bun:
+                    checked_paths.append(path)
                     if os.path.exists(path) and os.access(path, os.X_OK):
                         bunx_cmd = f"{path} x"
+                        logger.info(f"Found bun at: {path}")
                         break
         
         if not bunx_cmd:
-            raise RuntimeError("Could not find bun or bunx. Please ensure bun is installed. Tried: bunx, bun x, and common installation paths.")
+            error_msg = (
+                f"Could not find bun or bunx. Please ensure bun is installed.\n"
+                f"Checked paths: {', '.join(checked_paths)}\n"
+                f"Install bun: curl -fsSL https://bun.sh/install | bash\n"
+                f"Or on EC2: bash backend/install_bun_ec2.sh"
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
         
         cmd = f"{bunx_cmd} remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
 
         # Use Popen to stream output and send progress updates
-        # Explicitly set PATH to ensure bun is accessible
+        # Explicitly set PATH to ensure bun and ffmpeg are accessible
         env = os.environ.copy()
-        env['PATH'] = '/opt/pipeline/backend/venv/bin:/home/ec2-user/.bun/bin:/usr/local/bin:/usr/bin:/bin'
+        # Add common bun installation paths to PATH
+        bun_paths_to_add = [
+            '/home/ec2-user/.bun/bin',
+            os.path.expanduser('~/.bun/bin'),
+            '/usr/local/bin',
+            '/opt/homebrew/bin',
+        ]
+        current_path = env.get('PATH', '')
+        new_path_parts = [p for p in bun_paths_to_add if os.path.isdir(p)]
+        new_path_parts.append(current_path)
+        env['PATH'] = ':'.join(new_path_parts)
         
         process = subprocess.Popen(
             cmd,
@@ -943,7 +970,17 @@ async def agent_5_process(
 
             # Set PATH explicitly to ensure ffmpeg is accessible
             env = os.environ.copy()
-            env['PATH'] = '/opt/pipeline/backend/venv/bin:/home/ec2-user/.bun/bin:/usr/local/bin:/usr/bin:/bin'
+            # Use the same PATH construction as the Remotion render
+            bun_paths_to_add = [
+                '/home/ec2-user/.bun/bin',
+                os.path.expanduser('~/.bun/bin'),
+                '/usr/local/bin',
+                '/opt/homebrew/bin',
+            ]
+            current_path = env.get('PATH', '')
+            new_path_parts = [p for p in bun_paths_to_add if os.path.isdir(p)]
+            new_path_parts.append(current_path)
+            env['PATH'] = ':'.join(new_path_parts)
             result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             if result.returncode != 0:
                 logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
