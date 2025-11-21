@@ -430,6 +430,10 @@ async def agent_5_process(
         audio_files = []
         background_music = {}
         
+        # Initialize agent data variables at function scope (needed for nested functions)
+        agent_2_data = {}
+        agent_4_data = {}
+        
         try:
             # Scan Agent2 folder for script/data files
             agent2_files = storage_service.list_files_by_prefix(agent2_prefix, limit=1000)
@@ -567,10 +571,6 @@ async def agent_5_process(
                 # If still no script or audio files, raise error
                 if not script and not audio_files:
                     raise ValueError(f"No content found in S3 folders or database. Agent2: {len(agent2_files)} files, Agent4: {len(agent4_files)} files")
-            
-            # Initialize agent data variables (needed for nested functions)
-            agent_2_data = {}
-            agent_4_data = {}
             
             # If pipeline_data is provided, use it (for backwards compatibility)
             if pipeline_data:
