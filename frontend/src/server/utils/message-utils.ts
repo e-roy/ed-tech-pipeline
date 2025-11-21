@@ -3,14 +3,13 @@ import { db } from "@/server/db";
 import { conversationMessages } from "@/server/db/video-generation/schema";
 import type { ModelMessage } from "ai";
 import type { UIMessage } from "ai";
+import { eq, asc } from "drizzle-orm";
 
 /**
  * Extract text content from a message.
  * Handles both ModelMessage and UIMessage formats.
  */
-function extractMessageContent(
-  message: ModelMessage | UIMessage,
-): string {
+function extractMessageContent(message: ModelMessage | UIMessage): string {
   // Check if it's a ModelMessage (has content property)
   if ("content" in message) {
     if (typeof message.content === "string") {
@@ -93,7 +92,7 @@ export async function saveConversationMessage(
     role,
     content,
     parts: parts ? (parts as unknown) : null,
-    metadata: metadata || null,
+    metadata: metadata ?? null,
     createdAt: new Date(),
   });
 
@@ -142,3 +141,93 @@ export async function saveAssistantResponse(
   );
 }
 
+/**
+ * Load all conversation messages for a session from the database.
+ * Returns messages ordered by creation time.
+ */
+export async function loadConversationMessages(
+  sessionId: string,
+): Promise<ModelMessage[]> {
+  const dbMessages = await db
+    .select()
+    .from(conversationMessages)
+    .where(eq(conversationMessages.sessionId, sessionId))
+    .orderBy(asc(conversationMessages.createdAt));
+
+  return dbMessages.map((msg): ModelMessage => {
+    // Use content as primary, or reconstruct from parts if content is empty
+    const content: ModelMessage["content"] =
+      msg.content ||
+      (msg.parts
+        ? (msg.parts as ModelMessage["content"])
+        : ("" as ModelMessage["content"]));
+
+    const role = msg.role as "user" | "assistant" | "system";
+
+    // Create message with proper typing
+    if (role === "user") {
+      return {
+        role: "user",
+        content,
+      } as ModelMessage;
+    } else if (role === "assistant") {
+      return {
+        role: "assistant",
+        content,
+      } as ModelMessage;
+    } else {
+      return {
+        role: "system",
+        content,
+      } as ModelMessage;
+    }
+  });
+}
+
+/**
+ * Save only new conversation messages that haven't been saved yet.
+ * Compares message content with existing DB messages to avoid duplicates.
+ */
+export async function saveNewConversationMessages(
+  sessionId: string,
+  messages: (ModelMessage | UIMessage)[],
+  metadata?: Record<string, unknown>,
+): Promise<string[]> {
+  // Load existing messages from DB to check for duplicates
+  const existingMessages = await db
+    .select()
+    .from(conversationMessages)
+    .where(eq(conversationMessages.sessionId, sessionId))
+    .orderBy(asc(conversationMessages.createdAt));
+
+  // Create a set of existing message content for quick lookup
+  // Use role:content as the key to identify duplicates
+  const existingContents = new Set(
+    existingMessages.map((m) => `${m.role}:${m.content}`),
+  );
+
+  const messageIds: string[] = [];
+
+  for (const message of messages) {
+    const content = extractMessageContent(message);
+    const role =
+      message.role === "user" ||
+      message.role === "assistant" ||
+      message.role === "system"
+        ? message.role
+        : "user";
+    const key = `${role}:${content}`;
+
+    // Skip if message already exists
+    if (existingContents.has(key)) {
+      continue;
+    }
+
+    // Save new message
+    const id = await saveConversationMessage(sessionId, message, metadata);
+    messageIds.push(id);
+    existingContents.add(key); // Track to avoid duplicates in same batch
+  }
+
+  return messageIds;
+}

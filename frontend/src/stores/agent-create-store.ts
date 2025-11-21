@@ -53,6 +53,7 @@ interface AgentCreateState {
   extractFacts: (messagesToSend: Message[]) => Promise<void>;
   handleSubmitFacts: () => Promise<void>;
   handleSubmit: (message: { text: string; files: unknown[] }) => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
 }
 
 // Helper: Parse JSON response directly (optimized)
@@ -360,6 +361,48 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         } catch (e) {
           console.error("Chat error:", e);
           state.setError(e as Error);
+        } finally {
+          state.setIsLoading(false);
+        }
+      },
+
+      loadSession: async (sessionId) => {
+        const state = get();
+        try {
+          state.setIsLoading(true);
+          state.setError(null);
+
+          const response = await fetch(
+            `/api/agent-create/session?sessionId=${sessionId}`,
+          );
+          if (!response.ok) {
+            throw new Error("Failed to load session");
+          }
+
+          const data = await response.json();
+
+          // Restore state from DB
+          set({
+            sessionId: data.session.id,
+            messages: data.messages.map(
+              (m: { role: string; content: string; id: string }) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                id: m.id,
+              }),
+            ),
+            facts: (data.session.extractedFacts as Fact[]) || [],
+            selectedFacts: (data.session.confirmedFacts as Fact[]) || [],
+            narration: data.session.generatedScript || null,
+            workflowStep: data.session.confirmedFacts
+              ? data.session.generatedScript
+                ? "review"
+                : "selection"
+              : "input",
+          });
+        } catch (error) {
+          console.error("Failed to load session:", error);
+          state.setError(error as Error);
         } finally {
           state.setIsLoading(false);
         }

@@ -7,7 +7,11 @@ import {
   getSessionIdFromRequest,
   getOrCreateSession,
 } from "@/server/utils/session-utils";
-import { saveConversationMessage } from "@/server/utils/message-utils";
+import {
+  saveConversationMessage,
+  loadConversationMessages,
+  saveNewConversationMessages,
+} from "@/server/utils/message-utils";
 import { db } from "@/server/db";
 import { videoSessions } from "@/server/db/schema";
 import { eq } from "drizzle-orm";
@@ -34,38 +38,93 @@ function processToolResult(
   // Fire-and-forget: don't await, but handle errors gracefully
   const savePromise = (async () => {
     try {
-      const resultData = parseToolResult<{
+      // AI SDK wraps tool results in an object with 'output' field
+      // Extract the actual result from the wrapper
+      let actualResult: unknown = toolResult;
+
+      if (typeof toolResult === "object" && toolResult !== null) {
+        const wrapped = toolResult as { output?: unknown; type?: string };
+        if (wrapped.type === "tool-result" && wrapped.output !== undefined) {
+          actualResult = wrapped.output;
+        }
+      }
+
+      // Parse tool result - handle both string and object formats
+      // The tool returns JSON strings, so we need to parse them
+      let resultData: {
         facts?: Fact[];
         narration?: unknown;
-      }>(toolResult);
+        topic?: string;
+        learningObjective?: string;
+      };
 
-      if (toolName === "extractFactsTool" && resultData.facts) {
-        await db
-          .update(videoSessions)
-          .set({
+      if (typeof actualResult === "string") {
+        try {
+          resultData = JSON.parse(actualResult) as typeof resultData;
+        } catch {
+          // If parsing fails, the string might already be the data structure
+          // or it's malformed - try to continue
+          resultData = actualResult as typeof resultData;
+        }
+      } else if (actualResult !== null && typeof actualResult === "object") {
+        // Already an object, use it directly
+        resultData = actualResult as typeof resultData;
+      } else {
+        // Fallback: try to treat as the result data directly
+        resultData = actualResult as typeof resultData;
+      }
+
+      // Debug: log what we're processing
+      if (toolName === "extractFactsTool") {
+        // Check if facts exist and is an array (even if empty)
+        if (resultData.facts && Array.isArray(resultData.facts)) {
+          const updateData: {
+            extractedFacts: Fact[];
+            status: string;
+            updatedAt: Date;
+            topic?: string;
+            learningObjective?: string;
+          } = {
             extractedFacts: resultData.facts,
             status: "facts_extracted",
             updatedAt: new Date(),
-          })
-          .where(eq(videoSessions.id, sessionId));
-      } else if (toolName === "generateNarrationTool" && resultData.narration) {
-        await db
-          .update(videoSessions)
-          .set({
-            generatedScript: resultData.narration,
-            status: "script_generated",
-            updatedAt: new Date(),
-          })
-          .where(eq(videoSessions.id, sessionId));
+          };
+
+          // Add topic and learningObjective if provided
+          if (resultData.topic) {
+            updateData.topic = resultData.topic;
+          }
+          if (resultData.learningObjective) {
+            updateData.learningObjective = resultData.learningObjective;
+          }
+
+          await db
+            .update(videoSessions)
+            .set(updateData)
+            .where(eq(videoSessions.id, sessionId));
+        }
+      } else if (toolName === "generateNarrationTool") {
+        // Check if narration exists (not null/undefined)
+        if (resultData.narration != null) {
+          await db
+            .update(videoSessions)
+            .set({
+              generatedScript: resultData.narration,
+              status: "script_generated",
+              updatedAt: new Date(),
+            })
+            .where(eq(videoSessions.id, sessionId));
+        }
       }
-    } catch (error) {
-      console.error(`Error processing ${toolName} result:`, error);
+    } catch {
+      // Silently fail - errors are expected in fire-and-forget operations
+      // The database update will be retried on next request if needed
     }
   })();
 
   // Don't await, but prevent unhandled rejections
   savePromise.catch(() => {
-    /* already logged */
+    /* already handled in try-catch */
   });
 }
 
@@ -118,18 +177,63 @@ export async function POST(req: Request) {
   const isFirstMessage = messages.length === 1 && messages[0]?.role === "user";
   const isNewSession = !requestedSessionId || requestedSessionId !== sessionId;
 
-  // Save only the last user message (the new one in this request)
-  const userMessages = messages.filter((m) => m.role === "user");
-  const lastUserMessage = userMessages[userMessages.length - 1];
-  if (lastUserMessage) {
+  // Save confirmedFacts if selectedFacts are provided
+  if (selectedFacts && selectedFacts.length > 0) {
     try {
-      await saveConversationMessage(sessionId, lastUserMessage, {
-        isFirstMessage,
-      });
-    } catch (error) {
-      console.error("Error saving user message:", error);
+      await db
+        .update(videoSessions)
+        .set({
+          confirmedFacts: selectedFacts,
+          updatedAt: new Date(),
+        })
+        .where(eq(videoSessions.id, sessionId));
+    } catch {
+      // Continue even if save fails
     }
   }
+
+  // Load existing conversation messages from database
+  let dbMessages: ModelMessage[] = [];
+  try {
+    dbMessages = await loadConversationMessages(sessionId);
+  } catch {
+    // Continue with empty array if load fails
+  }
+
+  // Merge DB messages with request messages, deduplicating by content
+  // Create a set of existing message content for deduplication
+  const existingContent = new Set(
+    dbMessages.map((m) => {
+      const content =
+        typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return `${m.role}:${content}`;
+    }),
+  );
+
+  // Filter out duplicate messages from request
+  const newMessages = messages.filter((msg) => {
+    const content =
+      typeof msg.content === "string"
+        ? msg.content
+        : JSON.stringify(msg.content);
+    const key = `${msg.role}:${content}`;
+    return !existingContent.has(key);
+  });
+
+  // Save all new messages (not just the last one)
+  if (newMessages.length > 0) {
+    try {
+      await saveNewConversationMessages(sessionId, newMessages, {
+        isFirstMessage,
+      });
+    } catch {
+      // Continue even if save fails
+    }
+  }
+
+  // Merge DB messages with new messages for AI context
+  // DB messages are already in chronological order
+  const allMessages = [...dbMessages, ...newMessages];
 
   // Store tool results and assistant response
   let capturedToolResults: Array<unknown> = [];
@@ -156,12 +260,81 @@ Be conversational and guide the user through the process naturally.`;
     systemPrompt += `\n\nThe user has selected ${selectedFacts.length} facts. Use generateNarrationTool to create a narration from them.`;
   }
 
+  // Wrap tools to inject sessionId
+  // The AI SDK Tool type expects execute to take 2 args, but our tools only take 1
+  // We use type assertion to work around this mismatch
+  const toolsWithSessionId = {
+    extractFactsTool: {
+      ...extractFactsTool,
+      execute: async (
+        args: { content: string; sessionId?: string },
+        _options?: unknown,
+      ): Promise<string> => {
+        if (!extractFactsTool.execute) {
+          throw new Error("extractFactsTool.execute is not defined");
+        }
+        // Call original execute with injected sessionId
+        // Type assertion needed because Tool.execute signature expects 2 args
+        const originalExecute = extractFactsTool.execute as (args: {
+          content: string;
+          sessionId?: string;
+        }) => Promise<string>;
+        const result = await originalExecute({
+          ...args,
+          sessionId,
+        });
+        return result;
+      },
+    } as typeof extractFactsTool,
+    generateNarrationTool: {
+      ...generateNarrationTool,
+      execute: async (
+        args: {
+          facts: Array<{
+            concept: string;
+            details: string;
+            confidence?: number;
+          }>;
+          topic?: string;
+          target_duration?: number;
+          child_age?: string;
+          child_interest?: string;
+          sessionId?: string;
+        },
+        _options?: unknown,
+      ): Promise<string> => {
+        if (!generateNarrationTool.execute) {
+          throw new Error("generateNarrationTool.execute is not defined");
+        }
+        // Call original execute with injected sessionId
+        // Type assertion needed because Tool.execute signature expects 2 args
+        const originalExecute = generateNarrationTool.execute as (args: {
+          facts: Array<{
+            concept: string;
+            details: string;
+            confidence?: number;
+          }>;
+          topic?: string;
+          target_duration?: number;
+          child_age?: string;
+          child_interest?: string;
+          sessionId?: string;
+        }) => Promise<string>;
+        const result = await originalExecute({
+          ...args,
+          sessionId,
+        });
+        return result;
+      },
+    } as typeof generateNarrationTool,
+  };
+
   try {
     const result = streamText({
       model: openai("gpt-4o-mini"),
       system: systemPrompt,
-      messages,
-      tools: { extractFactsTool, generateNarrationTool },
+      messages: allMessages,
+      tools: toolsWithSessionId,
       onFinish: async (finishResult) => {
         // Capture tool results for response
         if (finishResult.toolResults) {
@@ -176,8 +349,8 @@ Be conversational and guide the user through the process naturally.`;
           saveConversationMessage(sessionId, {
             role: "assistant",
             content: assistantTextResponse,
-          }).catch((error) => {
-            console.error("Error saving assistant message:", error);
+          }).catch(() => {
+            // Silently fail - non-blocking operation
           });
         }
 
@@ -188,6 +361,25 @@ Be conversational and guide the user through the process naturally.`;
             const toolResult = finishResult.toolResults[i];
             if (toolCall?.toolName && toolResult) {
               processToolResult(toolCall.toolName, toolResult, sessionId);
+
+              // Extract and save assistant message from tool result if present
+              try {
+                const toolResultData = parseToolResult<{
+                  message?: string;
+                  facts?: unknown;
+                  narration?: unknown;
+                }>(toolResult);
+                if (toolResultData.message) {
+                  saveConversationMessage(sessionId, {
+                    role: "assistant",
+                    content: toolResultData.message,
+                  }).catch(() => {
+                    // Silently fail - non-blocking operation
+                  });
+                }
+              } catch {
+                // Silently fail if tool result doesn't have message
+              }
             }
           }
         }
@@ -229,7 +421,6 @@ Be conversational and guide the user through the process naturally.`;
       sessionId,
     );
   } catch (error) {
-    console.error("Error in streamText:", error);
     return new Response(
       JSON.stringify({
         error: "Failed to process request",
