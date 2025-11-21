@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BUCKET = os.getenv('S3_BUCKET_NAME')
-REGION = os.getenv('AWS_REGION', 'us-east-1')
+REGION = os.getenv('AWS_REGION', 'us-east-2')
 
 # Test with one of the existing images
 test_key = "users/1/output/images/img_010c1d5c0484.png"

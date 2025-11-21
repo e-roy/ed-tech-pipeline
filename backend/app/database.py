@@ -65,8 +65,8 @@ def get_db():
     try:
         db = SessionLocal()
         # Test the connection
-        from sqlalchemy import text
-        db.execute(text("SELECT 1"))
+        from sqlalchemy import text as sql_text
+        db.execute(sql_text("SELECT 1"))
         yield db
     except Exception as e:
         logger.exception(f"Database connection error: {e}")

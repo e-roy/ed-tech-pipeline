@@ -37,9 +37,37 @@ class NarrativeBuilderAgent:
     - duration: float - Time taken to generate
     """
 
-    def __init__(self, replicate_api_key: str):
-        self.api_key = replicate_api_key
-        self.client = replicate.Client(api_token=replicate_api_key)
+    def __init__(self, replicate_api_key: Optional[str] = None):
+        """
+        Initialize Narrative Builder Agent.
+        
+        Args:
+            replicate_api_key: Replicate API key (defaults to AWS Secrets Manager, then env var)
+        """
+        # Try to get API key from parameter, then Secrets Manager, then settings
+        if replicate_api_key:
+            self.api_key = replicate_api_key
+        else:
+            # Try Secrets Manager first
+            try:
+                from app.services.secrets import get_secret
+                self.api_key = get_secret("pipeline/replicate-api-key")
+                logger.debug("Retrieved REPLICATE_API_KEY from AWS Secrets Manager for NarrativeBuilderAgent")
+            except Exception as e:
+                logger.debug(f"Could not retrieve REPLICATE_API_KEY from Secrets Manager: {e}, falling back to settings")
+                from app.config import get_settings
+                settings = get_settings()
+                self.api_key = settings.REPLICATE_API_KEY
+        
+        if not self.api_key:
+            logger.warning(
+                "REPLICATE_API_KEY not set. Narrative generation will fail. "
+                "Add it to AWS Secrets Manager (pipeline/replicate-api-key) or .env file."
+            )
+            self.client = None
+        else:
+            self.client = replicate.Client(api_token=self.api_key)
+        
         self.model = "meta/meta-llama-3-70b-instruct"
         self.cost_per_call = 0.001  # Llama 3 is nearly free
 
@@ -207,6 +235,9 @@ Respond with ONLY the JSON object, no additional text."""
         Returns:
             str: The LLM's response
         """
+        if not self.client:
+            raise ValueError("REPLICATE_API_KEY not configured. Set it in AWS Secrets Manager (pipeline/replicate-api-key) or .env file.")
+        
         logger.info("Calling Replicate API with Llama 3 70B...")
 
         output = await self.client.async_run(

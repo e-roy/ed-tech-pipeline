@@ -17,7 +17,7 @@ load_dotenv()
 
 # S3 Configuration
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "pipeline-backend-assets")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 
 # Initialize S3 client
 s3_client = boto3.client("s3", region_name=AWS_REGION)

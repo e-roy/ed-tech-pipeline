@@ -81,13 +81,26 @@ class AudioPipelineAgent:
         Initialize the Audio Pipeline Agent.
 
         Args:
-            api_key: OpenAI API key (defaults to env var)
+            api_key: OpenAI API key (defaults to AWS Secrets Manager, then env var)
             db: Database session for music selection
             storage_service: Storage service for music processing
             websocket_manager: Optional WebSocketManager for progress updates
         """
         settings = get_settings()
-        self.api_key = api_key or settings.OPENAI_API_KEY
+        
+        # Try to get API key from parameter, then Secrets Manager, then settings
+        if api_key:
+            self.api_key = api_key
+        else:
+            # Try Secrets Manager first
+            try:
+                from app.services.secrets import get_secret
+                self.api_key = get_secret("pipeline/openai-api-key")
+                logger.debug("Retrieved OPENAI_API_KEY from AWS Secrets Manager")
+            except Exception as e:
+                logger.debug(f"Could not retrieve OPENAI_API_KEY from Secrets Manager: {e}, falling back to settings")
+                self.api_key = settings.OPENAI_API_KEY
+        
         self.db = db
         self.storage_service = storage_service
         self.websocket_manager = websocket_manager
@@ -95,7 +108,7 @@ class AudioPipelineAgent:
         if not self.api_key:
             logger.warning(
                 "OPENAI_API_KEY not set. Audio generation will fail. "
-                "Add it to .env file."
+                "Add it to AWS Secrets Manager (pipeline/openai-api-key) or .env file."
             )
         else:
             self.client = OpenAI(api_key=self.api_key)

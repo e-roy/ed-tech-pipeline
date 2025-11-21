@@ -20,13 +20,29 @@ class DALLEGenerator:
         Initialize DALL-E generator.
 
         Args:
-            api_key: OpenAI API key (or reads from OPENAI_API_KEY env)
+            api_key: OpenAI API key (defaults to AWS Secrets Manager, then env var)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        # Try to get API key from parameter, then Secrets Manager, then env var
+        if api_key:
+            self.api_key = api_key
+        else:
+            # Try Secrets Manager first
+            try:
+                from app.services.secrets import get_secret
+                self.api_key = get_secret("pipeline/openai-api-key")
+                logger.debug("Retrieved OPENAI_API_KEY from AWS Secrets Manager for DALL-E")
+            except Exception as e:
+                logger.debug(f"Could not retrieve OPENAI_API_KEY from Secrets Manager: {e}, falling back to env var")
+                self.api_key = os.getenv("OPENAI_API_KEY")
+        
         if not self.api_key:
-            logger.warning("OPENAI_API_KEY not set - DALL-E generation will fail")
+            logger.warning(
+                "OPENAI_API_KEY not set - DALL-E generation will fail. "
+                "Add it to AWS Secrets Manager (pipeline/openai-api-key) or .env file."
+            )
 
-        self.client = AsyncOpenAI(api_key=self.api_key)
+        # Initialize client (error will be caught in generate_image if api_key is None)
+        self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
 
         # DALL-E 3 pricing (as of 2024)
         self.costs = {
