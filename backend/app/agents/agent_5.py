@@ -233,7 +233,10 @@ async def render_video_with_remotion(
         cmd = f"bunx remotion render src/index.ts VideoComposition {output_path} --props={props_file.name}"
 
         # Use Popen to stream output and send progress updates
-        # Use system PATH (includes bun from systemd service or current environment)
+        # Explicitly set PATH to ensure bun is accessible
+        env = os.environ.copy()
+        env['PATH'] = '/opt/pipeline/backend/venv/bin:/home/ec2-user/.bun/bin:/usr/local/bin:/usr/bin:/bin'
+        
         process = subprocess.Popen(
             cmd,
             cwd=str(REMOTION_DIR),
@@ -241,7 +244,7 @@ async def render_video_with_remotion(
             stderr=subprocess.STDOUT,
             text=True,
             shell=True,
-            env=os.environ.copy(),  # Use current environment PATH as-is
+            env=env,
             bufsize=1
         )
 
@@ -854,7 +857,10 @@ async def agent_5_process(
                 output_path
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # Set PATH explicitly to ensure ffmpeg is accessible
+            env = os.environ.copy()
+            env['PATH'] = '/opt/pipeline/backend/venv/bin:/home/ec2-user/.bun/bin:/usr/local/bin:/usr/bin:/bin'
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             if result.returncode != 0:
                 logger.error(f"FFmpeg concat failed for {section}: {result.stderr}")
                 # Fallback to first clip
