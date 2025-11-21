@@ -340,7 +340,8 @@ async def agent_5_process(
     pipeline_data: Optional[Dict[str, Any]] = None,
     generation_mode: str = "video",  # Kept for backwards compatibility, always uses video
     db: Optional[Session] = None,
-    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
+    status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None,
+    restart_from_concat: bool = False  # Skip generation, reuse existing clips from S3
 ) -> Optional[str]:
     """
     Agent5: Video generation agent using FFmpeg.
@@ -711,14 +712,25 @@ async def agent_5_process(
 
         # Constants for video generation
         CLIP_DURATION = 6.0  # Minimax generates 6-second clips
+        
+        # Rate limiting: Max 4 concurrent Replicate API calls to avoid overwhelming the service
+        MAX_CONCURRENT_REPLICATE_CALLS = 4
+        replicate_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPLICATE_CALLS)
 
-        # Calculate clips needed per section based on scene timing
+        # Calculate clips needed per section based on audio file durations
         clips_per_section = {}
-        for scene in scenes:
-            part = scene["part"]
-            scene_duration = scene["durationFrames"] / 30.0  # Convert frames to seconds
-            clips_needed = max(1, math.ceil(scene_duration / CLIP_DURATION))
-            clips_per_section[part] = clips_needed
+        for audio_file in audio_files:
+            part = audio_file.get("part", "")
+            if part in sections:
+                # Get duration from audio file (default to 5.0 if not specified)
+                audio_duration = float(audio_file.get("duration", 5.0))
+                clips_needed = max(1, math.ceil(audio_duration / CLIP_DURATION))
+                clips_per_section[part] = clips_needed
+        
+        # Ensure all sections have at least 1 clip
+        for section in sections:
+            if section not in clips_per_section:
+                clips_per_section[section] = 1
 
         total_clips = sum(clips_per_section.values())
         
@@ -786,19 +798,27 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
 
-            # Generate all clips for this section with same seed (in parallel for this section)
-            clip_tasks = []
-            for clip_idx, clip_prompt in enumerate(clip_prompts):
-                clip_tasks.append(
-                    generate_video_replicate(
+            # Generate all clips for this section with same seed (with rate limiting)
+            async def generate_clip_with_rate_limit(clip_prompt, seed_val):
+                """Generate a clip with rate limiting."""
+                async with replicate_semaphore:
+                    return await generate_video_replicate(
                         clip_prompt,
                         settings.REPLICATE_API_KEY,
                         model="minimax",
-                        seed=section_seed  # Same seed for all clips in this section
+                        seed=seed_val
+                    )
+            
+            clip_tasks = []
+            for clip_idx, clip_prompt in enumerate(clip_prompts):
+                clip_tasks.append(
+                    generate_clip_with_rate_limit(
+                        clip_prompt,
+                        section_seed  # Same seed for all clips in this section
                     )
                 )
 
-            # Generate all clips for this section in parallel
+            # Generate all clips for this section (rate limited)
             generated_clips = await asyncio.gather(*clip_tasks)
 
             # Calculate cost for this section
@@ -824,7 +844,8 @@ async def agent_5_process(
                     cost_breakdown=cost_per_section
                 )
 
-            # Download all clips to temp files (no concatenation)
+            # Download all clips to temp files and upload to S3 for restart capability
+            # Reuse single HTTP client for all downloads
             clip_paths = []
             async with httpx.AsyncClient(timeout=120.0) as client:
                 for i, clip_url in enumerate(generated_clips):
@@ -834,124 +855,234 @@ async def agent_5_process(
                     with open(clip_path, 'wb') as f:
                         f.write(response.content)
                     clip_paths.append(clip_path)
+                    
+                    # Save clip to S3 for restart capability
+                    clip_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
+                    try:
+                        with open(clip_path, 'rb') as f:
+                            clip_content = f.read()
+                        storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
+                        logger.debug(f"[{session_id}] Saved clip to S3: {clip_s3_key}")
+                    except Exception as e:
+                        logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
 
-            logger.info(f"[{session_id}] Downloaded {len(generated_clips)} clips for {section}")
+            logger.info(f"[{session_id}] Downloaded and saved {len(generated_clips)} clips for {section}")
 
             return (section, clip_paths)
         
-        # Generate all videos in parallel (fully parallelized)
-        logger.info(f"[{session_id}] Generating all {len(sections)} sections in parallel")
-
-        await send_status(
-            "Agent5", "processing",
-            supersessionID=supersessionid,
-            message=f"Generating all {len(sections)} videos in parallel...",
-            cost=0.0
-        )
-
-        # Process all sections in parallel
-        section_results = await asyncio.gather(
-            *[generate_section_video(section) for section in sections]
-        )
-
-        # Collect all clip paths in order (hook, concept, process, conclusion)
+        # Handle restart mode: download existing clips from S3
         all_clip_paths = []
-        for section in sections:
-            # Find the result for this section
-            section_result = next((result for result in section_results if result[0] == section), None)
-            if section_result:
-                section_name, clip_paths = section_result
-                all_clip_paths.extend(clip_paths)
+        if restart_from_concat:
+            logger.info(f"[{session_id}] Restart mode: Downloading existing clips from S3")
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message="Restart mode: Loading existing clips from S3...",
+                cost=0.0
+            )
+            
+            agent5_prefix = f"scaffold_test/{user_id}/{session_id}/agent5/"
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for section in sections:
+                    section_clips = []
+                    clip_index = 0
+                    while True:
+                        clip_s3_key = f"{agent5_prefix}{section}_clip_{clip_index}.mp4"
+                        try:
+                            # Check if clip exists in S3
+                            storage_service.s3_client.head_object(
+                                Bucket=storage_service.bucket_name,
+                                Key=clip_s3_key
+                            )
+                            # Download clip
+                            clip_url = storage_service.generate_presigned_url(clip_s3_key, expires_in=3600)
+                            response = await client.get(clip_url)
+                            response.raise_for_status()
+                            clip_path = os.path.join(temp_dir, f"{section}_clip_{clip_index}.mp4")
+                            with open(clip_path, 'wb') as f:
+                                f.write(response.content)
+                            section_clips.append(clip_path)
+                            clip_index += 1
+                        except Exception:
+                            # No more clips for this section
+                            break
+                    
+                    if not section_clips:
+                        raise ValueError(f"No clips found in S3 for section: {section}")
+                    
+                    all_clip_paths.extend(section_clips)
+                    logger.info(f"[{session_id}] Loaded {len(section_clips)} clips for {section} from S3")
+            
+            logger.info(f"[{session_id}] Restart mode: Loaded {len(all_clip_paths)} total clips from S3")
+            total_cost = 0.0  # No cost for restart (clips already generated)
+        else:
+            # Generate all videos in parallel (fully parallelized)
+            logger.info(f"[{session_id}] Generating all {len(sections)} sections in parallel")
 
-        # Calculate final total cost
-        total_cost = sum(cost_per_section.values())
-        logger.info(f"[{session_id}] Completed all sections. Total cost: ${total_cost:.4f}")
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"Generating all {len(sections)} videos in parallel...",
+                cost=0.0
+            )
 
-        await send_status(
-            "Agent5", "processing",
-            supersessionID=supersessionid,
-            message=f"All clips generated ({len(all_clip_paths)} total). Starting audio/video concatenation...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
-        )
+            # Process all sections in parallel
+            section_results = await asyncio.gather(
+                *[generate_section_video(section) for section in sections]
+            )
+
+            # Collect all clip paths in order (hook, concept, process, conclusion)
+            for section in sections:
+                # Find the result for this section
+                section_result = next((result for result in section_results if result[0] == section), None)
+                if section_result:
+                    section_name, clip_paths = section_result
+                    all_clip_paths.extend(clip_paths)
+
+        # Calculate final total cost (only if not restart mode)
+        if not restart_from_concat:
+            total_cost = sum(cost_per_section.values())
+            logger.info(f"[{session_id}] Completed all sections. Total cost: ${total_cost:.4f}")
+
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"All clips generated ({len(all_clip_paths)} total). Starting audio/video concatenation...",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
+            )
+        else:
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message=f"Restart mode: Loaded {len(all_clip_paths)} clips. Starting concatenation...",
+                cost=0.0
+            )
 
         # ====================
         # AUDIO CONCATENATION
         # ====================
 
-        await send_status(
-            "Agent5", "processing",
-            supersessionID=supersessionid,
-            message="Step 1/4: Concatenating narration audio files...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
-        )
-
-        # Download all audio files to temp directory
-        import httpx
-        audio_file_paths = []
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            for audio_file in audio_files:
-                part = audio_file["part"]
-                url = audio_file["url"]
-                response = await client.get(url)
-                response.raise_for_status()
-                audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
-                with open(audio_path, 'wb') as f:
-                    f.write(response.content)
-                audio_file_paths.append(audio_path)
-
-        # Concatenate all narration audio files
-        concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
-        await concatenate_audio_files(audio_file_paths, concatenated_narration_path)
-        logger.info(f"[{session_id}] Concatenated {len(audio_file_paths)} audio files")
-
-        # ====================
-        # AUDIO MIXING
-        # ====================
-
-        await send_status(
-            "Agent5", "processing",
-            supersessionID=supersessionid,
-            message="Step 2/4: Mixing narration with background music...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
-        )
-
-        # Download background music
-        background_music_url = background_music.get("url", "")
-        if background_music_url:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.get(background_music_url)
-                response.raise_for_status()
-                background_music_path = os.path.join(temp_dir, "background_music.mp3")
-                with open(background_music_path, 'wb') as f:
-                    f.write(response.content)
-
-            # Mix narration with background music
+        if restart_from_concat:
+            # In restart mode, try to download existing final audio from S3
+            logger.info(f"[{session_id}] Restart mode: Attempting to load existing final audio from S3")
+            final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
             final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
-            await mix_audio_with_background(
-                concatenated_narration_path,
-                background_music_path,
-                final_audio_path,
-                music_volume=0.3
+            
+            try:
+                # Check if final audio exists in S3
+                storage_service.s3_client.head_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=final_audio_s3_key
+                )
+                # Download existing final audio
+                audio_url = storage_service.generate_presigned_url(final_audio_s3_key, expires_in=3600)
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.get(audio_url)
+                    response.raise_for_status()
+                    with open(final_audio_path, 'wb') as f:
+                        f.write(response.content)
+                logger.info(f"[{session_id}] Restart mode: Loaded existing final audio from S3")
+            except Exception as e:
+                logger.warning(f"[{session_id}] Restart mode: Could not load existing audio, regenerating: {e}")
+                # Fall through to normal audio processing
+                restart_from_concat = False  # Temporarily disable restart flag for audio processing
+        
+        if not restart_from_concat:
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message="Step 1/4: Concatenating narration audio files...",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
             )
-            logger.info(f"[{session_id}] Mixed narration with background music")
-        else:
-            # No background music, use concatenated narration as-is
-            final_audio_path = concatenated_narration_path
-            logger.info(f"[{session_id}] No background music, using narration only")
+
+            # Download all audio files to temp directory (reuse single HTTP client)
+            import httpx
+            audio_file_paths = []
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for audio_file in audio_files:
+                    part = audio_file["part"]
+                    url = audio_file["url"]
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
+                    with open(audio_path, 'wb') as f:
+                        f.write(response.content)
+                    audio_file_paths.append(audio_path)
+
+            # Concatenate all narration audio files
+            concatenated_narration_path = os.path.join(temp_dir, "concatenated_narration.mp3")
+            await concatenate_audio_files(audio_file_paths, concatenated_narration_path)
+            logger.info(f"[{session_id}] Concatenated {len(audio_file_paths)} audio files")
+
+            # ====================
+            # AUDIO MIXING
+            # ====================
+
+            await send_status(
+                "Agent5", "processing",
+                supersessionID=supersessionid,
+                message="Step 2/4: Mixing narration with background music...",
+                cost=total_cost,
+                cost_breakdown=cost_per_section
+            )
+
+            # Download background music
+            background_music_url = background_music.get("url", "")
+            if background_music_url:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.get(background_music_url)
+                    response.raise_for_status()
+                    background_music_path = os.path.join(temp_dir, "background_music.mp3")
+                    with open(background_music_path, 'wb') as f:
+                        f.write(response.content)
+
+                # Mix narration with background music
+                final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
+                await mix_audio_with_background(
+                    concatenated_narration_path,
+                    background_music_path,
+                    final_audio_path,
+                    music_volume=0.3
+                )
+                logger.info(f"[{session_id}] Mixed narration with background music")
+                
+                # Save final audio to S3 for future restarts
+                try:
+                    with open(final_audio_path, 'rb') as f:
+                        audio_content = f.read()
+                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
+                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
+            else:
+                # No background music, use concatenated narration as-is
+                final_audio_path = concatenated_narration_path
+                logger.info(f"[{session_id}] No background music, using narration only")
+                
+                # Save final audio to S3 for future restarts
+                try:
+                    with open(final_audio_path, 'rb') as f:
+                        audio_content = f.read()
+                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
+                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
 
         # ====================
         # VIDEO CONCATENATION
         # ====================
 
+        step_num = "3/4" if not restart_from_concat else "1/2"
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,
-            message=f"Step 3/4: Concatenating all {len(all_clip_paths)} video clips...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
+            message=f"Step {step_num}: Concatenating all {len(all_clip_paths)} video clips...",
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
         )
 
         # Concatenate all video clips
@@ -963,12 +1094,13 @@ async def agent_5_process(
         # FINAL VIDEO + AUDIO COMBINATION
         # ====================
 
+        step_num = "4/4" if not restart_from_concat else "2/2"
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,
-            message="Step 4/4: Combining video and audio...",
-            cost=total_cost,
-            cost_breakdown=cost_per_section
+            message=f"Step {step_num}: Combining video and audio...",
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
         )
 
         # Combine video and audio

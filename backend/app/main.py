@@ -857,27 +857,27 @@ async def start_processing(
 
 
 # =============================================================================
-# Agent5 Restart Endpoint - Restart from Remotion rendering
+# Agent5 Restart Endpoint - Restart from Concatenation
 # =============================================================================
 
 class RestartAgent5Request(BaseModel):
-    """Request to restart Agent5 from Remotion rendering stage."""
+    """Request to restart Agent5 from concatenation stage."""
     userID: str
     sessionID: str
     supersessionid: Optional[str] = None
 
 
-@app.post("/api/restart-agent5-remotion")
-async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = Depends(get_db)):
+@app.post("/api/restart-agent5-concat")
+async def restart_agent5_concat(request: RestartAgent5Request, db: Session = Depends(get_db)):
     """
-    Restart Agent5 from the Remotion rendering stage.
+    Restart Agent5 from the concatenation stage.
     
-    This endpoint allows restarting video generation from the Remotion rendering step,
-    skipping video clip generation by reusing clips already stored in S3.
+    This endpoint allows restarting video generation from the concatenation step,
+    skipping video clip generation and audio processing by reusing clips and audio already stored in S3.
     
-    Use case: When Remotion rendering fails but video clips were successfully generated.
+    Use case: When concatenation fails but video clips and audio were successfully generated.
     """
-    logger.info(f"Restart Agent5 Remotion request for session {request.sessionID}")
+    logger.info(f"Restart Agent5 Concatenation request for session {request.sessionID}")
     
     # Verify clips exist in S3 before starting
     try:
@@ -886,11 +886,12 @@ async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = D
         
         missing_clips = []
         for section in sections:
-            concat_key = f"{agent5_prefix}{section}_concat.mp4"
+            # Check for at least one clip per section (clips are numbered starting from 0)
+            clip_key = f"{agent5_prefix}{section}_clip_0.mp4"
             try:
                 storage_service.s3_client.head_object(
                     Bucket=storage_service.bucket_name,
-                    Key=concat_key
+                    Key=clip_key
                 )
             except Exception:
                 missing_clips.append(section)
@@ -947,7 +948,7 @@ async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = D
                 pipeline_data=None,
                 db=db,
                 status_callback=status_callback,
-                restart_from_remotion=True  # KEY: Skip clip generation
+                restart_from_concat=True  # KEY: Skip clip generation and audio processing
             )
             
             # Send completion status
@@ -956,7 +957,7 @@ async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = D
                 "userID": request.userID,
                 "sessionID": request.sessionID,
                 "status": "finished",
-                "message": "Remotion rendering completed successfully",
+                "message": "Video concatenation completed successfully",
                 "videoUrl": result,
                 "timestamp": int(time.time() * 1000)
             })
@@ -986,7 +987,7 @@ async def restart_agent5_remotion(request: RestartAgent5Request, db: Session = D
     
     return {
         "success": True,
-        "message": "Agent5 restart from Remotion initiated",
+        "message": "Agent5 restart from concatenation initiated",
         "sessionID": request.sessionID,
         "supersessionid": supersessionid
     }
