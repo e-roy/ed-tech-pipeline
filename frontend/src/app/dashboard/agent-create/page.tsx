@@ -23,7 +23,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { type Fact, type Narration } from "@/types";
 
 type WorkflowStep = "input" | "selection" | "review";
@@ -39,9 +39,6 @@ export default function Home() {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [selectedFacts, setSelectedFacts] = useState<Fact[]>([]);
   const [narration, setNarration] = useState<Narration | null>(null);
-
-  // Initialize sessionId from localStorage only (for page reloads)
-  // Backend will create session on first message
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Load from localStorage on client side only
@@ -52,6 +49,96 @@ export default function Home() {
       setSessionId(storedSessionId);
     }
   }, []);
+
+  // Helper: Update session ID from response
+  const updateSessionId = useCallback(
+    (response: Response) => {
+      const responseSessionId =
+        response.headers.get("x-session-id") ??
+        response.headers.get("X-Session-Id");
+
+      if (responseSessionId && responseSessionId !== sessionId) {
+        setSessionId(responseSessionId);
+        localStorage.setItem("agentCreateSessionId", responseSessionId);
+      }
+    },
+    [sessionId],
+  );
+
+  // Helper: Read stream response
+  const readStreamResponse = async (response: Response): Promise<string> => {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let accumulatedResponse = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      accumulatedResponse += decoder.decode(value, { stream: true });
+    }
+
+    return accumulatedResponse;
+  };
+
+  // Helper: Handle fact extraction response
+  const handleFactExtractionResponse = useCallback(
+    (json: { facts?: Fact[]; message?: string }) => {
+      if (json.facts) {
+        setFacts(json.facts);
+        setWorkflowStep("selection");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              json.message ??
+              "I've extracted these facts. Please select the ones you want to keep.",
+            id: Date.now().toString(),
+          },
+        ]);
+      }
+    },
+    [],
+  );
+
+  // Helper: Extract facts from messages
+  const extractFacts = useCallback(
+    async (messagesToSend: typeof messages) => {
+      try {
+        const response = await fetch("/api/agent-create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: messagesToSend,
+            mode: "extract",
+            sessionId,
+          }),
+        });
+
+        updateSessionId(response);
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch response");
+        }
+
+        const accumulatedResponse = await readStreamResponse(response);
+        const json = JSON.parse(accumulatedResponse) as {
+          facts?: Fact[];
+          message?: string;
+        };
+
+        handleFactExtractionResponse(json);
+      } catch (e) {
+        console.error("Failed to extract facts", e);
+        throw e;
+      }
+    },
+    [sessionId, updateSessionId, handleFactExtractionResponse],
+  );
 
   const handleFactToggle = (fact: Fact) => {
     setSelectedFacts((prev) => {
@@ -67,6 +154,15 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
 
+    const confirmationMessage = {
+      role: "user" as const,
+      content: `I confirm these facts:\n\n${selectedFacts
+        .map((f) => `- ${f.concept}: ${f.details}`)
+        .join("\n")}`,
+    };
+
+    const messagesWithConfirmation = [...messages, confirmationMessage];
+
     try {
       const response = await fetch("/api/agent-create", {
         method: "POST",
@@ -74,71 +170,40 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages,
+          messages: messagesWithConfirmation,
           mode: "narrate",
           selectedFacts,
           sessionId,
         }),
       });
 
-      // Capture sessionId from response header if this is first request
-      const responseSessionId =
-        response.headers.get("x-session-id") ||
-        response.headers.get("X-Session-Id");
-
-      console.log("[AgentCreate-SubmitFacts] Response Headers:", {
-        sessionIdHeader: responseSessionId,
-        allHeaders: [...response.headers.entries()],
-      });
-
-      if (responseSessionId && responseSessionId !== sessionId) {
-        console.log(
-          "[AgentCreate-SubmitFacts] Capturing new sessionId:",
-          responseSessionId,
-        );
-        setSessionId(responseSessionId);
-        localStorage.setItem("agentCreateSessionId", responseSessionId);
-      }
+      updateSessionId(response);
 
       if (!response.ok) {
         throw new Error("Failed to fetch response");
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) return;
+      const accumulatedResponse = await readStreamResponse(response);
+      const json = JSON.parse(accumulatedResponse) as Narration & {
+        message?: string;
+      };
 
-      const decoder = new TextDecoder();
-      let accumulatedResponse = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        accumulatedResponse += chunk;
-      }
-
-      try {
-        const json = JSON.parse(accumulatedResponse) as Narration;
-        setNarration(json);
-        setWorkflowStep("review");
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "user",
-            content: `I confirm these facts:\n\n${selectedFacts
-              .map((f) => `- ${f.concept}: ${f.details}`)
-              .join("\n")}`,
-            id: Date.now().toString() + "-user-confirm",
-          },
-          {
-            role: "assistant",
-            content: "Here is the narration based on your selected facts.",
-            id: Date.now().toString(),
-          },
-        ]);
-      } catch (e) {
-        console.error("Failed to parse narration response", e);
-      }
+      const { message, ...narrationData } = json;
+      setNarration(narrationData as Narration);
+      setWorkflowStep("review");
+      setMessages((prev) => [
+        ...prev,
+        {
+          ...confirmationMessage,
+          id: Date.now().toString() + "-user-confirm",
+        },
+        {
+          role: "assistant",
+          content:
+            message ?? "Here is the narration based on your selected facts.",
+          id: Date.now().toString(),
+        },
+      ]);
     } catch (e) {
       console.error("Chat error:", e);
       setError(e as Error);
@@ -162,161 +227,23 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
 
-    // If we are in input mode, we extract facts
-    if (workflowStep === "input") {
-      try {
-        const response = await fetch("/api/agent-create", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messages: newMessages,
-            mode: "extract",
-            sessionId,
-          }),
-        });
-
-        // Capture sessionId from response header if this is first request
-        const responseSessionId =
-          response.headers.get("x-session-id") ||
-          response.headers.get("X-Session-Id");
-
-        console.log("[AgentCreate] Response Headers:", {
-          sessionIdHeader: responseSessionId,
-          allHeaders: [...response.headers.entries()],
-        });
-
-        if (responseSessionId && responseSessionId !== sessionId) {
-          console.log(
-            "[AgentCreate] Capturing new sessionId:",
-            responseSessionId,
-          );
-          setSessionId(responseSessionId);
-          localStorage.setItem("agentCreateSessionId", responseSessionId);
-        }
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch response");
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) return;
-
-        const decoder = new TextDecoder();
-        let accumulatedResponse = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          accumulatedResponse += decoder.decode(value, { stream: true });
-        }
-
-        try {
-          const json = JSON.parse(accumulatedResponse) as { facts?: Fact[] };
-          if (json.facts) {
-            setFacts(json.facts);
-            setWorkflowStep("selection");
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content:
-                  "I've extracted these facts. Please select the ones you want to keep.",
-                id: Date.now().toString(),
-              },
-            ]);
-          }
-        } catch (e) {
-          console.error("Failed to parse response", e);
-        }
-      } catch (e) {
-        console.error("Chat error:", e);
-        setError(e as Error);
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      if (workflowStep === "review") {
+    try {
+      if (workflowStep === "input") {
+        await extractFacts(newMessages);
+      } else if (workflowStep === "review") {
+        // Reset state for new extraction
         setWorkflowStep("input");
         setFacts([]);
         setSelectedFacts([]);
         setDocumentContent("");
         setNarration(null);
-
-        try {
-          const response = await fetch("/api/agent-create", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messages: newMessages,
-              mode: "extract",
-              sessionId,
-            }),
-          });
-
-          // Capture sessionId from response header if this is first request
-          const responseSessionId =
-            response.headers.get("x-session-id") ||
-            response.headers.get("X-Session-Id");
-
-          console.log("[AgentCreate-Review] Response Headers:", {
-            sessionIdHeader: responseSessionId,
-            allHeaders: [...response.headers.entries()],
-          });
-
-          if (responseSessionId && responseSessionId !== sessionId) {
-            console.log(
-              "[AgentCreate-Review] Capturing new sessionId:",
-              responseSessionId,
-            );
-            setSessionId(responseSessionId);
-            localStorage.setItem("agentCreateSessionId", responseSessionId);
-          }
-
-          if (!response.ok) {
-            throw new Error("Failed to fetch response");
-          }
-
-          const reader = response.body?.getReader();
-          if (!reader) return;
-
-          const decoder = new TextDecoder();
-          let accumulatedResponse = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            accumulatedResponse += decoder.decode(value, { stream: true });
-          }
-
-          try {
-            const json = JSON.parse(accumulatedResponse) as { facts?: Fact[] };
-            if (json.facts) {
-              setFacts(json.facts);
-              setWorkflowStep("selection");
-              setMessages((prev) => [
-                ...prev,
-                {
-                  role: "assistant",
-                  content:
-                    "I've extracted these facts. Please select the ones you want to keep.",
-                  id: Date.now().toString(),
-                },
-              ]);
-            }
-          } catch (e) {
-            console.error("Failed to parse response", e);
-          }
-        } catch (e) {
-          console.error("Chat error:", e);
-          setError(e as Error);
-        } finally {
-          setIsLoading(false);
-        }
+        await extractFacts(newMessages);
       }
+    } catch (e) {
+      console.error("Chat error:", e);
+      setError(e as Error);
+    } finally {
+      setIsLoading(false);
     }
   };
 

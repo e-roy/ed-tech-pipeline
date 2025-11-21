@@ -7,6 +7,10 @@ import {
   getSessionIdFromRequest,
   getOrCreateSession,
 } from "@/server/utils/session-utils";
+import {
+  saveConversationMessage,
+  saveAssistantResponse,
+} from "@/server/utils/message-utils";
 import { db } from "@/server/db";
 import { videoSessions } from "@/server/db/schema";
 import { eq } from "drizzle-orm";
@@ -46,6 +50,22 @@ export async function POST(req: Request) {
   const isFirstMessage = messages.length === 1 && messages[0]?.role === "user";
   const isNewSession = !requestedSessionId || requestedSessionId !== sessionId;
 
+  // Save only the last user message (the new one in this request)
+  // Previous messages were already saved in earlier requests
+  const userMessages = messages.filter((m) => m.role === "user");
+  const lastUserMessage = userMessages[userMessages.length - 1];
+  if (lastUserMessage) {
+    try {
+      await saveConversationMessage(sessionId, lastUserMessage, {
+        mode,
+        isFirstMessage,
+      });
+    } catch (error) {
+      console.error("Error saving user message:", error);
+      // Don't fail the request if message saving fails
+    }
+  }
+
   if (mode === "extract") {
     const result = streamObject({
       model: openai("gpt-4o-mini"),
@@ -56,9 +76,14 @@ export async function POST(req: Request) {
       - details: A clear explanation or definition based on the story.
       - confidence: A number between 0 and 1 indicating your confidence in this fact.
       
-      Return a JSON object with a "facts" array.`,
+      Provide a friendly, conversational message to the user explaining what you've extracted, and return the facts in a structured format.`,
       messages,
       schema: z.object({
+        message: z
+          .string()
+          .describe(
+            "A friendly, conversational response to the user explaining what facts were extracted",
+          ),
         facts: z.array(
           z.object({
             concept: z.string().describe("Main concept or term"),
@@ -85,6 +110,17 @@ export async function POST(req: Request) {
             console.error("Error saving extracted facts:", error);
           }
         }
+
+        // Save assistant conversational response
+        if (result.object?.message) {
+          try {
+            await saveAssistantResponse(sessionId, result.object.message, {
+              mode: "extract",
+            });
+          } catch (error) {
+            console.error("Error saving assistant response:", error);
+          }
+        }
       },
     });
 
@@ -106,7 +142,10 @@ export async function POST(req: Request) {
       ${JSON.stringify(selectedFacts, null, 2)}
       
       Create a cohesive and engaging narration that incorporates these facts.
+      Provide a friendly, conversational message to the user explaining what you've created, and return the structured narration data.
+      
       Return a structured object with the following fields:
+      - message: A conversational response to the user.
       - total_duration: Estimated total duration in seconds.
       - reading_level: Reading level (e.g., "6.5").
       - key_terms_count: Number of key terms used.
@@ -129,6 +168,11 @@ export async function POST(req: Request) {
         },
       ],
       schema: z.object({
+        message: z
+          .string()
+          .describe(
+            "A friendly, conversational response to the user explaining what narration was created",
+          ),
         total_duration: z
           .number()
           .describe("Estimated total duration in seconds"),
@@ -155,14 +199,16 @@ export async function POST(req: Request) {
       }),
       onFinish: async (result) => {
         if (result.object) {
-          // Save generated script to database
+          // Save generated script to database (excluding message field)
           try {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { message, ...scriptData } = result.object;
             await db
               .update(videoSessions)
               .set({
                 // Type casting as we're saving raw JSON
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                generatedScript: result.object as any,
+                generatedScript: scriptData as any,
                 status: "script_generated",
                 updatedAt: new Date(),
               })
@@ -180,6 +226,17 @@ export async function POST(req: Request) {
             }
           } catch (error) {
             console.error("Error saving generated script:", error);
+          }
+
+          // Save assistant conversational response
+          if (result.object.message) {
+            try {
+              await saveAssistantResponse(sessionId, result.object.message, {
+                mode: "narrate",
+              });
+            } catch (error) {
+              console.error("Error saving assistant response:", error);
+            }
           }
         }
       },
@@ -199,14 +256,32 @@ export async function POST(req: Request) {
       model: openai("gpt-4o-mini"),
       system: `You are a helpful assistant that edits markdown documents based on user requests.
       Current document content:
-      ${documentContent ?? ""}`,
+      ${documentContent ?? ""}
+      
+      Provide a friendly, conversational response explaining what changes you made, and return the updated document content.`,
       messages,
       schema: z.object({
         documentContent: z
           .string()
           .describe("The updated markdown document content."),
-        reply: z.string().describe("Your conversational response to the user."),
+        reply: z
+          .string()
+          .describe(
+            "Your friendly, conversational response to the user explaining what changes were made",
+          ),
       }),
+      onFinish: async (result) => {
+        // Save assistant conversational response
+        if (result.object?.reply) {
+          try {
+            await saveAssistantResponse(sessionId, result.object.reply, {
+              mode: "edit",
+            });
+          } catch (error) {
+            console.error("Error saving assistant response:", error);
+          }
+        }
+      },
     });
 
     const response = result.toTextStreamResponse();
