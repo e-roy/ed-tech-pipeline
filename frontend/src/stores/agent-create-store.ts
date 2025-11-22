@@ -568,18 +568,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
     }),
     {
       name: "agent-create-storage",
-      partialize: (state) => ({ sessionId: state.sessionId }), // Only persist sessionId
-      // Migrate from old localStorage key if it exists
-      onRehydrateStorage: () => (state) => {
-        if (typeof window !== "undefined" && state) {
-          const oldSessionId = localStorage.getItem("agentCreateSessionId");
-          if (oldSessionId && !state.sessionId) {
-            useAgentCreateStore.getState().setSessionId(oldSessionId);
-          }
-          // Clean up old key after migration
-          localStorage.removeItem("agentCreateSessionId");
-        }
-      },
+      partialize: (state) => ({}), // Don't persist anything - sessionId is now URL-based
     },
   ),
 );
