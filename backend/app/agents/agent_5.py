@@ -1437,10 +1437,10 @@ async def agent_5_process(
         )
         logger.info(f"[{session_id}] Combined video and audio into final output")
 
-        # Upload video to S3 - use {userId}/{sessionId}/agent5/ path
+        # Upload video to S3 - use users/{userId}/{sessionId}/final/ path
         import uuid
         video_filename = f"final_video_{uuid.uuid4().hex[:8]}.mp4"
-        video_s3_key = f"users/{user_id}/{session_id}/agent5/{video_filename}"
+        video_s3_key = f"users/{user_id}/{session_id}/final/{video_filename}"
 
         # Debug: Check file before upload
         if os.path.exists(output_path):

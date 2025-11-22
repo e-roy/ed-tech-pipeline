@@ -3146,7 +3146,7 @@ class VideoGenerationOrchestrator:
             # Load agent_4_output.json from S3 which contains both agent_2_data and agent_4_data
             pipeline_data = None
             try:
-                agent4_output_key = f"scaffold_test/{userId}/{sessionId}/agent4/agent_4_output.json"
+                agent4_output_key = f"users/{userId}/{sessionId}/agent4/agent_4_output.json"
                 response = self.storage_service.s3_client.get_object(
                     Bucket=self.storage_service.bucket_name,
                     Key=agent4_output_key
