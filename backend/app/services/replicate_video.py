@@ -29,15 +29,20 @@ class ReplicateVideoService:
         Args:
             api_key: Replicate API key. If not provided, reads from settings.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         settings = get_settings()
         self.api_key = api_key or settings.REPLICATE_API_KEY
 
         if not self.api_key:
+            logger.error("REPLICATE_API_KEY not configured in ReplicateVideoService")
             raise ValueError("REPLICATE_API_KEY not configured")
 
         # Set the API token for the replicate client
         import os
         os.environ["REPLICATE_API_TOKEN"] = self.api_key
+        logger.debug(f"ReplicateVideoService initialized with API key (starts with: {self.api_key[:5]}...)")
 
     async def generate_video(
         self,

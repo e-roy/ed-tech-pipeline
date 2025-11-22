@@ -498,13 +498,19 @@ async def agent_5_process(
     try:
         from app.services.secrets import get_secret
         replicate_api_key = get_secret("pipeline/replicate-api-key")
-        logger.debug("Retrieved REPLICATE_API_KEY from AWS Secrets Manager for Agent5")
+        if replicate_api_key:
+            logger.info(f"Retrieved REPLICATE_API_KEY from AWS Secrets Manager for Agent5 (length: {len(replicate_api_key)})")
+        else:
+            logger.warning("REPLICATE_API_KEY retrieved from Secrets Manager but is None or empty")
     except Exception as e:
-        logger.debug(f"Could not retrieve REPLICATE_API_KEY from Secrets Manager: {e}, falling back to settings")
+        logger.error(f"Could not retrieve REPLICATE_API_KEY from Secrets Manager: {e}, falling back to settings")
         replicate_api_key = settings.REPLICATE_API_KEY
     
     if not replicate_api_key:
-        logger.warning("REPLICATE_API_KEY not set - video generation will fail")
+        logger.error("REPLICATE_API_KEY not set - video generation will fail")
+        raise ValueError("REPLICATE_API_KEY not configured. Check AWS Secrets Manager (pipeline/replicate-api-key) or .env file.")
+    else:
+        logger.info(f"Using REPLICATE_API_KEY for Agent5 (starts with: {replicate_api_key[:5]}...)")
 
     # Initialize storage service if not provided
     if storage_service is None:
