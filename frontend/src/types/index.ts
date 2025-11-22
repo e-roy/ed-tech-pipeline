@@ -63,7 +63,7 @@ export interface ProgressUpdate {
   agentnumber?: string;
   status: string;
   message: string;
-  progress: {
+  progress?: {
     stage: string;
     completed: number;
     total: number;

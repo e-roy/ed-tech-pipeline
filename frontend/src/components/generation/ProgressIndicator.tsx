@@ -13,14 +13,16 @@ export function ProgressIndicator({ update, isConnected }: Props) {
   if (!update) return null;
 
   // Calculate progress percentage from completed/total
-  const progressPercent = Math.round(
-    (update.progress.completed / update.progress.total) * 100,
-  );
+  const progressPercent = update.progress
+    ? Math.round((update.progress.completed / update.progress.total) * 100)
+    : 0;
 
   // Determine if the process is complete
   const isComplete =
     update.status === "completed" ||
-    update.progress.completed === update.progress.total;
+    (update.progress?.completed === update.progress?.total &&
+      update?.progress?.total &&
+      update.progress.total > 0);
 
   return (
     <Card className="fixed right-4 bottom-4 w-96 p-6 shadow-lg">
@@ -35,10 +37,12 @@ export function ProgressIndicator({ update, isConnected }: Props) {
 
       <p className="mb-2 text-sm text-gray-700">{update.message}</p>
 
-      <div className="mb-2 text-xs text-gray-600">
-        Stage: {update.progress.stage}
-        {update.progress.section && ` (${update.progress.section})`}
-      </div>
+      {update.progress && (
+        <div className="mb-2 text-xs text-gray-600">
+          Stage: {update.progress.stage}
+          {update.progress.section && ` (${update.progress.section})`}
+        </div>
+      )}
 
       {update.cost > 0 && (
         <p className="text-xs text-gray-500">
