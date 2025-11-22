@@ -114,17 +114,26 @@ async def agent_4_process(
     # Extract script from generation_script (same as Agent2 does)
     if not script and generation_script:
         from app.agents.agent_2 import extract_script_from_generated_script
+
+        logger.info(f"[SCRIPT TRACE] Agent4 extracting script from generation_script")
+        logger.info(f"[SCRIPT TRACE] generation_script type: {type(generation_script)}")
+        if isinstance(generation_script, dict):
+            logger.info(f"[SCRIPT TRACE] generation_script top-level keys: {list(generation_script.keys())}")
+
         script = extract_script_from_generated_script(generation_script)
         if script:
-            logger.info(f"Agent4 extracted script from generation_script for session {session_id}")
-            logger.info(f"Agent4 extracted script keys: {list(script.keys())}")
+            logger.info(f"[SCRIPT TRACE] Agent4 extracted script successfully for session {session_id}")
+            logger.info(f"[SCRIPT TRACE] Extracted script keys: {list(script.keys())}")
             # Log what fields each part has
             for part_name in ["hook", "concept", "process", "conclusion"]:
                 if part_name in script and isinstance(script[part_name], dict):
                     part_keys = list(script[part_name].keys())
-                    logger.info(f"Agent4 script['{part_name}'] keys: {part_keys}")
+                    logger.info(f"[SCRIPT TRACE] script['{part_name}'] keys: {part_keys}")
+                    # Log the actual text field value (first 100 chars)
+                    text_value = script[part_name].get("text", script[part_name].get("narration", script[part_name].get("narrationtext", "")))
+                    logger.info(f"[SCRIPT TRACE] script['{part_name}'] text preview: {text_value[:100] if text_value else '(empty)'}")
         else:
-            logger.warning(f"Agent4 extract_script_from_generated_script returned None or empty for session {session_id}")
+            logger.warning(f"[SCRIPT TRACE] Agent4 extract_script_from_generated_script returned None or empty for session {session_id}")
     
     # If script is still empty, wait for Agent2 to write it (they run in parallel)
     if not script and db is not None:
@@ -316,25 +325,93 @@ async def agent_4_process(
 
         result_data = audio_result.data
 
-        # Upload audio files to S3 if they have local filepaths
+        # Read agent_2_data.json from S3
+        agent_2_data = {}
+        try:
+            s3_key_agent2 = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
+            response = storage_service.s3_client.get_object(
+                Bucket=storage_service.bucket_name,
+                Key=s3_key_agent2
+            )
+            agent_2_data = json.loads(response['Body'].read().decode('utf-8'))
+            logger.info(f"Agent4 loaded agent_2_data.json from S3: {s3_key_agent2}")
+        except Exception as e:
+            logger.warning(f"Agent4 could not load agent_2_data.json from S3: {e}")
+
+        # Upload audio files to S3 and build agent_4_data structure
+        audio_files_output = []
+        background_music_output = None
+
         if result_data.get("audio_files"):
             for audio_file in result_data["audio_files"]:
-                if audio_file.get("filepath") and audio_file["part"] != "music":
-                    # Upload to S3 - use users/{userId}/{sessionId}/agent4/ path
-                    s3_key = f"users/{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
-                    try:
-                        with open(audio_file["filepath"], "rb") as f:
-                            storage_service.s3_client.put_object(
-                                Bucket=storage_service.bucket_name,
-                                Key=s3_key,
-                                Body=f.read(),
-                                ContentType='audio/mpeg'
-                            )
-                        # Generate presigned URL
-                        audio_file["url"] = storage_service.generate_presigned_url(s3_key, expires_in=86400)  # 24 hours for testing
-                        logger.info(f"Uploaded audio file to S3: {s3_key}")
-                    except Exception as e:
-                        logger.warning(f"Failed to upload audio file to S3: {e}")
+                if audio_file.get("filepath"):
+                    if audio_file["part"] == "music":
+                        # Handle background music
+                        s3_key = f"users/{user_id}/{session_id}/agent4/background_music.mp3"
+                        try:
+                            with open(audio_file["filepath"], "rb") as f:
+                                storage_service.s3_client.put_object(
+                                    Bucket=storage_service.bucket_name,
+                                    Key=s3_key,
+                                    Body=f.read(),
+                                    ContentType='audio/mpeg'
+                                )
+                            # Generate presigned URL
+                            music_url = storage_service.generate_presigned_url(s3_key, expires_in=86400)  # 24 hours for testing
+                            background_music_output = {
+                                "url": music_url,
+                                "duration": audio_file.get("duration", 60)
+                            }
+                            logger.info(f"Uploaded background music to S3: {s3_key}")
+                        except Exception as e:
+                            logger.warning(f"Failed to upload background music to S3: {e}")
+                    else:
+                        # Handle narration audio
+                        s3_key = f"users/{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
+                        try:
+                            with open(audio_file["filepath"], "rb") as f:
+                                storage_service.s3_client.put_object(
+                                    Bucket=storage_service.bucket_name,
+                                    Key=s3_key,
+                                    Body=f.read(),
+                                    ContentType='audio/mpeg'
+                                )
+                            # Generate presigned URL
+                            audio_url = storage_service.generate_presigned_url(s3_key, expires_in=86400)  # 24 hours for testing
+                            audio_files_output.append({
+                                "part": audio_file["part"],
+                                "url": audio_url,
+                                "duration": audio_file.get("duration", 0)
+                            })
+                            logger.info(f"Uploaded audio file to S3: {s3_key}")
+                        except Exception as e:
+                            logger.warning(f"Failed to upload audio file to S3: {e}")
+
+        # Create combined output structure with agent_2_data and agent_4_data
+        combined_output = {
+            "agent_2_data": agent_2_data,
+            "agent_4_data": {
+                "audio_files": audio_files_output,
+                "background_music": background_music_output if background_music_output else {
+                    "url": "",
+                    "duration": 60
+                }
+            }
+        }
+
+        # Upload combined output to S3 as agent_4_output.json
+        try:
+            s3_key_output = f"users/{user_id}/{session_id}/agent4/agent_4_output.json"
+            output_json = json.dumps(combined_output, indent=2).encode('utf-8')
+            storage_service.s3_client.put_object(
+                Bucket=storage_service.bucket_name,
+                Key=s3_key_output,
+                Body=output_json,
+                ContentType='application/json'
+            )
+            logger.info(f"Agent4 uploaded agent_4_output.json to S3: {s3_key_output}")
+        except Exception as e:
+            logger.error(f"Agent4 failed to upload agent_4_output.json: {e}", exc_info=True)
 
         # Report finished status
         finished_kwargs = {
