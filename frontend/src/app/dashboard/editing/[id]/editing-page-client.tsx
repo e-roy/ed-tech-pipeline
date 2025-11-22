@@ -28,11 +28,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Download, Scissors, ArrowLeft, Loader2, TestTube } from "lucide-react";
 import { api } from "@/trpc/react";
+import { EditorLayout } from "@/components/video-editor/EditorLayout";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Hardcoded test video S3 key for testing purposes
-const TEST_VIDEO_S3_KEY = "users/7302d0b7-f093-4063-947f-73ca799ef5d5/Sv75fpt8L8S75jSNKVPXg/final_video_dae6d4f1.mp4";
+const TEST_VIDEO_S3_KEY = "users/f218067b-e198-45ae-888a-cf45979bc57d/kYd20Q5WaK-b27v31a1eE/final_video_dae6d4f1.mp4";
 
 interface EditingPageClientProps {
   sessionId: string;
@@ -65,6 +66,7 @@ export function EditingPageClient({
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
   const [useTestVideo, setUseTestVideo] = useState(false);
   const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
+  const [isEditorMode, setIsEditorMode] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -185,6 +187,14 @@ export function EditingPageClient({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Editor mode - render the full video editor
+  if (isEditorMode) {
+    const videoUrl = testVideoUrl || sessionData?.final_video_url;
+    return (
+      <EditorLayout sessionId={sessionId} videoUrl={videoUrl || undefined} />
+    );
+  }
+
   // Error state
   if (error) {
     return (
@@ -260,21 +270,21 @@ export function EditingPageClient({
   const videoUrl = currentVideoUrl as string;
 
   return (
-    <div className="space-y-6">
-      {/* Video Player Card */}
-      <Card>
-        <CardHeader>
+    <div className="flex h-full flex-col gap-4 overflow-hidden">
+      {/* Video Player Card - takes most of the space */}
+      <Card className="flex flex-1 min-h-0 flex-col">
+        <CardHeader className="shrink-0 py-3">
           <CardTitle>Your Video</CardTitle>
           <CardDescription>
             {testVideoUrl ? "Test Video" : `Session ID: ${sessionId}`}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-lg overflow-hidden border bg-muted/50">
+        <CardContent className="flex-1 min-h-0 pb-3">
+          <div className="h-full rounded-lg overflow-hidden border bg-muted/50 flex items-center justify-center">
             <video
               ref={videoRef}
               controls
-              className="w-full h-auto"
+              className="max-w-full max-h-full object-contain"
               src={videoUrl}
               preload="metadata"
               onLoadedMetadata={handleVideoMetadata}
@@ -285,82 +295,60 @@ export function EditingPageClient({
         </CardContent>
       </Card>
 
-      {/* Video Metadata Card */}
-      {videoMetadata && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Video Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <p className="text-muted-foreground text-xs">Duration</p>
-                <p className="font-medium">
-                  {formatDuration(videoMetadata.duration)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Resolution</p>
-                <p className="font-medium">
-                  {videoMetadata.width} x {videoMetadata.height}
-                </p>
-              </div>
-              {sessionData?.created_at && (
-                <div>
-                  <p className="text-muted-foreground text-xs">Created</p>
-                  <p className="font-medium">
-                    {new Date(sessionData.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              )}
+      {/* Bottom section: Video Details + Actions */}
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-4">
+        {/* Video Metadata - inline */}
+        {videoMetadata && (
+          <div className="flex items-center gap-6 text-sm">
+            <div>
+              <span className="text-muted-foreground">Duration: </span>
+              <span className="font-medium text-foreground">
+                {formatDuration(videoMetadata.duration)}
+              </span>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div>
+              <span className="text-muted-foreground">Resolution: </span>
+              <span className="font-medium text-foreground">
+                {videoMetadata.width} x {videoMetadata.height}
+              </span>
+            </div>
+            {sessionData?.created_at && (
+              <div>
+                <span className="text-muted-foreground">Created: </span>
+                <span className="font-medium text-foreground">
+                  {new Date(sessionData.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-3">
-        <Button onClick={handleDownload}>
-          <Download className="mr-2 h-4 w-4" />
-          Download Video
-        </Button>
-
-        <TooltipProvider>
-          <AlertDialog>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline">
-                    <Scissors className="mr-2 h-4 w-4" />
-                    Edit Video
-                  </Button>
-                </AlertDialogTrigger>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Coming Soon</p>
-              </TooltipContent>
-            </Tooltip>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Coming Soon</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Video editing features are currently in development. Stay tuned
-                  for updates!
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogAction>Got it</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </TooltipProvider>
-
-        <Link href="/dashboard/hardcode-create">
-          <Button variant="ghost">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Create
+        {/* Actions */}
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={handleDownload}>
+            <Download className="mr-2 h-4 w-4" />
+            Download Video
           </Button>
-        </Link>
+
+          <Button
+            variant="outline"
+            onClick={() => setIsEditorMode(true)}
+            className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+          >
+            <Scissors className="mr-2 h-4 w-4" />
+            Open Editor
+          </Button>
+
+          <Link href="/dashboard/hardcode-create">
+            <Button
+              variant="outline"
+              className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Create
+            </Button>
+          </Link>
+        </div>
       </div>
     </div>
   );
