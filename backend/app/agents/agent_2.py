@@ -217,28 +217,15 @@ async def agent_2_process(
         # Wait 2 seconds
         await asyncio.sleep(2)
 
-        # Generate storyboard.json from script data
+        # Generate storyboard from script data (will be included in agent_2_data.json)
         storyboard = None
         if script:
             try:
                 storyboard = create_storyboard_from_script(script, topic)
                 logger.info(f"Agent2 generated storyboard with {len(storyboard.get('segments', []))} segments")
-                
-                # Upload storyboard.json to S3
-                if storage_service.s3_client:
-                    s3_key = f"scaffold_test/{user_id}/{session_id}/agent2/storyboard.json"
-                    storyboard_json = json.dumps(storyboard, indent=2).encode('utf-8')
-                    storage_service.s3_client.put_object(
-                        Bucket=storage_service.bucket_name,
-                        Key=s3_key,
-                        Body=storyboard_json,
-                        ContentType='application/json'
-                    )
-                    logger.info(f"Agent2 uploaded storyboard.json to S3: {s3_key}")
-                else:
-                    logger.warning("Storage service not configured, skipping storyboard.json upload")
+                logger.info(f"Agent2 storyboard will be included in agent_2_data.json (not creating separate storyboard.json)")
             except Exception as e:
-                logger.error(f"Agent2 failed to generate/upload storyboard.json: {e}", exc_info=True)
+                logger.error(f"Agent2 failed to generate storyboard: {e}", exc_info=True)
                 # Don't fail the pipeline if storyboard generation fails
         
         # Generate base_scene with detailed characters and visual direction
@@ -426,38 +413,50 @@ def create_storyboard_from_script(script: dict, topic: Optional[str] = None) -> 
     for idx, (script_key, segment_type) in enumerate(segment_mapping, start=1):
         if script_key not in script:
             continue
-            
+
         part_data = script[script_key]
-        
+
+        logger.info(f"[STORYBOARD TRACE] Processing {script_key} -> {segment_type}")
+        logger.info(f"[STORYBOARD TRACE] part_data type: {type(part_data)}")
+        if isinstance(part_data, dict):
+            logger.info(f"[STORYBOARD TRACE] part_data keys: {list(part_data.keys())}")
+
         # Get narration text (could be "text", "narration", or nested)
         narration = ""
         if isinstance(part_data, dict):
             narration = part_data.get("text") or part_data.get("narration") or part_data.get("narrationtext") or ""
+            logger.info(f"[STORYBOARD TRACE] Extracted narration from: {('text' if part_data.get('text') else 'narration' if part_data.get('narration') else 'narrationtext' if part_data.get('narrationtext') else 'none')}")
         elif isinstance(part_data, str):
             narration = part_data
-        
+            logger.info(f"[STORYBOARD TRACE] part_data is string, using as narration")
+
+        logger.info(f"[STORYBOARD TRACE] {script_key} narration preview: {narration[:100] if narration else '(empty)'}")
+
         if not narration:
+            logger.warning(f"[STORYBOARD TRACE] Skipping {script_key} - no narration found")
             continue
-        
+
         # Calculate duration from word count
         duration = calculate_duration_from_words(narration)
-        
+        logger.info(f"[STORYBOARD TRACE] {script_key} calculated duration: {duration}s")
+
         # Get key concepts
         key_concepts = []
         if isinstance(part_data, dict):
             key_concepts = part_data.get("key_concepts", []) or []
             if isinstance(key_concepts, str):
                 key_concepts = [key_concepts]
-        
+
         # Add to all_key_concepts set
         for concept in key_concepts:
             if concept:
                 all_key_concepts.add(concept)
-        
+
         # Get visual guidance
         visual_guidance = ""
         if isinstance(part_data, dict):
             visual_guidance = part_data.get("visual_guidance") or part_data.get("visual_guidance_preview") or ""
+            logger.info(f"[STORYBOARD TRACE] {script_key} visual_guidance preview: {visual_guidance[:100] if visual_guidance else '(empty)'}")
         
         # Get educational purpose (if available, otherwise generate default)
         educational_purpose = ""

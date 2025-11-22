@@ -6,6 +6,7 @@ Also generates/processes background music for videos.
 Based on Phase 07 Tasks (Audio Pipeline).
 """
 
+import asyncio
 import os
 import time
 import tempfile
@@ -157,6 +158,120 @@ class AudioPipelineAgent:
             items=cumulative_items
         )
 
+    async def _generate_single_audio(
+        self,
+        part_name: str,
+        part_data: Dict[str, Any],
+        voice: str,
+        session_id: str,
+        cumulative_items: list,
+        part_idx: int,
+        total_parts: int
+    ) -> Dict[str, Any]:
+        """Generate audio for a single script part."""
+        try:
+            text = part_data.get("text", "")
+
+            if not text:
+                logger.warning(f"[{session_id}] Part '{part_name}' has no text, skipping audio generation")
+                return {
+                    "success": False,
+                    "error": f"Part '{part_name}' has no text"
+                }
+
+            # Update cumulative status: mark audio as processing
+            item_id = f"audio_{part_name}"
+            if cumulative_items:
+                await self._update_cumulative_status(
+                    session_id,
+                    cumulative_items,
+                    item_id,
+                    "processing"
+                )
+
+            logger.info(
+                f"[{session_id}] Generating audio for '{part_name}' "
+                f"({len(text)} chars, voice: {voice})"
+            )
+
+            # Generate TTS audio using OpenAI
+            response = self.client.audio.speech.create(
+                model="tts-1",  # Use tts-1 (faster, cheaper) or tts-1-hd (higher quality)
+                voice=voice,
+                input=text,
+                response_format="mp3"
+            )
+
+            # Save to temporary file (cross-platform)
+            temp_dir = tempfile.gettempdir()
+            os.makedirs(temp_dir, exist_ok=True)
+
+            filename = f"audio_{part_name}_{session_id}.mp3"
+            filepath = os.path.join(temp_dir, filename)
+
+            # Write audio bytes to file
+            with open(filepath, "wb") as f:
+                f.write(response.content)
+
+            logger.debug(f"[{session_id}] Saved audio file to: {filepath}")
+
+            # Get file size for verification
+            file_size = os.path.getsize(filepath)
+
+            # Calculate cost (based on character count)
+            char_count = len(text)
+            cost = (char_count / 1_000_000) * self.COST_PER_1M_CHARS
+
+            # Estimate duration based on speaking rate (~150 words/min)
+            words = len(text.split())
+            estimated_duration = (words / 150) * 60  # seconds
+
+            # Update cumulative status: mark audio as completed
+            if cumulative_items:
+                await self._update_cumulative_status(
+                    session_id,
+                    cumulative_items,
+                    item_id,
+                    "completed"
+                )
+
+            # Send WebSocket update for each audio file generated (backward compatibility)
+            if self.websocket_manager and not cumulative_items:
+                await self.websocket_manager.broadcast_status(
+                    session_id,
+                    status="audio_generated",
+                    progress=50 + (part_idx * 8),
+                    details=f"Generated audio {part_idx} of {total_parts}: {part_name.capitalize()}"
+                )
+
+            logger.info(
+                f"[{session_id}] Generated audio for '{part_name}': "
+                f"{estimated_duration:.1f}s, {file_size} bytes, ${cost:.4f}"
+            )
+
+            return {
+                "success": True,
+                "cost": cost,
+                "audio_data": {
+                    "part": part_name,
+                    "filepath": filepath,
+                    "url": "",  # Will be filled by orchestrator after S3 upload
+                    "duration": round(estimated_duration, 1),
+                    "cost": round(cost, 4),
+                    "character_count": char_count,
+                    "file_size": file_size,
+                    "voice": voice
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"[{session_id}] Error generating audio for '{part_name}': {e}", exc_info=True)
+            return {
+                "success": False,
+                "cost": 0.0,
+                "error": str(e)
+            }
+
     async def process(self, input: AgentInput) -> AgentOutput:
         """
         Process script and generate TTS audio for each part.
@@ -205,104 +320,39 @@ class AudioPipelineAgent:
                 )
                 voice = self.DEFAULT_VOICE
 
-            # Generate audio for each part
+            # Generate audio for all parts in parallel
             audio_files = []
             total_cost = 0.0
             total_parts = len(required_parts)
-            current_part_idx = 0
 
-            for part_name in required_parts:
-                current_part_idx += 1
-                part_data = script[part_name]
-                text = part_data.get("text", "")
-
-                if not text:
-                    logger.warning(f"Part '{part_name}' has no text, skipping audio generation")
-                    continue
-
-                # Update cumulative status: mark audio as processing
-                item_id = f"audio_{part_name}"
-                if cumulative_items:
-                    await self._update_cumulative_status(
-                        input.session_id,
-                        cumulative_items,
-                        item_id,
-                        "processing"
-                    )
-
-                logger.info(
-                    f"[{input.session_id}] Generating audio for '{part_name}' "
-                    f"({len(text)} chars, voice: {voice})"
-                )
-
-                # Generate TTS audio using OpenAI
-                response = self.client.audio.speech.create(
-                    model="tts-1",  # Use tts-1 (faster, cheaper) or tts-1-hd (higher quality)
+            # Create tasks for all audio parts
+            audio_tasks = [
+                self._generate_single_audio(
+                    part_name=part_name,
+                    part_data=script[part_name],
                     voice=voice,
-                    input=text,
-                    response_format="mp3"
+                    session_id=input.session_id,
+                    cumulative_items=cumulative_items,
+                    part_idx=idx + 1,
+                    total_parts=total_parts
                 )
+                for idx, part_name in enumerate(required_parts)
+                if script[part_name].get("text", "")  # Only generate if text exists
+            ]
 
-                # Save to temporary file (cross-platform)
-                temp_dir = tempfile.gettempdir()
-                # Ensure temp directory exists
-                os.makedirs(temp_dir, exist_ok=True)
-                
-                filename = f"audio_{part_name}_{input.session_id}.mp3"
-                filepath = os.path.join(temp_dir, filename)
+            # Generate all audio files in parallel
+            audio_results = await asyncio.gather(*audio_tasks, return_exceptions=True)
 
-                # Write audio bytes to file
-                with open(filepath, "wb") as f:
-                    f.write(response.content)
-                
-                logger.debug(f"[{input.session_id}] Saved audio file to: {filepath}")
-
-                # Get file size for verification
-                file_size = os.path.getsize(filepath)
-
-                # Calculate cost (based on character count)
-                char_count = len(text)
-                cost = (char_count / 1_000_000) * self.COST_PER_1M_CHARS
-
-                # Estimate duration based on speaking rate (~150 words/min)
-                words = len(text.split())
-                estimated_duration = (words / 150) * 60  # seconds
-
-                audio_files.append({
-                    "part": part_name,
-                    "filepath": filepath,
-                    "url": "",  # Will be filled by orchestrator after S3 upload
-                    "duration": round(estimated_duration, 1),
-                    "cost": round(cost, 4),
-                    "character_count": char_count,
-                    "file_size": file_size,
-                    "voice": voice
-                })
-
-                total_cost += cost
-
-                logger.info(
-                    f"[{input.session_id}] Generated audio for '{part_name}': "
-                    f"{estimated_duration:.1f}s, {file_size} bytes, ${cost:.4f}"
-                )
-
-                # Update cumulative status: mark audio as completed
-                if cumulative_items:
-                    await self._update_cumulative_status(
-                        input.session_id,
-                        cumulative_items,
-                        item_id,
-                        "completed"
-                    )
-
-                # Send WebSocket update for each audio file generated (backward compatibility)
-                if self.websocket_manager and not cumulative_items:
-                    await self.websocket_manager.broadcast_status(
-                        input.session_id,
-                        status="audio_generated",
-                        progress=50 + (current_part_idx * 8),
-                        details=f"Generated audio {current_part_idx} of {total_parts}: {part_name.capitalize()}"
-                    )
+            # Process results
+            for result in audio_results:
+                if isinstance(result, Exception):
+                    logger.error(f"[{input.session_id}] Audio generation failed with exception: {result}")
+                    continue
+                elif isinstance(result, dict) and result.get("success"):
+                    audio_files.append(result["audio_data"])
+                    total_cost += result.get("cost", 0.0)
+                else:
+                    logger.warning(f"[{input.session_id}] Audio generation failed: {result.get('error', 'Unknown error')}")
 
             # Generate background music if music agents are available
             music_file = None

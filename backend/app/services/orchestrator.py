@@ -3142,19 +3142,31 @@ class VideoGenerationOrchestrator:
                 userId, sessionId, "processing",
                 {"message": "Agent2 and Agent4 completed, starting Agent5"}
             )
-            
+
+            # Load agent_4_output.json from S3 which contains both agent_2_data and agent_4_data
+            pipeline_data = None
             try:
-                # Agent5 will scan S3 folders to discover content
+                agent4_output_key = f"scaffold_test/{userId}/{sessionId}/agent4/agent_4_output.json"
+                response = self.storage_service.s3_client.get_object(
+                    Bucket=self.storage_service.bucket_name,
+                    Key=agent4_output_key
+                )
+                pipeline_data = json.loads(response['Body'].read().decode('utf-8'))
+                logger.info(f"Orchestrator loaded agent_4_output.json for Agent5: {agent4_output_key}")
+            except Exception as e:
+                logger.warning(f"Orchestrator could not load agent_4_output.json, Agent5 will scan S3: {e}")
+
+            try:
                 # Generate supersessionid for Agent5
                 agent5_supersessionid = f"{sessionId}_{secrets.token_urlsafe(12)[:16]}"
-                
+
                 agent5_result = await agent_5_process(
                     websocket_manager=None,  # Not used - using callback instead
                     user_id=userId,
                     session_id=sessionId,
                     supersessionid=agent5_supersessionid,
                     storage_service=self.storage_service,
-                    pipeline_data=None,  # Agent5 will scan S3 instead
+                    pipeline_data=pipeline_data,  # Pass combined data from agent_4_output.json
                     generation_mode="video",
                     db=db,
                     status_callback=status_callback

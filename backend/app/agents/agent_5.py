@@ -185,7 +185,7 @@ async def create_timed_narration_track(audio_file_paths: List[str], output_path:
 
     # Build ffmpeg filter_complex to place each audio at its segment start time using adelay
     filter_parts = []
-    for i, audio_path in enumerate(audio_file_paths):
+    for i in range(num_segments):
         # Calculate delay for this segment (in milliseconds)
         start_time_seconds = i * segment_duration
         delay_ms = int(start_time_seconds * 1000)
@@ -198,10 +198,10 @@ async def create_timed_narration_track(audio_file_paths: List[str], output_path:
     mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
     filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0[mixed]"
 
-    # Build ffmpeg command
+    # Build ffmpeg command with direct MP3 inputs
     cmd = ["ffmpeg", "-y"]
 
-    # Add all audio inputs
+    # Add all audio inputs (MP3 files work directly with adelay filter)
     for audio_path in audio_file_paths:
         cmd.extend(["-i", audio_path])
 
@@ -212,7 +212,7 @@ async def create_timed_narration_track(audio_file_paths: List[str], output_path:
         "-t", str(total_duration),  # Set total duration to 60s
         "-ac", "2",  # Stereo
         "-ar", "44100",  # Sample rate
-        "-c:a", "aac",  # AAC codec
+        "-c:a", "libmp3lame",  # MP3 codec
         "-b:a", "128k",  # Bitrate
         output_path
     ])
@@ -318,6 +318,63 @@ async def concatenate_all_video_clips(clip_paths: List[str], output_path: str) -
     return output_path
 
 
+async def extract_last_frame_as_base64(video_url: str) -> str:
+    """
+    Extract the last frame from a video and return it as a base64 data URI.
+
+    Args:
+        video_url: URL to the video file
+
+    Returns:
+        Base64 data URI string (data:image/png;base64,...)
+    """
+    import base64
+    import io
+    import httpx
+
+    # Download video (use long timeout for large files from Replicate)
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        response = await client.get(video_url)
+        response.raise_for_status()
+        video_bytes = response.content
+
+    # Save to temp file for FFmpeg processing
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+        temp_video.write(video_bytes)
+        temp_video_path = temp_video.name
+
+    try:
+        # Use FFmpeg to extract last frame as PNG to stdout
+        cmd = [
+            "ffmpeg",
+            "-sseof", "-3",  # Start 3 seconds from end
+            "-i", temp_video_path,
+            "-frames:v", "1",  # Extract 1 frame
+            "-f", "image2pipe",  # Output to pipe
+            "-c:v", "png",  # PNG format
+            "-"  # Output to stdout
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg frame extraction failed: {result.stderr.decode()}")
+
+        # Convert frame bytes to base64 data URI
+        frame_b64 = base64.b64encode(result.stdout).decode('utf-8')
+        data_uri = f"data:image/png;base64,{frame_b64}"
+
+        logger.info(f"Extracted last frame as base64 ({len(frame_b64)} chars)")
+        return data_uri
+
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(temp_video_path)
+        except:
+            pass
+
+
 async def combine_video_and_audio(video_path: str, audio_path: str, output_path: str) -> str:
     """
     Combine video and audio into final output file.
@@ -335,15 +392,16 @@ async def combine_video_and_audio(video_path: str, audio_path: str, output_path:
     # Combine video + audio
     # - Copy video stream (no re-encoding)
     # - Encode audio as AAC
-    # - Use shortest stream duration
+    # - Loop video to match audio duration (60s)
     cmd = [
         "ffmpeg", "-y",
+        "-stream_loop", "-1",  # Loop video indefinitely
         "-i", video_path,
         "-i", audio_path,
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
-        "-shortest",
+        "-t", "60",  # Limit to 60 seconds (matches audio duration)
         output_path
     ]
 
@@ -352,6 +410,47 @@ async def combine_video_and_audio(video_path: str, audio_path: str, output_path:
         raise RuntimeError(f"FFmpeg video+audio combination failed: {result.stderr}")
 
     return output_path
+
+
+def sanitize_video_prompt(prompt: str) -> str:
+    """
+    Sanitize video prompt to prevent text, numbers, equations, and math from appearing.
+
+    Best practices for Minimax video-01:
+    - Remove mentions of text, equations, formulas, numbers, labels
+    - Focus on visual, physical elements only
+    - Keep prompts concise and action-focused
+
+    Args:
+        prompt: Original visual prompt
+
+    Returns:
+        Sanitized prompt focused on pure visual elements
+    """
+    import re
+
+    # Keywords that might trigger text/math generation
+    text_keywords = [
+        r'\btext\b', r'\blabel\b', r'\bequation\b', r'\bformula\b', r'\bnumber\b',
+        r'\bwriting\b', r'\bwritten\b', r'\bdiagram\b', r'\bchart\b', r'\bgraph\b',
+        r'\bmath\b', r'\bcalculation\b', r'\bsymbol\b', r'\bnotation\b',
+        r'\boverlay\b', r'\bcaption\b', r'\btitle\b', r'\bsubtitle\b',
+        r'\bword\b', r'\bletter\b', r'\bcharacter\b', r'\bfigure\b'
+    ]
+
+    # Remove text-triggering keywords (case-insensitive)
+    sanitized = prompt
+    for keyword in text_keywords:
+        sanitized = re.sub(keyword, '', sanitized, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+
+    # Add anti-text prefix if not already present
+    if 'NO TEXT' not in sanitized.upper() and 'CLEAN VISUAL' not in sanitized.upper():
+        sanitized = f"CLEAN VISUAL ANIMATION, NO TEXT, NO NUMBERS: {sanitized}"
+
+    return sanitized
 
 
 async def agent_5_process(
@@ -496,10 +595,21 @@ async def agent_5_process(
                 loaded_agent_2_data = json.loads(content)
                 logger.info(f"Agent5 loaded agent_2_data.json from {agent_2_data_key}")
 
-                # Extract script and base_scene from agent_2_data
+                # Extract script and storyboard from agent_2_data
                 if loaded_agent_2_data.get("script"):
                     script = loaded_agent_2_data["script"]
-                    logger.info("Agent5 extracted script from agent_2_data.json")
+                    logger.info("[AGENT5 TRACE] Extracted script from agent_2_data.json")
+                    for part_name in ["hook", "concept", "process", "conclusion"]:
+                        if part_name in script and isinstance(script[part_name], dict):
+                            text_preview = script[part_name].get("text", "")[:100] if script[part_name].get("text") else "(empty)"
+                            logger.info(f"[AGENT5 TRACE] script['{part_name}'] text preview: {text_preview}")
+                            visual_preview = script[part_name].get("visual_guidance", "")[:100] if script[part_name].get("visual_guidance") else "(empty)"
+                            logger.info(f"[AGENT5 TRACE] script['{part_name}'] visual_guidance preview: {visual_preview}")
+
+                # Extract storyboard from agent_2_data (replaces storyboard.json)
+                if loaded_agent_2_data.get("storyboard"):
+                    storyboard = loaded_agent_2_data["storyboard"]
+                    logger.info(f"[AGENT5 TRACE] Extracted storyboard from agent_2_data.json with {len(storyboard.get('segments', []))} segments")
 
                 # Store agent_2_data for later use
                 agent_2_data = loaded_agent_2_data
@@ -555,7 +665,13 @@ async def agent_5_process(
                                 }
                         if script_parts:
                             script = script_parts
-                            logger.info("Agent5 extracted script from storyboard.json")
+                            logger.info("[AGENT5 TRACE] Extracted script from storyboard.json")
+                            for part_name in ["hook", "concept", "process", "conclusion"]:
+                                if part_name in script:
+                                    text_preview = script[part_name].get("text", "")[:100] if script[part_name].get("text") else "(empty)"
+                                    logger.info(f"[AGENT5 TRACE] script['{part_name}'] text preview: {text_preview}")
+                                    visual_preview = script[part_name].get("visual_guidance", "")[:100] if script[part_name].get("visual_guidance") else "(empty)"
+                                    logger.info(f"[AGENT5 TRACE] script['{part_name}'] visual_guidance preview: {visual_preview}")
                 except Exception as e:
                     logger.debug(f"Agent5 could not load storyboard.json: {e}, will try other sources")
             
@@ -691,9 +807,9 @@ async def agent_5_process(
             
             # Log storyboard status
             if storyboard:
-                logger.info(f"Agent5 loaded storyboard.json with {len(storyboard.get('segments', []))} segments")
+                logger.info(f"Agent5 loaded storyboard with {len(storyboard.get('segments', []))} segments")
             else:
-                logger.info("Agent5 did not find storyboard.json, using script data only")
+                logger.info("Agent5 did not find storyboard, using script data only")
                 
         except Exception as e:
             logger.error(f"Agent5 failed to scan S3 folders: {e}")
@@ -702,14 +818,27 @@ async def agent_5_process(
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
 
-        # Build visual prompts for each section
+        # Build visual prompts and segment durations for each section
         sections = ["hook", "concept", "process", "conclusion"]
         visual_prompts = {}  # Store prompts for parallel generation
+        segment_durations = {}  # Store segment durations (in seconds)
 
         for part in sections:
             # Get section data and visual prompt
             section_data = script.get(part, {})
-            visual_prompt = section_data.get("visual_prompt", "")
+            # Check for both visual_prompt and visual_guidance (Agent 2 uses visual_guidance)
+            visual_prompt = section_data.get("visual_prompt", "") or section_data.get("visual_guidance", "")
+
+            # Debug logging for prompt verification
+            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - section_data keys: {list(section_data.keys())}")
+            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - visual_prompt from script: '{visual_prompt[:100] if visual_prompt else '(empty)'}'")
+            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - duration from script: {section_data.get('duration', '(not set)')}")
+
+            # Also log text and visual_guidance if present
+            if "text" in section_data:
+                logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - text preview: {section_data['text'][:100] if section_data['text'] else '(empty)'}")
+            if "visual_guidance" in section_data:
+                logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - visual_guidance: {section_data['visual_guidance'][:100] if section_data['visual_guidance'] else '(empty)'}")
 
             # If storyboard is available, try to get enhanced data from it
             if storyboard and storyboard.get("segments"):
@@ -729,9 +858,13 @@ async def agent_5_process(
                         None
                     )
                     if storyboard_segment:
+                        logger.info(f"[VISUAL PROMPT TRACE] Found storyboard segment for '{part}': {segment_type}")
                         # Use visual_guidance from storyboard if available
-                        if storyboard_segment.get("visual_guidance") and not visual_prompt:
-                            visual_prompt = storyboard_segment.get("visual_guidance")
+                        storyboard_visual = storyboard_segment.get("visual_guidance", "")
+                        logger.info(f"[VISUAL PROMPT TRACE] Storyboard visual_guidance for '{part}': {storyboard_visual[:100] if storyboard_visual else '(empty)'}")
+                        if storyboard_visual and not visual_prompt:
+                            visual_prompt = storyboard_visual
+                            logger.info(f"[VISUAL PROMPT TRACE] Using storyboard visual_guidance as visual_prompt for '{part}'")
                         # Use key_concepts from storyboard if available
                         if storyboard_segment.get("key_concepts") and not section_data.get("key_concepts"):
                             section_data["key_concepts"] = storyboard_segment.get("key_concepts")
@@ -746,8 +879,23 @@ async def agent_5_process(
 
             visual_prompts[part] = visual_prompt
 
-            # Log the visual prompt for verification
+            # Store segment duration (from storyboard or script, with defaults)
+            duration_str = section_data.get("duration")
+            if duration_str:
+                try:
+                    segment_durations[part] = float(duration_str)
+                except (ValueError, TypeError):
+                    # Fallback to defaults if duration is invalid
+                    default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
+                    segment_durations[part] = default_durations.get(part, 15.0)
+            else:
+                # Use default segment durations from segments.md
+                default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
+                segment_durations[part] = default_durations.get(part, 15.0)
+
+            # Log the visual prompt and duration for verification
             logger.info(f"[{session_id}] Section '{part}' visual prompt: {visual_prompt[:100]}...")
+            logger.info(f"[{session_id}] Section '{part}' duration: {segment_durations[part]}s")
 
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
@@ -765,20 +913,14 @@ async def agent_5_process(
         MAX_CONCURRENT_REPLICATE_CALLS = 4
         replicate_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPLICATE_CALLS)
 
-        # Calculate clips needed per section based on audio file durations
+        # Calculate clips needed per section based on segment durations
         clips_per_section = {}
-        for audio_file in audio_files:
-            part = audio_file.get("part", "")
-            if part in sections:
-                # Get duration from audio file (default to 5.0 if not specified)
-                audio_duration = float(audio_file.get("duration", 5.0))
-                clips_needed = max(1, math.ceil(audio_duration / CLIP_DURATION))
-                clips_per_section[part] = clips_needed
-        
-        # Ensure all sections have at least 1 clip
         for section in sections:
-            if section not in clips_per_section:
-                clips_per_section[section] = 1
+            # Use segment duration (from storyboard/script or defaults)
+            segment_duration = segment_durations[section]
+            clips_needed = max(1, math.ceil(segment_duration / CLIP_DURATION))
+            clips_per_section[section] = clips_needed
+            logger.info(f"[{session_id}] Section '{section}': {segment_duration}s → {clips_needed} clips ({CLIP_DURATION}s each)")
 
         total_clips = sum(clips_per_section.values())
         
@@ -806,36 +948,52 @@ async def agent_5_process(
             teacher_desc = base_scene.get("teacher", "")
             students_desc = base_scene.get("students", "")
 
-            # Build consistency anchor
+            # Sanitize the base prompt to remove text-triggering keywords
+            prompt_sanitized = sanitize_video_prompt(prompt)
+            logger.info(f"[{session_id}] Original prompt for '{section}': {prompt[:150]}")
+            logger.info(f"[{session_id}] Sanitized prompt for '{section}': {prompt_sanitized[:150]}")
+
+            # Build consistency anchor (keep visual-only elements)
             consistency_anchor = ""
             if style or setting or teacher_desc or students_desc:
                 consistency_parts = []
                 if style:
-                    consistency_parts.append(style)
+                    # Sanitize style to remove any text references
+                    style_sanitized = sanitize_video_prompt(style)
+                    consistency_parts.append(style_sanitized)
                 if setting:
-                    consistency_parts.append(f"Setting: {setting}")
+                    # Sanitize setting
+                    setting_sanitized = sanitize_video_prompt(setting)
+                    # Limit setting length to avoid overly long prompts
+                    setting_words = setting_sanitized.split()[:30]  # Max 30 words for setting
+                    consistency_parts.append(f"Setting: {' '.join(setting_words)}")
                 if teacher_desc:
-                    consistency_parts.append(f"Teacher: {teacher_desc}")
+                    # Keep teacher description concise and visual-only
+                    teacher_words = teacher_desc.split()[:20]  # Max 20 words
+                    consistency_parts.append(f"Teacher: {' '.join(teacher_words)}")
                 if students_desc:
-                    consistency_parts.append(f"Students: {students_desc}")
+                    # Keep students description concise
+                    students_words = students_desc.split()[:20]  # Max 20 words
+                    consistency_parts.append(f"Students: {' '.join(students_words)}")
                 consistency_anchor = " | ".join(consistency_parts) + " | "
 
             # Generate progressive prompts for each clip position
+            # Keep prompts concise - Minimax works best with shorter, focused prompts
             clip_prompts = []
             for i in range(clips_needed):
                 # Create clip-specific temporal and action cues based on position
                 if clips_needed == 1:
-                    # Single clip: use full prompt as-is
-                    clip_prompt = f"{consistency_anchor}{prompt}, smooth cinematic movement, maintaining consistent visual style throughout"
+                    # Single clip: use sanitized prompt with visual-only modifiers
+                    clip_prompt = f"{consistency_anchor}{prompt_sanitized}, smooth cinematic movement, clean animation"
                 elif i == 0:
-                    # First clip: Opening/beginning of action
-                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt}, camera slowly pushes in, characters beginning action, establishing shot with clear framing"
+                    # First clip: Opening/beginning of action (keep concise)
+                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt_sanitized}, camera slowly pushes in, characters beginning action, clean visual composition"
                 elif i == clips_needed - 1:
-                    # Final clip: Conclusion of action
-                    clip_prompt = f"{consistency_anchor}CONTINUING FINAL SHOT: {prompt}, camera holds steady from previous angle, characters completing action, maintaining exact same composition and lighting as previous clip"
+                    # Final clip: Conclusion of action (keep concise)
+                    clip_prompt = f"{consistency_anchor}FINAL SHOT: {prompt_sanitized}, camera holds steady, characters completing action, same composition as previous clip"
                 else:
-                    # Middle clips: Progression of action
-                    clip_prompt = f"{consistency_anchor}MID-SEQUENCE SHOT {i+1}: {prompt}, camera maintains previous angle and framing, characters mid-action, same positioning and lighting"
+                    # Middle clips: Progression of action (keep concise)
+                    clip_prompt = f"{consistency_anchor}SHOT {i+1}: {prompt_sanitized}, camera maintains angle, characters mid-action, continuous motion"
 
                 clip_prompts.append(clip_prompt)
 
@@ -847,28 +1005,39 @@ async def agent_5_process(
 
             logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
 
-            # Generate all clips for this section with same seed (with rate limiting)
-            async def generate_clip_with_rate_limit(clip_prompt, seed_val):
-                """Generate a clip with rate limiting."""
-                async with replicate_semaphore:
-                    return await generate_video_replicate(
-                        clip_prompt,
-                        settings.REPLICATE_API_KEY,
-                        model="minimax",
-                        seed=seed_val
-                    )
-            
-            clip_tasks = []
-            for clip_idx, clip_prompt in enumerate(clip_prompts):
-                clip_tasks.append(
-                    generate_clip_with_rate_limit(
-                        clip_prompt,
-                        section_seed  # Same seed for all clips in this section
-                    )
-                )
+            # Generate clips sequentially with continuity (image-to-video for clips 2+)
+            generated_clips = []
+            previous_clip_url = None
 
-            # Generate all clips for this section (rate limited)
-            generated_clips = await asyncio.gather(*clip_tasks)
+            for clip_idx, clip_prompt in enumerate(clip_prompts):
+                async with replicate_semaphore:
+                    if clip_idx == 0:
+                        # First clip: text-to-video
+                        logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (text-to-video)")
+                        clip_url = await generate_video_replicate(
+                            clip_prompt,
+                            settings.REPLICATE_API_KEY,
+                            model="minimax",
+                            seed=section_seed
+                        )
+                    else:
+                        # Subsequent clips: extract last frame from previous clip, then image-to-video
+                        logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (image-to-video with continuity)")
+
+                        # Extract last frame as base64 from previous clip
+                        frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
+
+                        # Generate next clip from the frame
+                        service = ReplicateVideoService(settings.REPLICATE_API_KEY)
+                        clip_url = await service.generate_video_from_image(
+                            prompt=clip_prompt,
+                            image_url=frame_data_uri,
+                            model="minimax",
+                            seed=section_seed
+                        )
+
+                    generated_clips.append(clip_url)
+                    previous_clip_url = clip_url
 
             # Calculate cost for this section
             section_cost = len(generated_clips) * COST_PER_CLIP
