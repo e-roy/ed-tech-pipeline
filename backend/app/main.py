@@ -864,7 +864,7 @@ async def restart_agent5_concat(request: RestartAgent5Request, db: Session = Dep
     # Verify clips exist in S3 before starting
     try:
         sections = ["hook", "concept", "process", "conclusion"]
-        agent5_prefix = f"{request.userID}/{request.sessionID}/agent5/"
+        agent5_prefix = f"users/{request.userID}/{request.sessionID}/agent5/"
         
         missing_clips = []
         for section in sections:

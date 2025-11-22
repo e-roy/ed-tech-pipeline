@@ -199,8 +199,8 @@ async def agent_4_process(
 
         timestamp = int(time.time() * 1000)  # Milliseconds timestamp
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        # Use {userId}/{sessionId}/agent4/ path
-        s3_key = f"{user_id}/{session_id}/agent4/{filename}"
+        # Use users/{userId}/{sessionId}/agent4/ path
+        s3_key = f"users/{user_id}/{session_id}/agent4/{filename}"
 
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -320,8 +320,8 @@ async def agent_4_process(
         if result_data.get("audio_files"):
             for audio_file in result_data["audio_files"]:
                 if audio_file.get("filepath") and audio_file["part"] != "music":
-                    # Upload to S3 - use {userId}/{sessionId}/agent4/ path
-                    s3_key = f"{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
+                    # Upload to S3 - use users/{userId}/{sessionId}/agent4/ path
+                    s3_key = f"users/{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
                     try:
                         with open(audio_file["filepath"], "rb") as f:
                             storage_service.s3_client.put_object(
