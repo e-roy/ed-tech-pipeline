@@ -171,7 +171,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile, mounted } = useSidebar()
 
   if (collapsible === "none") {
     return (
@@ -188,7 +188,9 @@ function Sidebar({
     )
   }
 
-  if (isMobile) {
+  // Only check isMobile after mounting to avoid hydration mismatch
+  // Server always renders desktop version, then client switches if needed
+  if (mounted && isMobile) {
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
