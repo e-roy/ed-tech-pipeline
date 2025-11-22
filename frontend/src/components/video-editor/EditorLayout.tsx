@@ -6,6 +6,7 @@ import { MediaBin } from './MediaBin';
 import { PreviewPlayer } from './PreviewPlayer';
 import { Timeline } from './Timeline';
 import { PropertiesPanel } from './PropertiesPanel';
+import { EditorSidebar } from './EditorSidebar';
 import { useEditorStore } from '@/stores/editorStore';
 import { useEffect } from 'react';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -69,11 +70,16 @@ export function EditorLayout({ sessionId, videoUrl }: EditorLayoutProps) {
   return (
     <Box
       sx={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
         bgcolor: 'background.default',
         color: 'text.primary',
+        zIndex: 1200, // Above most MUI components
       }}
     >
       {/* Top Toolbar */}
@@ -81,6 +87,9 @@ export function EditorLayout({ sessionId, videoUrl }: EditorLayoutProps) {
 
       {/* Main Content */}
       <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Left: Navigation Sidebar */}
+        <EditorSidebar />
+
         {/* Left: Media Bin (280px) */}
         <Box sx={{ width: 280, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
           <MediaBin sessionId={sessionId} />
@@ -101,7 +110,7 @@ export function EditorLayout({ sessionId, videoUrl }: EditorLayoutProps) {
 
         {/* Right: Properties (300px) */}
         {propertiesPanelOpen && (
-          <Box sx={{ width: 300, borderLeft: 1, borderColor: 'divider' }}>
+          <Box sx={{ width: 300, borderLeft: 1, borderColor: 'divider', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <PropertiesPanel />
           </Box>
         )}
