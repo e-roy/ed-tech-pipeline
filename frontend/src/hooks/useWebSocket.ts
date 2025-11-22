@@ -3,7 +3,36 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { type ProgressUpdate } from "@/types";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
+// Get the WebSocket URL from environment or construct from API URL
+const getWebSocketUrl = () => {
+  // If explicitly set, use it
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    const url = process.env.NEXT_PUBLIC_WS_URL;
+    // Ensure it uses wss:// for non-localhost URLs
+    if (
+      !url.includes("localhost") &&
+      !url.includes("127.0.0.1") &&
+      url.startsWith("ws://")
+    ) {
+      return url.replace("ws://", "wss://");
+    }
+    return url;
+  }
+
+  // Otherwise construct from NEXT_PUBLIC_API_URL or use localhost
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+  // Convert http(s):// to ws(s)://
+  if (apiUrl.startsWith("https://")) {
+    return apiUrl.replace("https://", "wss://");
+  } else if (apiUrl.startsWith("http://")) {
+    return apiUrl.replace("http://", "ws://");
+  }
+
+  return "ws://localhost:8000";
+};
+
+const WS_URL = getWebSocketUrl();
 
 export function useWebSocket(sessionId: string | null) {
   const [isConnected, setIsConnected] = useState(false);
@@ -27,12 +56,15 @@ export function useWebSocket(sessionId: string | null) {
       // Use query parameter format for API Gateway compatibility
       // Format: wss://gateway-url/prod?session_id=xxx
       // Backend supports both: /ws/{session_id} (path) and /ws?session_id=xxx (query)
-      const wsUrl = WS_URL.includes('execute-api') 
-        ? `${WS_URL}?session_id=${sessionId}`  // API Gateway format
-        : `${WS_URL}/ws/${sessionId}`;          // Direct connection format
+      const wsUrl = WS_URL.includes("execute-api")
+        ? `${WS_URL}?session_id=${sessionId}` // API Gateway format
+        : `${WS_URL}/ws/${sessionId}`; // Direct connection format
+
+      console.log("[WebSocket] Attempting to connect to:", wsUrl);
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        console.log("[WebSocket] Connected successfully");
         setIsConnected(true);
         reconnectAttempts.current = 0; // Reset on successful connection
       };
@@ -42,18 +74,33 @@ export function useWebSocket(sessionId: string | null) {
           const messageData =
             typeof event.data === "string" ? event.data : String(event.data);
           const data = JSON.parse(messageData) as ProgressUpdate;
+          console.log(
+            "[WebSocket] Message received:",
+            data.stage,
+            `${data.progress}%`,
+          );
           setLastMessage(data);
         } catch (error) {
-          console.error("Failed to parse WebSocket message:", error);
+          console.error("[WebSocket] Failed to parse message:", error);
         }
       };
 
       ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
+        console.error("[WebSocket] Connection error:", error);
+        console.error(
+          "[WebSocket] Check that:",
+          "\n1. Backend WebSocket server is running",
+          "\n2. WebSocket URL is correct:",
+          wsUrl,
+          "\n3. Backend allows CORS from your origin",
+        );
         setIsConnected(false);
       };
 
       ws.onclose = (event) => {
+        console.log(
+          `[WebSocket] Connection closed. Code: ${event.code}, Reason: ${event.reason || "No reason provided"}`,
+        );
         setIsConnected(false);
 
         // Attempt to reconnect if not a normal closure and we haven't exceeded max attempts
@@ -67,15 +114,24 @@ export function useWebSocket(sessionId: string | null) {
             30000,
           ); // Exponential backoff, max 30s
 
+          console.log(
+            `[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`,
+          );
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
           }, delay);
+        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+          console.error(
+            "[WebSocket] Max reconnection attempts reached. Giving up.",
+          );
         }
       };
 
       wsRef.current = ws;
     } catch (error) {
-      console.error("Failed to create WebSocket connection:", error);
+      console.error("[WebSocket] Failed to create connection:", error);
+      console.error("[WebSocket] Session ID:", sessionId);
+      console.error("[WebSocket] Base URL:", WS_URL);
       setIsConnected(false);
     }
   }, [sessionId]);

@@ -20,7 +20,11 @@ export function DashboardLayoutClient({
   return (
     <SidebarInset className="flex-1">
       {showDoublePanel ? (
-        <ResizablePanelGroup direction="horizontal" className="h-full">
+        <ResizablePanelGroup
+          id="dashboard-layout-panels"
+          direction="horizontal"
+          className="h-full"
+        >
           <ResizablePanel defaultSize={20} minSize={20}>
             <ChatPreview />
           </ResizablePanel>

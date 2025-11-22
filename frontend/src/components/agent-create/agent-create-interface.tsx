@@ -4,7 +4,6 @@ import type { FileUIPart } from "ai";
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
 import {
   PromptInput,
@@ -34,9 +33,13 @@ import {
 } from "@/components/ui/resizable";
 import { useAgentCreateStore } from "@/stores/agent-create-store";
 import { ScriptGenerationChainOfThought } from "@/components/generation/ScriptGenerationChainOfThought";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { api } from "@/trpc/react";
 
 type AgentCreateInterfaceProps = {
   /**
@@ -66,7 +69,100 @@ export function AgentCreateInterface({
     reset,
     setSessionId,
     loadSession,
+    facts,
+    selectedFacts,
+    narration,
+    childAge,
+    childInterest,
+    showFactSelectionPrompt,
+    showNarrationReviewPrompt,
+    handleSubmitFacts,
+    setIsVideoGenerating,
   } = useAgentCreateStore();
+
+  // Video generation state
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [videoSuccess, setVideoSuccess] = useState(false);
+
+  // tRPC mutation for video approval
+  const approveMutation = api.script.approve.useMutation({
+    onSuccess: () => {
+      setIsGeneratingVideo(false);
+      setVideoSuccess(true);
+      setVideoError(null);
+      setIsVideoGenerating(true); // Enable WebSocket connection
+
+      // Add success message to chat
+      const successMessage = {
+        role: "assistant" as const,
+        content:
+          "🎉 Video generation started! Your video is being created and will be ready soon. You can check the status in your dashboard.",
+        id: Date.now().toString(),
+      };
+      const store = useAgentCreateStore.getState();
+      store.addMessage(successMessage);
+    },
+    onError: (error) => {
+      setIsGeneratingVideo(false);
+      setVideoError(error.message);
+      setIsVideoGenerating(false); // Disable WebSocket connection
+
+      // Add error message to chat
+      const errorMessage = {
+        role: "assistant" as const,
+        content: `❌ Failed to start video generation: ${error.message}. Please try again.`,
+        id: Date.now().toString(),
+      };
+      const store = useAgentCreateStore.getState();
+      store.addMessage(errorMessage);
+    },
+  });
+
+  // Handler for video creation
+  const handleSubmitVideo = async () => {
+    if (!narration || !selectedFacts || !storeSessionId) {
+      setVideoError("Missing required data for video generation");
+      return;
+    }
+
+    setIsGeneratingVideo(true);
+    setVideoError(null);
+    setVideoSuccess(false);
+
+    // Calculate cost and duration from narration
+    const cost = 0; // You may want to calculate this based on your pricing
+    const duration = narration.total_duration || 60;
+
+    // Add user message confirming video generation
+    const confirmMessage = {
+      role: "user" as const,
+      content: "Start generating the video",
+      id: Date.now().toString(),
+    };
+    const store = useAgentCreateStore.getState();
+    store.addMessage(confirmMessage);
+
+    // Prepare facts for the API
+    const factsForApi = selectedFacts.map((f) => ({
+      concept: f.concept,
+      details: f.details,
+    }));
+
+    try {
+      await approveMutation.mutateAsync({
+        script: narration,
+        topic: factsForApi[0]?.concept ?? "Educational Content",
+        facts: factsForApi,
+        cost,
+        duration,
+        sessionId: storeSessionId,
+      });
+    } catch (error) {
+      // Error is handled in onError callback
+      console.error("Video generation error:", error);
+    }
+  };
 
   // Load session data on mount if externalSessionId is provided
   useEffect(() => {
@@ -88,7 +184,11 @@ export function AgentCreateInterface({
 
   return (
     <div className="flex h-full w-full flex-col">
-      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+      <ResizablePanelGroup
+        id="agent-create-panels"
+        direction="horizontal"
+        className="h-full min-h-0"
+      >
         {/* Chat Panel */}
         <ResizablePanel defaultSize={40} minSize={30} className="flex flex-col">
           <div className="bg-background flex h-full min-h-0 flex-col border-r">
@@ -116,11 +216,65 @@ export function AgentCreateInterface({
             <Conversation className="min-h-0 flex-1">
               <ConversationContent className="flex min-h-full flex-col">
                 {messages.length === 0 ? (
-                  <ConversationEmptyState
-                    title="Start your story"
-                    description="Tell me a story or provide information to generate a narration."
-                    className="flex-1"
-                  />
+                  <div className="flex flex-1 flex-col items-center justify-center p-8">
+                    <Message from="assistant">
+                      <MessageContent>
+                        <div className="space-y-4">
+                          <div>
+                            <h3 className="mb-2 text-lg font-semibold">
+                              Create a Personalized Educational Video
+                            </h3>
+                            <p className="text-muted-foreground text-sm">
+                              I&apos;ll help you create an engaging biology
+                              video for your student. You can share lesson
+                              materials to get started, or tell me about your
+                              student&apos;s age and interests for
+                              personalization.
+                            </p>
+                          </div>
+                          <Suggestions>
+                            <Suggestion
+                              suggestion="Tell me about the student"
+                              onClick={() => {
+                                const textarea = document.querySelector(
+                                  'textarea[placeholder*="Tell me about"]',
+                                );
+                                if (textarea instanceof HTMLTextAreaElement) {
+                                  textarea.value =
+                                    "My student is __ years old and loves ___";
+                                  textarea.focus();
+                                  // Move cursor to first blank
+                                  textarea.setSelectionRange(14, 16);
+                                }
+                              }}
+                            />
+                            <Suggestion
+                              suggestion="Upload lesson PDF"
+                              onClick={() => {
+                                const fileInput = document.querySelector(
+                                  'input[type="file"][accept*="pdf"]',
+                                );
+                                if (fileInput instanceof HTMLInputElement) {
+                                  fileInput.click();
+                                }
+                              }}
+                            />
+                            <Suggestion
+                              suggestion="Paste lesson text"
+                              onClick={() => {
+                                const textarea = document.querySelector(
+                                  'textarea[placeholder*="Tell me about"]',
+                                );
+                                if (textarea instanceof HTMLTextAreaElement) {
+                                  textarea.focus();
+                                }
+                              }}
+                            />
+                          </Suggestions>
+                        </div>
+                      </MessageContent>
+                    </Message>
+                  </div>
                 ) : (
                   <>
                     {messages.map((message, i) => {
@@ -144,8 +298,8 @@ export function AgentCreateInterface({
                         }
                       }
 
-                      const files: FileUIPart[] =
-                        (message.files as FileUIPart[] | undefined) ?? [];
+                      const files = (message.files ??
+                        []) as unknown as FileUIPart[];
                       const hasFiles = files.length > 0;
 
                       return (
@@ -177,13 +331,162 @@ export function AgentCreateInterface({
                         </Message>
                       );
                     })}
+                    {showFactSelectionPrompt && facts.length > 0 && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          <div className="space-y-3">
+                            <p>
+                              I&apos;ve found {facts.length} key facts. Please
+                              review them on the right and select the ones
+                              you&apos;d like to focus on for the video.
+                            </p>
+                            {selectedFacts.length > 0 && (
+                              <Alert className="bg-primary/10">
+                                <AlertDescription>
+                                  <div className="flex w-full items-center justify-between">
+                                    <span className="text-sm font-medium">
+                                      {selectedFacts.length} fact
+                                      {selectedFacts.length !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      selected
+                                    </span>
+                                    <Button
+                                      onClick={handleSubmitFacts}
+                                      size="sm"
+                                      disabled={isLoading}
+                                    >
+                                      Create Narration
+                                    </Button>
+                                  </div>
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                          </div>
+                        </MessageContent>
+                      </Message>
+                    )}
+                    {showNarrationReviewPrompt && narration && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          <div className="space-y-3">
+                            <p>
+                              I&apos;ve created your narration script!
+                              Here&apos;s a summary:
+                            </p>
+                            <div className="bg-muted rounded-lg p-3 text-sm">
+                              <div className="flex flex-wrap gap-4">
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Duration:
+                                  </span>{" "}
+                                  {narration.total_duration}s
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Segments:
+                                  </span>{" "}
+                                  {narration.segments.length}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Reading Level:
+                                  </span>{" "}
+                                  {narration.reading_level}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Key Terms:
+                                  </span>{" "}
+                                  {narration.key_terms_count}
+                                </div>
+                              </div>
+                            </div>
+                            <p className="text-muted-foreground text-sm">
+                              You can review and edit the script on the right.
+                              When you&apos;re ready, you can proceed to
+                              generate the video.
+                            </p>
+
+                            <Alert className="bg-primary/10">
+                              <AlertDescription>
+                                <div className="flex w-full items-center justify-between">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-sm font-medium">
+                                      {selectedFacts.length} fact
+                                      {selectedFacts.length !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      selected
+                                    </span>
+                                    {videoSuccess && (
+                                      <span className="text-xs text-green-600">
+                                        ✓ Video generation started!
+                                      </span>
+                                    )}
+                                    {videoError && (
+                                      <span className="text-xs text-red-600">
+                                        ✗ {videoError}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <Button
+                                    onClick={handleSubmitVideo}
+                                    size="sm"
+                                    disabled={
+                                      isLoading ||
+                                      isGeneratingVideo ||
+                                      !storeSessionId
+                                    }
+                                  >
+                                    {isGeneratingVideo ? (
+                                      <>
+                                        <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                        Generating...
+                                      </>
+                                    ) : videoSuccess ? (
+                                      "✓ Video Started"
+                                    ) : (
+                                      "Create Video"
+                                    )}
+                                  </Button>
+                                </div>
+                              </AlertDescription>
+                            </Alert>
+                          </div>
+                        </MessageContent>
+                      </Message>
+                    )}
+                    {isGeneratingVideo && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          <div className="flex items-center gap-3">
+                            <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
+                            <p>
+                              Starting video generation... This may take a few
+                              minutes.
+                            </p>
+                          </div>
+                        </MessageContent>
+                      </Message>
+                    )}
                     {thinkingStatus && (
                       <Message from="assistant">
                         <MessageContent>
-                          <ScriptGenerationChainOfThought
-                            isVisible={true}
-                            operation={thinkingStatus.operation}
-                          />
+                          <div className="space-y-3">
+                            <ScriptGenerationChainOfThought
+                              isVisible={true}
+                              operation={thinkingStatus.operation}
+                            />
+                            {childAge && childInterest && (
+                              <div className="flex items-center justify-center">
+                                <Badge variant="secondary" className="text-xs">
+                                  Personalizing for {childAge}-year-old
+                                  interested in {childInterest}
+                                </Badge>
+                              </div>
+                            )}
+                          </div>
                         </MessageContent>
                       </Message>
                     )}
@@ -210,8 +513,8 @@ export function AgentCreateInterface({
                   <PromptInputTextarea
                     placeholder={
                       workflowStep === "selection"
-                        ? "Select facts on the right and click Submit..."
-                        : "Tell me a story or attach a PDF..."
+                        ? "Review and select facts on the right, then click Submit..."
+                        : "Tell me about your student, or share lesson materials..."
                     }
                     disabled={workflowStep === "selection"}
                   />
