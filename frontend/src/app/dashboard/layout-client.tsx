@@ -32,7 +32,7 @@ export function DashboardLayoutClient({
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
-        <div className="">
+        <div className="h-full overflow-hidden">
           <div className="flex h-full flex-col">{children}</div>
         </div>
       )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Sequence, Video, useVideoConfig } from 'remotion';
+import { Sequence, OffthreadVideo, useVideoConfig } from 'remotion';
 import { type MediaFile } from '@/stores/editorStore';
 
 interface VideoSequenceProps {
@@ -25,7 +25,7 @@ export function VideoSequence({ media, fps }: VideoSequenceProps) {
 
   return (
     <Sequence from={from} durationInFrames={durationInFrames}>
-      <Video
+      <OffthreadVideo
         src={media.src}
         startFrom={startFrom}
         endAt={endAt}
@@ -40,6 +40,9 @@ export function VideoSequence({ media, fps }: VideoSequenceProps) {
           opacity,
           transform: rotation ? `rotate(${rotation}deg)` : undefined,
           objectFit: 'contain',
+        }}
+        onError={(error) => {
+          console.error('[VideoSequence] Video playback error:', error);
         }}
       />
     </Sequence>
