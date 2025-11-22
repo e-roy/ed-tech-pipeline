@@ -1,28 +1,39 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useEditorStore, selectCanUndo, selectCanRedo } from '@/stores/editorStore';
+import { useEditorStore } from '@/stores/editorStore';
 
 export function useKeyboardShortcuts() {
-  const togglePlayPause = useEditorStore((state) => state.togglePlayPause);
-  const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
-  const currentTime = useEditorStore((state) => state.currentTime);
-  const duration = useEditorStore((state) => state.duration);
-  const undo = useEditorStore((state) => state.undo);
-  const redo = useEditorStore((state) => state.redo);
-  const copy = useEditorStore((state) => state.copy);
-  const cut = useEditorStore((state) => state.cut);
-  const paste = useEditorStore((state) => state.paste);
-  const deleteSelected = useEditorStore((state) => state.deleteSelected);
-  const selectAll = useEditorStore((state) => state.selectAll);
-  const selectedIds = useEditorStore((state) => state.selectedIds);
-  const splitMedia = useEditorStore((state) => state.splitMedia);
-  const canUndo = useEditorStore(selectCanUndo);
-  const canRedo = useEditorStore(selectCanRedo);
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      // Get current state from store
+      const state = useEditorStore.getState();
+      const {
+        togglePlayPause,
+        setCurrentTime,
+        currentTime,
+        duration,
+        undo,
+        redo,
+        copy,
+        cut,
+        paste,
+        deleteSelected,
+        selectAll,
+        selectedIds,
+        splitMedia,
+        zoomIn,
+        zoomOut,
+        zoomToFit,
+        setIsPlaying,
+        historyIndex,
+        history,
+      } = state;
+
+      const canUndo = historyIndex > 0;
+      const canRedo = historyIndex < history.length - 1;
 
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifier = isMac ? e.metaKey : e.ctrlKey;
@@ -58,11 +69,16 @@ export function useKeyboardShortcuts() {
 
       // J/K/L - Playback control
       if (e.code === 'KeyJ') { e.preventDefault(); setCurrentTime(Math.max(0, currentTime - 5)); return; }
-      if (e.code === 'KeyK') { e.preventDefault(); useEditorStore.getState().setIsPlaying(false); return; }
+      if (e.code === 'KeyK') { e.preventDefault(); setIsPlaying(false); return; }
       if (e.code === 'KeyL') { e.preventDefault(); setCurrentTime(Math.min(duration, currentTime + 5)); return; }
+
+      // Zoom controls - Ctrl/Cmd + =/-/0
+      if (modifier && (e.code === 'Equal' || e.code === 'NumpadAdd')) { e.preventDefault(); zoomIn(); return; }
+      if (modifier && (e.code === 'Minus' || e.code === 'NumpadSubtract')) { e.preventDefault(); zoomOut(); return; }
+      if (modifier && (e.code === 'Digit0' || e.code === 'Numpad0')) { e.preventDefault(); zoomToFit(); return; }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlayPause, setCurrentTime, currentTime, duration, undo, redo, copy, cut, paste, deleteSelected, selectAll, selectedIds, splitMedia, canUndo, canRedo]);
+  }, []);
 }

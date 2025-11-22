@@ -24,6 +24,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Tooltip,
@@ -93,7 +94,7 @@ export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar> & { user: User }) {
   const pathname = usePathname();
-
+  const { mounted } = useSidebar();
   const queryResult = api.script.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
@@ -105,6 +106,14 @@ export function AppSidebar({
     if (!sessions || !Array.isArray(sessions)) return [];
     return sessions.slice(0, 20);
   }, [sessions]);
+
+  // Compute if we're on a history route (same on server and client)
+  const isOnHistoryRoute =
+    pathname.startsWith("/dashboard/history/") ||
+    pathname === "/dashboard/history";
+
+  // Only show active styling after mount to avoid hydration mismatch
+  const isHistoryActive = mounted && isOnHistoryRoute;
 
   return (
     <Sidebar
@@ -133,15 +142,12 @@ export function AppSidebar({
             <SidebarMenu>
               {navItems.map((item) => {
                 if (item.isCollapsible) {
-                  const isHistoryActive =
-                    pathname.startsWith("/dashboard/history/") ||
-                    pathname === "/dashboard/history";
                   return (
                     <Collapsible
                       key={item.title}
                       id="sidebar-history-collapsible"
                       asChild
-                      defaultOpen={isHistoryActive}
+                      defaultOpen={isOnHistoryRoute}
                     >
                       <SidebarMenuItem>
                         <CollapsibleTrigger asChild>

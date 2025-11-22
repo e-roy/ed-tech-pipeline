@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Box, IconButton, Button, Tooltip, Select, MenuItem, Typography, Slider, type SelectChangeEvent } from '@mui/material';
-import { PlayArrow, Pause, SkipPrevious, SkipNext, VolumeUp, VolumeOff, Undo, Redo, ContentCut, ContentCopy, ContentPaste, Delete, ZoomIn, ZoomOut, FileDownload, FolderOpen } from '@mui/icons-material';
+import { PlayArrow, Pause, SkipPrevious, SkipNext, VolumeUp, VolumeOff, Undo, Redo, ContentCut, ContentCopy, ContentPaste, Delete, ZoomIn, ZoomOut, FileDownload, FolderOpen, FitScreen } from '@mui/icons-material';
 import { useEditorStore, selectCanUndo, selectCanRedo } from '@/stores/editorStore';
 import { colors } from './theme';
 import { ExportDialog } from './ExportDialog';
@@ -91,6 +91,9 @@ export function Toolbar() {
   const deleteSelected = useEditorStore((state) => state.deleteSelected);
   const zoomIn = useEditorStore((state) => state.zoomIn);
   const zoomOut = useEditorStore((state) => state.zoomOut);
+  const zoomToFit = useEditorStore((state) => state.zoomToFit);
+  const timelineZoom = useEditorStore((state) => state.timelineZoom);
+  const setTimelineZoom = useEditorStore((state) => state.setTimelineZoom);
 
   const canUndo = useEditorStore(selectCanUndo);
   const canRedo = useEditorStore(selectCanRedo);
@@ -257,11 +260,41 @@ export function Toolbar() {
 
         {/* Zoom */}
         <ButtonGroup>
-          <ToolbarIconButton tooltip="Zoom Out" onClick={zoomOut}>
+          <ToolbarIconButton tooltip="Zoom Out (Ctrl+-)" onClick={zoomOut}>
             <ZoomOut sx={{ fontSize: 18 }} />
           </ToolbarIconButton>
-          <ToolbarIconButton tooltip="Zoom In" onClick={zoomIn}>
+          <Slider
+            size="small"
+            value={timelineZoom}
+            min={10}
+            max={500}
+            onChange={(_, value) => setTimelineZoom(value as number)}
+            sx={{
+              width: 80,
+              mx: 1,
+              '& .MuiSlider-thumb': {
+                width: 12,
+                height: 12,
+              },
+            }}
+          />
+          <ToolbarIconButton tooltip="Zoom In (Ctrl+=)" onClick={zoomIn}>
             <ZoomIn sx={{ fontSize: 18 }} />
+          </ToolbarIconButton>
+          <Typography
+            variant="caption"
+            sx={{
+              minWidth: 40,
+              textAlign: 'center',
+              color: colors.text.secondary,
+              fontFamily: '"SF Mono", "Fira Code", monospace',
+              fontSize: '0.7rem',
+            }}
+          >
+            {Math.round(timelineZoom)}%
+          </Typography>
+          <ToolbarIconButton tooltip="Fit to View (Ctrl+0)" onClick={zoomToFit}>
+            <FitScreen sx={{ fontSize: 18 }} />
           </ToolbarIconButton>
         </ButtonGroup>
 
