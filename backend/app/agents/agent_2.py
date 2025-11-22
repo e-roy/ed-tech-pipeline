@@ -146,8 +146,8 @@ async def agent_2_process(
         
         timestamp = int(time.time() * 1000)  # Milliseconds timestamp
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        # Use {userId}/{sessionId}/agent2/ path
-        s3_key = f"{user_id}/{session_id}/agent2/{filename}"
+        # Use users/{userId}/{sessionId}/agent2/ path
+        s3_key = f"users/{user_id}/{session_id}/agent2/{filename}"
         
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -226,7 +226,7 @@ async def agent_2_process(
                 
                 # Upload storyboard.json to S3
                 if storage_service.s3_client:
-                    s3_key = f"{user_id}/{session_id}/agent2/storyboard.json"
+                    s3_key = f"users/{user_id}/{session_id}/agent2/storyboard.json"
                     storyboard_json = json.dumps(storyboard, indent=2).encode('utf-8')
                     storage_service.s3_client.put_object(
                         Bucket=storage_service.bucket_name,
@@ -276,7 +276,7 @@ async def agent_2_process(
                 }
                 
                 # Upload agent_2_data.json to S3
-                s3_key = f"{user_id}/{session_id}/agent2/agent_2_data.json"
+                s3_key = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
                 agent_2_data_json = json.dumps(agent_2_data, indent=2).encode('utf-8')
                 storage_service.s3_client.put_object(
                     Bucket=storage_service.bucket_name,
