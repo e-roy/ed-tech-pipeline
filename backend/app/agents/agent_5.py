@@ -493,6 +493,19 @@ async def agent_5_process(
     """
     settings = get_settings()
 
+    # Get Replicate API key from Secrets Manager or settings
+    replicate_api_key = None
+    try:
+        from app.services.secrets import get_secret
+        replicate_api_key = get_secret("pipeline/replicate-api-key")
+        logger.debug("Retrieved REPLICATE_API_KEY from AWS Secrets Manager for Agent5")
+    except Exception as e:
+        logger.debug(f"Could not retrieve REPLICATE_API_KEY from Secrets Manager: {e}, falling back to settings")
+        replicate_api_key = settings.REPLICATE_API_KEY
+    
+    if not replicate_api_key:
+        logger.warning("REPLICATE_API_KEY not set - video generation will fail")
+
     # Initialize storage service if not provided
     if storage_service is None:
         storage_service = StorageService()
@@ -1016,7 +1029,7 @@ async def agent_5_process(
                         logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (text-to-video)")
                         clip_url = await generate_video_replicate(
                             clip_prompt,
-                            settings.REPLICATE_API_KEY,
+                            replicate_api_key,
                             model="minimax",
                             seed=section_seed
                         )
@@ -1028,7 +1041,7 @@ async def agent_5_process(
                         frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
 
                         # Generate next clip from the frame
-                        service = ReplicateVideoService(settings.REPLICATE_API_KEY)
+                        service = ReplicateVideoService(replicate_api_key)
                         clip_url = await service.generate_video_from_image(
                             prompt=clip_prompt,
                             image_url=frame_data_uri,
