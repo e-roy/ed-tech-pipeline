@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,22 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Download, Scissors, ArrowLeft, Loader2, TestTube } from "lucide-react";
 import { api } from "@/trpc/react";
 import { EditorLayout } from "@/components/video-editor/EditorLayout";
@@ -33,7 +18,8 @@ import { EditorLayout } from "@/components/video-editor/EditorLayout";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Hardcoded test video S3 key for testing purposes
-const TEST_VIDEO_S3_KEY = "users/f218067b-e198-45ae-888a-cf45979bc57d/kYd20Q5WaK-b27v31a1eE/final_video_dae6d4f1.mp4";
+const TEST_VIDEO_S3_KEY =
+  "users/f218067b-e198-45ae-888a-cf45979bc57d/kYd20Q5WaK-b27v31a1eE/final_video_dae6d4f1.mp4";
 
 interface EditingPageClientProps {
   sessionId: string;
@@ -60,13 +46,19 @@ export function EditingPageClient({
   sessionId,
   userEmail,
 }: EditingPageClientProps) {
+  const searchParams = useSearchParams();
+  const videoUrlFromQuery = searchParams.get("videoUrl");
+  const autoEdit = searchParams.get("autoEdit") === "true";
+
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
+  const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
+    null,
+  );
   const [useTestVideo, setUseTestVideo] = useState(false);
   const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
-  const [isEditorMode, setIsEditorMode] = useState(false);
+  const [isEditorMode, setIsEditorMode] = useState(autoEdit);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -78,7 +70,7 @@ export function EditingPageClient({
     },
     {
       enabled: useTestVideo,
-    }
+    },
   );
 
   // Handle test video query result
@@ -100,6 +92,13 @@ export function EditingPageClient({
 
   // Polling logic to fetch session data
   useEffect(() => {
+    // Skip polling if we have video URL from query params (agent-create flow)
+    if (videoUrlFromQuery) {
+      setIsLoading(false);
+      console.log("[EditingPage] Using video URL from query params");
+      return;
+    }
+
     const fetchSession = async () => {
       try {
         const response = await fetch(`${API_URL}/api/sessions/${sessionId}`, {
@@ -117,7 +116,7 @@ export function EditingPageClient({
           throw new Error(`Failed to fetch session: ${response.status}`);
         }
 
-        const data = await response.json();
+        const data = (await response.json()) as SessionData;
         setSessionData(data);
 
         // Stop polling when video is ready
@@ -135,17 +134,19 @@ export function EditingPageClient({
     };
 
     // Initial fetch
-    fetchSession();
+    void fetchSession();
 
     // Start polling every 3 seconds
-    pollIntervalRef.current = setInterval(fetchSession, 3000);
+    pollIntervalRef.current = setInterval(() => {
+      void fetchSession();
+    }, 3000);
 
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
       }
     };
-  }, [sessionId, userEmail]);
+  }, [sessionId, userEmail, videoUrlFromQuery]);
 
   // Handle video metadata loaded
   const handleVideoMetadata = () => {
@@ -160,7 +161,8 @@ export function EditingPageClient({
 
   // Handle download
   const handleDownload = () => {
-    const videoUrl = testVideoUrl || sessionData?.final_video_url;
+    const videoUrl =
+      videoUrlFromQuery ?? testVideoUrl ?? sessionData?.final_video_url;
     if (!videoUrl) return;
 
     const link = document.createElement("a");
@@ -177,8 +179,9 @@ export function EditingPageClient({
     setError(null);
   };
 
-  // Get the current video URL (test or session)
-  const currentVideoUrl = testVideoUrl || sessionData?.final_video_url;
+  // Get the current video URL (prioritize: query param > test video > session)
+  const currentVideoUrl =
+    videoUrlFromQuery ?? testVideoUrl ?? sessionData?.final_video_url;
 
   // Format duration to MM:SS
   const formatDuration = (seconds: number): string => {
@@ -189,9 +192,10 @@ export function EditingPageClient({
 
   // Editor mode - render the full video editor
   if (isEditorMode) {
-    const videoUrl = testVideoUrl || sessionData?.final_video_url;
+    const videoUrl =
+      videoUrlFromQuery ?? testVideoUrl ?? sessionData?.final_video_url;
     return (
-      <EditorLayout sessionId={sessionId} videoUrl={videoUrl || undefined} />
+      <EditorLayout sessionId={sessionId} videoUrl={videoUrl ?? undefined} />
     );
   }
 
@@ -227,19 +231,19 @@ export function EditingPageClient({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-12">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+          <Loader2 className="text-primary mb-4 h-12 w-12 animate-spin" />
           <p className="text-muted-foreground text-sm">
             Video is still processing...
           </p>
           {sessionData?.status && (
-            <p className="text-muted-foreground text-xs mt-2">
+            <p className="text-muted-foreground mt-2 text-xs">
               Status: {sessionData.status}
             </p>
           )}
 
           {/* Test Video Button */}
-          <div className="mt-6 pt-6 border-t w-full max-w-sm">
-            <p className="text-muted-foreground text-xs text-center mb-3">
+          <div className="mt-6 w-full max-w-sm border-t pt-6">
+            <p className="text-muted-foreground mb-3 text-center text-xs">
               For testing purposes only:
             </p>
             <Button
@@ -267,24 +271,24 @@ export function EditingPageClient({
   }
 
   // Video ready state - currentVideoUrl is guaranteed to be non-null here due to the check above
-  const videoUrl = currentVideoUrl as string;
+  const videoUrl = currentVideoUrl;
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       {/* Video Player Card - takes most of the space */}
-      <Card className="flex flex-1 min-h-0 flex-col">
+      <Card className="flex min-h-0 flex-1 flex-col">
         <CardHeader className="shrink-0 py-3">
           <CardTitle>Your Video</CardTitle>
           <CardDescription>
             {testVideoUrl ? "Test Video" : `Session ID: ${sessionId}`}
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex-1 min-h-0 pb-3">
-          <div className="h-full rounded-lg overflow-hidden border bg-muted/50 flex items-center justify-center">
+        <CardContent className="min-h-0 flex-1 pb-3">
+          <div className="bg-muted/50 flex h-full items-center justify-center overflow-hidden rounded-lg border">
             <video
               ref={videoRef}
               controls
-              className="max-w-full max-h-full object-contain"
+              className="max-h-full max-w-full object-contain"
               src={videoUrl}
               preload="metadata"
               onLoadedMetadata={handleVideoMetadata}
@@ -296,26 +300,26 @@ export function EditingPageClient({
       </Card>
 
       {/* Bottom section: Video Details + Actions */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-4">
         {/* Video Metadata - inline */}
         {videoMetadata && (
           <div className="flex items-center gap-6 text-sm">
             <div>
               <span className="text-muted-foreground">Duration: </span>
-              <span className="font-medium text-foreground">
+              <span className="text-foreground font-medium">
                 {formatDuration(videoMetadata.duration)}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Resolution: </span>
-              <span className="font-medium text-foreground">
+              <span className="text-foreground font-medium">
                 {videoMetadata.width} x {videoMetadata.height}
               </span>
             </div>
             {sessionData?.created_at && (
               <div>
                 <span className="text-muted-foreground">Created: </span>
-                <span className="font-medium text-foreground">
+                <span className="text-foreground font-medium">
                   {new Date(sessionData.created_at).toLocaleDateString()}
                 </span>
               </div>
