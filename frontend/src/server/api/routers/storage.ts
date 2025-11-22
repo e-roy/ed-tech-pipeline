@@ -13,6 +13,7 @@ import {
   listUserFiles,
   deleteUserFile,
   getPresignedUrl,
+  listSessionFiles,
 } from "@/server/services/storage";
 
 export const storageRouter = createTRPCRouter({
@@ -112,6 +113,43 @@ export const storageRouter = createTRPCRouter({
             error instanceof Error
               ? error.message
               : "Failed to get presigned URL",
+        });
+      }
+    }),
+
+  /**
+   * List files from a session-specific folder (e.g., users/{userId}/{sessionId}/final/).
+   */
+  listSessionFiles: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        subfolder: z.string().optional(), // e.g., "final", "images", etc.
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      try {
+        const files = await listSessionFiles(
+          ctx.session.user.id,
+          input.sessionId,
+          input.subfolder,
+        );
+
+        return files;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to list session files",
         });
       }
     }),

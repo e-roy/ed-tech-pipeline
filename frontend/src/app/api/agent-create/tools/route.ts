@@ -20,7 +20,9 @@ import { generateNarrationTool } from "./_tools/generate-narration-tool";
 import { extractFactsTool } from "./_tools/extract-facts-tools";
 import { saveStudentInfoTool } from "./_tools/save-student-info-tool";
 
-export const maxDuration = 30;
+// export const maxDuration = 30;
+
+export const runtime = "nodejs";
 
 interface RequestBody {
   messages: ModelMessage[];
