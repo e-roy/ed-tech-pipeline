@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Add, Lock, LockOpen, Visibility, VisibilityOff, VolumeUp, VolumeOff, Videocam, MusicNote, TextFields } from '@mui/icons-material';
 import { useEditorStore } from '@/stores/editorStore';
@@ -31,11 +31,45 @@ export function Timeline() {
   const tracks = useEditorStore((state) => state.tracks);
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
   const setTimelineScroll = useEditorStore((state) => state.setTimelineScroll);
+  const setTimelineZoom = useEditorStore((state) => state.setTimelineZoom);
   const addTrack = useEditorStore((state) => state.addTrack);
   const updateTrack = useEditorStore((state) => state.updateTrack);
 
   const timelineWidth = Math.max(duration * timelineZoom, 1000);
   const trackHeaderWidth = 180;
+
+  // Mouse wheel zoom handler (Ctrl/Cmd + scroll)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Only zoom when Ctrl (Windows/Linux) or Meta (Mac) is pressed
+      if (!e.ctrlKey && !e.metaKey) return;
+
+      e.preventDefault();
+
+      // Get cursor position relative to timeline content
+      const rect = container.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left + container.scrollLeft - trackHeaderWidth;
+      const cursorTime = cursorX / timelineZoom;
+
+      // Calculate new zoom (zoom in on scroll up, out on scroll down)
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const newZoom = Math.max(10, Math.min(500, timelineZoom * zoomFactor));
+
+      // Calculate new scroll position to keep cursor position stable
+      const newCursorX = cursorTime * newZoom;
+      const newScrollLeft = newCursorX - (e.clientX - rect.left) + trackHeaderWidth;
+
+      setTimelineZoom(newZoom);
+      setTimelineScroll(Math.max(0, newScrollLeft));
+      container.scrollLeft = Math.max(0, newScrollLeft);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [timelineZoom, setTimelineZoom, setTimelineScroll, trackHeaderWidth]);
 
   const handleTimelineClick = useCallback((e: React.MouseEvent) => {
     if (!containerRef.current) return;
