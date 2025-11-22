@@ -12,22 +12,37 @@ interface Props {
 export function ProgressIndicator({ update, isConnected }: Props) {
   if (!update) return null;
 
+  // Calculate progress percentage from completed/total
+  const progressPercent = Math.round(
+    (update.progress.completed / update.progress.total) * 100,
+  );
+
+  // Determine if the process is complete
+  const isComplete =
+    update.status === "completed" ||
+    update.progress.completed === update.progress.total;
+
   return (
     <Card className="fixed right-4 bottom-4 w-96 p-6 shadow-lg">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-lg font-semibold">
-          {update.stage === "complete" ? "Complete!" : "Generating..."}
+          {isComplete ? "Complete!" : "Generating..."}
         </h3>
-        <span className="text-sm text-gray-500">{update.progress}%</span>
+        <span className="text-sm text-gray-500">{progressPercent}%</span>
       </div>
 
-      <Progress value={update.progress} className="mb-3" />
+      <Progress value={progressPercent} className="mb-3" />
 
       <p className="mb-2 text-sm text-gray-700">{update.message}</p>
 
-      {update.current_cost && (
+      <div className="mb-2 text-xs text-gray-600">
+        Stage: {update.progress.stage}
+        {update.progress.section && ` (${update.progress.section})`}
+      </div>
+
+      {update.cost > 0 && (
         <p className="text-xs text-gray-500">
-          Cost so far: ${update.current_cost.toFixed(2)}
+          Cost so far: ${update.cost.toFixed(2)}
         </p>
       )}
 

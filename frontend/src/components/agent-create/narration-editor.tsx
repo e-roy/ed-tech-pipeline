@@ -105,18 +105,34 @@ export function NarrationEditor() {
               <AlertDescription>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">{lastMessage.stage}</span>
+                    <span className="font-medium">
+                      {lastMessage.progress.stage}
+                      {lastMessage.progress.section &&
+                        ` (${lastMessage.progress.section})`}
+                    </span>
                     <span className="text-muted-foreground text-xs">
-                      {Math.round(lastMessage.progress)}%
+                      {Math.round(
+                        (lastMessage.progress.completed /
+                          lastMessage.progress.total) *
+                          100,
+                      )}
+                      %
                     </span>
                   </div>
-                  <Progress value={lastMessage.progress} className="h-2" />
+                  <Progress
+                    value={
+                      (lastMessage.progress.completed /
+                        lastMessage.progress.total) *
+                      100
+                    }
+                    className="h-2"
+                  />
                   <p className="text-muted-foreground text-xs">
                     {lastMessage.message}
                   </p>
-                  {lastMessage.current_cost !== undefined && (
+                  {lastMessage.cost > 0 && (
                     <p className="text-muted-foreground text-xs">
-                      Current cost: ${lastMessage.current_cost.toFixed(2)}
+                      Current cost: ${lastMessage.cost.toFixed(2)}
                     </p>
                   )}
                 </div>

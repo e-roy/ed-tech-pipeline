@@ -76,9 +76,12 @@ export function useWebSocket(sessionId: string | null) {
           const data = JSON.parse(messageData) as ProgressUpdate;
           console.log(
             "[WebSocket] Message received:",
-            data.stage,
-            `${data.progress}%`,
+            data.progress.stage,
+            `${data.progress.completed}/${data.progress.total}`,
+            data.message,
           );
+
+          console.log("[WebSocket] Message data:", data);
           setLastMessage(data);
         } catch (error) {
           console.error("[WebSocket] Failed to parse message:", error);

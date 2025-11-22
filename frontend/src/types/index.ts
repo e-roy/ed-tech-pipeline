@@ -56,12 +56,27 @@ export interface Session {
 }
 
 export interface ProgressUpdate {
+  sessionID: string;
   session_id: string;
-  stage: string;
-  progress: number;
+  supersessionID?: string;
+  userID: string;
+  agentnumber?: string;
+  status: string;
   message: string;
-  current_cost?: number;
-  timestamp: string;
+  progress: {
+    stage: string;
+    completed: number;
+    total: number;
+    section?: string;
+  };
+  cost: number;
+  cost_breakdown?: {
+    process?: number;
+    hook?: number;
+    conclusion?: number;
+    [key: string]: number | undefined;
+  };
+  timestamp: number;
   data?: unknown;
   error?: string;
   video_url?: string;
