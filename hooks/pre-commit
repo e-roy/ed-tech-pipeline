@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Pre-commit hook to check for leaked secrets using gitleaks
+
+echo "Running gitleaks to check for secrets..."
+
+# Create a temporary directory for staged files
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+# Export staged files to temp directory
+git diff --cached --name-only --diff-filter=ACM | while read -r file; do
+    mkdir -p "$TEMP_DIR/$(dirname "$file")"
+    git show :"$file" > "$TEMP_DIR/$file"
+done
+
+# Run gitleaks on the temp directory
+gitleaks detect --source="$TEMP_DIR" --no-git -v 2>&1
+
+# Capture exit code
+GITLEAKS_EXIT_CODE=$?
+
+if [ $GITLEAKS_EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "❌ Gitleaks detected secrets in your staged changes!"
+    echo "Please remove the secrets before committing."
+    echo ""
+    echo "To bypass this check (NOT recommended), use: git commit --no-verify"
+    exit 1
+fi
+
+echo "✅ No secrets detected. Proceeding with commit."
+exit 0
