@@ -30,6 +30,11 @@ interface AgentCreateState {
   sessionId: string | null;
   thinkingStatus: ThinkingStatus;
   factsLocked: boolean;
+  childAge: string | null;
+  childInterest: string | null;
+  showFactSelectionPrompt: boolean;
+  showNarrationReviewPrompt: boolean;
+  isVideoGenerating: boolean;
 
   // Actions
   addMessage: (message: Message) => void;
@@ -44,6 +49,13 @@ interface AgentCreateState {
   setSessionId: (id: string | null) => void;
   setThinkingStatus: (status: ThinkingStatus) => void;
   setFactsLocked: (locked: boolean) => void;
+  setChildInfo: (age: string, interest: string) => void;
+  setShowFactSelectionPrompt: (show: boolean) => void;
+  setShowNarrationReviewPrompt: (show: boolean) => void;
+  setIsVideoGenerating: (generating: boolean) => void;
+  selectAllFacts: () => void;
+  selectHighConfidenceFacts: (threshold: number) => void;
+  clearSelectedFacts: () => void;
   reset: () => void;
 
   // Complex actions
@@ -54,7 +66,10 @@ interface AgentCreateState {
   }) => void;
   extractFacts: (messagesToSend: Message[]) => Promise<void>;
   handleSubmitFacts: () => Promise<void>;
-  handleSubmit: (message: { text: string; files: FileUIPart[] }) => Promise<void>;
+  handleSubmit: (message: {
+    text: string;
+    files: FileUIPart[];
+  }) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
 }
 
@@ -77,6 +92,8 @@ const parseToolResponse = (
     setNarration: (narration: Narration | null) => void;
     setWorkflowStep: (step: WorkflowStep) => void;
     addMessage: (message: Message) => void;
+    setChildInfo: (age: string, interest: string) => void;
+    setShowNarrationReviewPrompt: (show: boolean) => void;
   },
 ): boolean => {
   try {
@@ -87,6 +104,9 @@ const parseToolResponse = (
       facts?: Fact[];
       narration?: Narration;
       message?: string;
+      child_age?: string;
+      child_interest?: string;
+      success?: boolean;
     };
 
     // Handle tool-result format with output field
@@ -95,9 +115,32 @@ const parseToolResponse = (
         facts?: Fact[];
         narration?: Narration;
         message?: string;
+        child_age?: string;
+        child_interest?: string;
+        success?: boolean;
       }>(directJson.output);
 
-      if (directJson.toolName === "extractFactsTool" && parsedOutput.facts) {
+      if (
+        directJson.toolName === "saveStudentInfoTool" &&
+        parsedOutput.success
+      ) {
+        if (parsedOutput.child_age && parsedOutput.child_interest) {
+          state.setChildInfo(
+            parsedOutput.child_age,
+            parsedOutput.child_interest,
+          );
+        }
+        state.addMessage({
+          role: "assistant",
+          content:
+            parsedOutput.message ?? "Student information saved successfully.",
+          id: Date.now().toString(),
+        });
+        return true;
+      } else if (
+        directJson.toolName === "extractFactsTool" &&
+        parsedOutput.facts
+      ) {
         state.handleFactExtractionResponse(parsedOutput);
         return true;
       } else if (
@@ -106,6 +149,7 @@ const parseToolResponse = (
       ) {
         state.setNarration(parsedOutput.narration);
         state.setWorkflowStep("review");
+        state.setShowNarrationReviewPrompt(true);
         state.addMessage({
           role: "assistant",
           content:
@@ -126,10 +170,26 @@ const parseToolResponse = (
     if (directJson.narration) {
       state.setNarration(directJson.narration);
       state.setWorkflowStep("review");
+      state.setShowNarrationReviewPrompt(true);
       state.addMessage({
         role: "assistant",
         content:
           directJson.message ?? "I've created the narration. Please review it.",
+        id: Date.now().toString(),
+      });
+      return true;
+    }
+
+    if (
+      directJson.success &&
+      directJson.child_age &&
+      directJson.child_interest
+    ) {
+      state.setChildInfo(directJson.child_age, directJson.child_interest);
+      state.addMessage({
+        role: "assistant",
+        content:
+          directJson.message ?? "Student information saved successfully.",
         id: Date.now().toString(),
       });
       return true;
@@ -155,6 +215,11 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       sessionId: null,
       thinkingStatus: null,
       factsLocked: false,
+      childAge: null,
+      childInterest: null,
+      showFactSelectionPrompt: false,
+      showNarrationReviewPrompt: false,
+      isVideoGenerating: false,
 
       // Simple setters
       addMessage: (message) =>
@@ -182,6 +247,23 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       setSessionId: (id) => set({ sessionId: id }),
       setThinkingStatus: (status) => set({ thinkingStatus: status }),
       setFactsLocked: (locked) => set({ factsLocked: locked }),
+      setChildInfo: (age, interest) =>
+        set({ childAge: age, childInterest: interest }),
+      setShowFactSelectionPrompt: (show) =>
+        set({ showFactSelectionPrompt: show }),
+      setShowNarrationReviewPrompt: (show) =>
+        set({ showNarrationReviewPrompt: show }),
+      setIsVideoGenerating: (generating) =>
+        set({ isVideoGenerating: generating }),
+      selectAllFacts: () =>
+        set((state) => ({
+          selectedFacts: [...state.facts],
+        })),
+      selectHighConfidenceFacts: (threshold) =>
+        set((state) => ({
+          selectedFacts: state.facts.filter((f) => f.confidence >= threshold),
+        })),
+      clearSelectedFacts: () => set({ selectedFacts: [] }),
       reset: () =>
         set({
           messages: [],
@@ -193,6 +275,11 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           narration: null,
           thinkingStatus: null,
           factsLocked: false,
+          childAge: null,
+          childInterest: null,
+          showFactSelectionPrompt: false,
+          showNarrationReviewPrompt: false,
+          isVideoGenerating: false,
           // Keep sessionId on reset
         }),
 
@@ -213,6 +300,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           set({
             facts: json.facts,
             workflowStep: "selection",
+            showFactSelectionPrompt: true,
           });
           get().addMessage({
             role: "assistant",
@@ -279,6 +367,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         state.setIsLoading(true);
         state.setError(null);
         state.setFactsLocked(true);
+        state.setShowFactSelectionPrompt(false);
         state.setThinkingStatus({
           operation: "narrating",
           steps: [
@@ -341,7 +430,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         if (!message.text.trim() && message.files.length === 0) return;
 
         const state = get();
-        
+
         // Process PDF files and extract text
         let finalMessageText = message.text.trim();
         const extractedContent: string[] = [];
@@ -353,9 +442,13 @@ export const useAgentCreateStore = create<AgentCreateState>()(
               // Fetch the PDF file
               const response = await fetch(filePart.url);
               const blob = await response.blob();
-              const file = new File([blob], filePart.filename ?? "document.pdf", {
-                type: "application/pdf",
-              });
+              const file = new File(
+                [blob],
+                filePart.filename ?? "document.pdf",
+                {
+                  type: "application/pdf",
+                },
+              );
 
               // Extract text from PDF
               const { extractTextFromPDF } = await import("@/lib/extractPDF");
@@ -420,15 +513,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           const response = await fetch(
             `/api/agent-create/session?sessionId=${sessionId}`,
           );
+
           if (!response.ok) {
-            throw new Error("Failed to load session");
+            // If session not found (404), clear the invalid sessionId
+            if (response.status === 404) {
+              console.warn("Session not found, clearing invalid sessionId");
+              state.setSessionId(null);
+              return;
+            }
+            throw new Error(`Failed to load session: ${response.status}`);
           }
 
           const data = await response.json();
 
           // Restore state from DB
-          const extractedFacts = (data.session.extractedFacts as Fact[]) || [];
-          const confirmedFacts = (data.session.confirmedFacts as Fact[]) || [];
+          const extractedFacts = (data.session.extractedFacts as Fact[]) ?? [];
+          const confirmedFacts = (data.session.confirmedFacts as Fact[]) ?? [];
           const hasExtractedFacts = extractedFacts.length > 0;
           const hasConfirmedFacts = confirmedFacts.length > 0;
           const hasGeneratedScript = !!data.session.generatedScript;
@@ -444,7 +544,9 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             ),
             facts: extractedFacts,
             selectedFacts: confirmedFacts,
-            narration: data.session.generatedScript || null,
+            narration: data.session.generatedScript ?? null,
+            childAge: data.session.childAge ?? null,
+            childInterest: data.session.childInterest ?? null,
             workflowStep: hasConfirmedFacts
               ? hasGeneratedScript
                 ? "review"
@@ -455,7 +557,10 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           });
         } catch (error) {
           console.error("Failed to load session:", error);
-          state.setError(error as Error);
+          // Don't set error state for 404s since we're clearing the session
+          if (error instanceof Error && !error.message.includes("404")) {
+            state.setError(error);
+          }
         } finally {
           state.setIsLoading(false);
         }

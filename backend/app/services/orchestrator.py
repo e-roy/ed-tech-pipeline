@@ -2985,8 +2985,8 @@ class VideoGenerationOrchestrator:
                 {"message": "Orchestrator starting Full Test process"}
             )
             
-            # Create S3 folder structure: scaffold_test/{userId}/{sessionId}/
-            s3_folder_prefix = f"scaffold_test/{userId}/{sessionId}/"
+            # Create S3 folder structure: users/{userId}/{sessionId}/
+            s3_folder_prefix = f"users/{userId}/{sessionId}/"
             
             # Create timestamp.json with Unix timestamp
             timestamp = int(time.time())

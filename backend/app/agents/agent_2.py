@@ -146,8 +146,8 @@ async def agent_2_process(
         
         timestamp = int(time.time() * 1000)  # Milliseconds timestamp
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        # Use scaffold_test/{userId}/{sessionId}/agent2/ path
-        s3_key = f"scaffold_test/{user_id}/{session_id}/agent2/{filename}"
+        # Use users/{userId}/{sessionId}/agent2/ path
+        s3_key = f"users/{user_id}/{session_id}/agent2/{filename}"
         
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -223,7 +223,20 @@ async def agent_2_process(
             try:
                 storyboard = create_storyboard_from_script(script, topic)
                 logger.info(f"Agent2 generated storyboard with {len(storyboard.get('segments', []))} segments")
-                logger.info(f"Agent2 storyboard will be included in agent_2_data.json (not creating separate storyboard.json)")
+                
+                # Upload storyboard.json to S3
+                if storage_service.s3_client:
+                    s3_key = f"users/{user_id}/{session_id}/agent2/storyboard.json"
+                    storyboard_json = json.dumps(storyboard, indent=2).encode('utf-8')
+                    storage_service.s3_client.put_object(
+                        Bucket=storage_service.bucket_name,
+                        Key=s3_key,
+                        Body=storyboard_json,
+                        ContentType='application/json'
+                    )
+                    logger.info(f"Agent2 uploaded storyboard.json to S3: {s3_key}")
+                else:
+                    logger.warning("Storage service not configured, skipping storyboard.json upload")
             except Exception as e:
                 logger.error(f"Agent2 failed to generate storyboard: {e}", exc_info=True)
                 # Don't fail the pipeline if storyboard generation fails
@@ -263,7 +276,7 @@ async def agent_2_process(
                 }
                 
                 # Upload agent_2_data.json to S3
-                s3_key = f"scaffold_test/{user_id}/{session_id}/agent2/agent_2_data.json"
+                s3_key = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
                 agent_2_data_json = json.dumps(agent_2_data, indent=2).encode('utf-8')
                 storage_service.s3_client.put_object(
                     Bucket=storage_service.bucket_name,

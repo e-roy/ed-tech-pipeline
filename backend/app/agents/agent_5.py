@@ -532,8 +532,8 @@ async def agent_5_process(
 
         timestamp = int(time.time() * 1000)
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        # Use scaffold_test/{userId}/{sessionId}/agent5/ path
-        s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{filename}"
+        # Use users/{userId}/{sessionId}/agent5/ path
+        s3_key = f"users/{user_id}/{session_id}/agent5/{filename}"
 
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -567,8 +567,8 @@ async def agent_5_process(
         await create_status_json("5", "starting", status_data)
 
         # Scan S3 folders for Agent2 and Agent4 content
-        agent2_prefix = f"scaffold_test/{user_id}/{session_id}/agent2/"
-        agent4_prefix = f"scaffold_test/{user_id}/{session_id}/agent4/"
+        agent2_prefix = f"users/{user_id}/{session_id}/agent2/"
+        agent4_prefix = f"users/{user_id}/{session_id}/agent4/"
         
         script = {}
         storyboard = {}
@@ -1046,7 +1046,8 @@ async def agent_5_process(
             # Update progress with cost info
             for clip_idx in range(len(generated_clips)):
                 completed_videos.append(f"{section}_{clip_idx}")
-                total_cost = sum(cost_per_section.values())
+                # Calculate current total cost for progress updates
+                current_total_cost = sum(cost_per_section.values())
                 await send_status(
                     "Agent5",
                     "processing",
@@ -1058,7 +1059,7 @@ async def agent_5_process(
                         "total": total_clips,
                         "section": section
                     },
-                    cost=total_cost,
+                    cost=current_total_cost,
                     cost_breakdown=cost_per_section
                 )
 
@@ -1075,7 +1076,7 @@ async def agent_5_process(
                     clip_paths.append(clip_path)
                     
                     # Save clip to S3 for restart capability
-                    clip_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
+                    clip_s3_key = f"users/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
                     try:
                         with open(clip_path, 'rb') as f:
                             clip_content = f.read()
@@ -1099,7 +1100,7 @@ async def agent_5_process(
                 cost=0.0
             )
             
-            agent5_prefix = f"scaffold_test/{user_id}/{session_id}/agent5/"
+            agent5_prefix = f"users/{user_id}/{session_id}/agent5/"
             async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
                 for section in sections:
                     section_clips = []
@@ -1201,7 +1202,7 @@ async def agent_5_process(
         if restart_from_concat:
             # In restart mode, try to download existing final audio from S3
             logger.info(f"[{session_id}] Restart mode: Attempting to load existing final audio from S3")
-            final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+            final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
             final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
             
             try:
@@ -1376,7 +1377,7 @@ async def agent_5_process(
                 try:
                     with open(final_audio_path, 'rb') as f:
                         audio_content = f.read()
-                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
                     storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
                     logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
                 except Exception as e:
@@ -1390,7 +1391,7 @@ async def agent_5_process(
                 try:
                     with open(final_audio_path, 'rb') as f:
                         audio_content = f.read()
-                    final_audio_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/final_audio.mp3"
+                    final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
                     storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
                     logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
                 except Exception as e:
@@ -1436,10 +1437,10 @@ async def agent_5_process(
         )
         logger.info(f"[{session_id}] Combined video and audio into final output")
 
-        # Upload video to S3 - use scaffold_test/{userId}/{sessionId}/agent5/ path
+        # Upload video to S3 - use {userId}/{sessionId}/agent5/ path
         import uuid
         video_filename = f"final_video_{uuid.uuid4().hex[:8]}.mp4"
-        video_s3_key = f"scaffold_test/{user_id}/{session_id}/agent5/{video_filename}"
+        video_s3_key = f"users/{user_id}/{session_id}/agent5/{video_filename}"
 
         # Debug: Check file before upload
         if os.path.exists(output_path):

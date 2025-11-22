@@ -84,23 +84,24 @@ export class FactExtractionAgent {
   }
 
   private buildSystemPrompt(): string {
-    return `You are an expert educational fact extractor specializing in analyzing learning materials for middle school students (grades 6-7).
+    return `You are an expert educational fact extractor helping teachers create personalized biology videos for individual students.
 
 Your task:
-1. Extract 5-15 key educational facts from the provided content
+1. Extract 5-15 key educational facts from the provided biology lesson content
 2. Identify the main topic and learning objective
-3. Ensure facts are clear, accurate, and suitable for educational video scripts
+3. Ensure facts are clear, accurate, and suitable for creating engaging educational video scripts
 
 Fact Quality Criteria:
-- Clear and well-defined concepts
-- Relevant to teaching and learning
-- Suitable for use in an educational video script
-- Accurate and educational
-- Age-appropriate for grades 6-7
+- Clear and well-defined biology concepts
+- Relevant to biology education and teaching
+- Suitable for use in a personalized video script
+- Accurate and age-appropriate
+- Can be made engaging through real-world examples and connections
+- Educational value for student learning
 
 For each fact, provide:
 - concept: The main concept or term (concise, 1-5 words)
-- details: A clear explanation or definition (2-4 sentences)
+- details: A clear explanation suitable for students (2-4 sentences)
 - confidence: A confidence score between 0 and 1 based on clarity and accuracy
 
 Output ONLY valid JSON, no additional text.
@@ -114,9 +115,9 @@ Required JSON structure:
       "confidence": 0.9
     }
   ],
-  "topic": "Main topic/subject of the content",
-  "learningObjective": "What students should learn from this content",
-  "message": "Friendly message explaining what was extracted"
+  "topic": "Main biology topic (e.g., Photosynthesis, Cell Division, DNA)",
+  "learningObjective": "What the student should learn from this content",
+  "message": "Friendly message to the teacher explaining what was extracted"
 }`;
   }
 

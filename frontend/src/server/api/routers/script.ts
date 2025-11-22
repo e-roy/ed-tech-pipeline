@@ -75,13 +75,11 @@ export const scriptRouter = createTRPCRouter({
         return null;
       }
 
-      const metadata = scriptAsset.metadata as
-        | {
-            script?: unknown;
-            cost?: number;
-            duration?: number;
-          }
-        | null;
+      const metadata = scriptAsset.metadata as {
+        script?: unknown;
+        cost?: number;
+        duration?: number;
+      } | null;
 
       return {
         script: metadata?.script,
@@ -124,14 +122,11 @@ export const scriptRouter = createTRPCRouter({
       .from(videoSessions)
       .where(eq(videoSessions.userId, ctx.session.user.id));
 
-    const latestSession = userSessions
-      .sort((a, b) => {
-        const aTime =
-          a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
-        const bTime =
-          b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
-        return bTime - aTime;
-      })[0];
+    const latestSession = userSessions.sort((a, b) => {
+      const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bTime - aTime;
+    })[0];
 
     return latestSession ? { sessionId: latestSession.id } : null;
   }),
@@ -140,9 +135,7 @@ export const scriptRouter = createTRPCRouter({
     .input(
       z.object({
         topic: z.string(),
-        facts: z.array(
-          z.object({ concept: z.string(), details: z.string() }),
-        ),
+        facts: z.array(z.object({ concept: z.string(), details: z.string() })),
         targetDuration: z.number().default(60),
       }),
     )
@@ -168,9 +161,7 @@ export const scriptRouter = createTRPCRouter({
       z.object({
         script: z.any(),
         topic: z.string(),
-        facts: z.array(
-          z.object({ concept: z.string(), details: z.string() }),
-        ),
+        facts: z.array(z.object({ concept: z.string(), details: z.string() })),
         cost: z.number(),
         duration: z.number(),
         sessionId: z.string().optional(),
@@ -206,8 +197,7 @@ export const scriptRouter = createTRPCRouter({
 
       // Call external video processing API
       try {
-        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/process`;
-        const scriptString = JSON.stringify(input.script);
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/startprocessing`;
 
         const response = await fetch(apiUrl, {
           method: "POST",
@@ -215,14 +205,16 @@ export const scriptRouter = createTRPCRouter({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            sessionId,
-            script: scriptString,
+            sessionID: sessionId,
+            userID: ctx.session.user.id,
+            agent_selection: "Full Test",
           }),
         });
 
         if (!response.ok) {
+          const errorText = await response.text();
           throw new Error(
-            `Video processing API returned status ${response.status}`,
+            `Video processing API returned status ${response.status}: ${errorText}`,
           );
         }
 
@@ -303,4 +295,3 @@ export const scriptRouter = createTRPCRouter({
       return { success: true };
     }),
 });
-

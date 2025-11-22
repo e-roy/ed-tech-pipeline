@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import { parseToolResult } from "@/lib/ai-utils";
 import { generateNarrationTool } from "./_tools/generate-narration-tool";
 import { extractFactsTool } from "./_tools/extract-facts-tools";
+import { saveStudentInfoTool } from "./_tools/save-student-info-tool";
 
 export const maxDuration = 30;
 
@@ -240,20 +241,32 @@ export async function POST(req: Request) {
   let assistantTextResponse = "";
 
   // Build system prompt based on context
-  let systemPrompt = `You are a helpful AI assistant that helps create educational videos.
+  let systemPrompt = `You are an expert educational AI assistant helping teachers create personalized biology videos for individual students.
 
-You have access to two tools:
-1. extractFactsTool - Extract educational facts from learning materials (text, PDF, or URL)
-2. generateNarrationTool - Generate a structured narration/script from confirmed facts
+Your role:
+- Help teachers create engaging biology videos tailored to specific students
+- Gather student information (age and interests) when provided to personalize content
+- Extract key facts from lesson materials
+- Generate age-appropriate, personalized narration scripts
 
-IMPORTANT: When the user provides ANY content (text, stories, learning materials, documents), you MUST use extractFactsTool to analyze it. Do not just acknowledge - always call the tool.
+Available Tools:
+1. saveStudentInfoTool - Save student age and interest for personalization (OPTIONAL - use if teacher provides this info)
+2. extractFactsTool - Extract educational facts from learning materials (text, PDF, or lesson content)
+3. generateNarrationTool - Generate a structured narration/script from confirmed facts
 
-Instructions:
-- ALWAYS use extractFactsTool when content is provided
-- After facts are extracted, the user will review and select the ones they want
-- When the user confirms facts or asks to create a narration, use generateNarrationTool with the selected facts
+Conversation Flow (FLEXIBLE):
+- If the teacher mentions student age or interests, use saveStudentInfoTool to save it
+- When the teacher provides lesson content/materials, ALWAYS use extractFactsTool to analyze it
+- After facts are extracted and selected, use generateNarrationTool (will automatically use saved student info if available)
+- The teacher can skip providing student info - personalization is OPTIONAL but recommended
 
-Be conversational and guide the user through the process naturally.`;
+Key Guidelines:
+- Be warm, conversational, and helpful
+- Gently encourage personalization but don't require it
+- If generating narration without student info, you can prompt: "Would you like to personalize this for a specific student? I can tailor the language and examples if you share their age and interests."
+- Always extract facts when content is provided - don't just acknowledge
+
+Be supportive and guide the teacher through the process naturally.`;
 
   // If selectedFacts are provided, add a concise instruction
   if (selectedFacts && selectedFacts.length > 0) {
@@ -264,6 +277,27 @@ Be conversational and guide the user through the process naturally.`;
   // The AI SDK Tool type expects execute to take 2 args, but our tools only take 1
   // We use type assertion to work around this mismatch
   const toolsWithSessionId = {
+    saveStudentInfoTool: {
+      ...saveStudentInfoTool,
+      execute: async (
+        args: { child_age: string; child_interest: string; sessionId?: string },
+        _options?: unknown,
+      ): Promise<string> => {
+        if (!saveStudentInfoTool.execute) {
+          throw new Error("saveStudentInfoTool.execute is not defined");
+        }
+        const originalExecute = saveStudentInfoTool.execute as (args: {
+          child_age: string;
+          child_interest: string;
+          sessionId?: string;
+        }) => Promise<string>;
+        const result = await originalExecute({
+          ...args,
+          sessionId,
+        });
+        return result;
+      },
+    } as typeof saveStudentInfoTool,
     extractFactsTool: {
       ...extractFactsTool,
       execute: async (

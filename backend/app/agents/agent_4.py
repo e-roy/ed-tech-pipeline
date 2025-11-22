@@ -208,8 +208,8 @@ async def agent_4_process(
 
         timestamp = int(time.time() * 1000)  # Milliseconds timestamp
         filename = f"agent_{agent_number}_{status}_{timestamp}.json"
-        # Use scaffold_test/{userId}/{sessionId}/agent4/ path
-        s3_key = f"scaffold_test/{user_id}/{session_id}/agent4/{filename}"
+        # Use users/{userId}/{sessionId}/agent4/ path
+        s3_key = f"users/{user_id}/{session_id}/agent4/{filename}"
 
         try:
             json_content = json.dumps(status_data, indent=2).encode('utf-8')
@@ -328,7 +328,7 @@ async def agent_4_process(
         # Read agent_2_data.json from S3
         agent_2_data = {}
         try:
-            s3_key_agent2 = f"scaffold_test/{user_id}/{session_id}/agent2/agent_2_data.json"
+            s3_key_agent2 = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
             response = storage_service.s3_client.get_object(
                 Bucket=storage_service.bucket_name,
                 Key=s3_key_agent2
@@ -347,7 +347,7 @@ async def agent_4_process(
                 if audio_file.get("filepath"):
                     if audio_file["part"] == "music":
                         # Handle background music
-                        s3_key = f"scaffold_test/{user_id}/{session_id}/agent4/background_music.mp3"
+                        s3_key = f"users/{user_id}/{session_id}/agent4/background_music.mp3"
                         try:
                             with open(audio_file["filepath"], "rb") as f:
                                 storage_service.s3_client.put_object(
@@ -367,7 +367,7 @@ async def agent_4_process(
                             logger.warning(f"Failed to upload background music to S3: {e}")
                     else:
                         # Handle narration audio
-                        s3_key = f"scaffold_test/{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
+                        s3_key = f"users/{user_id}/{session_id}/agent4/audio_{audio_file['part']}.mp3"
                         try:
                             with open(audio_file["filepath"], "rb") as f:
                                 storage_service.s3_client.put_object(
@@ -401,7 +401,7 @@ async def agent_4_process(
 
         # Upload combined output to S3 as agent_4_output.json
         try:
-            s3_key_output = f"scaffold_test/{user_id}/{session_id}/agent4/agent_4_output.json"
+            s3_key_output = f"users/{user_id}/{session_id}/agent4/agent_4_output.json"
             output_json = json.dumps(combined_output, indent=2).encode('utf-8')
             storage_service.s3_client.put_object(
                 Bucket=storage_service.bucket_name,

@@ -67,6 +67,10 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Include video editor router
+from app.routes.video_editor import router as video_editor_router
+app.include_router(video_editor_router)
+
 
 # Request/Response models
 class ProcessRequest(BaseModel):
@@ -323,7 +327,7 @@ async def websocket_endpoint_query(websocket: WebSocket):
                 parts = url_str.split('session_id=')
                 if len(parts) > 1:
                     session_id = parts[1].split('&')[0].split('/')[0]
-            except:
+            except Exception:
                 pass
     
     # If still no session_id, reject connection
@@ -348,35 +352,6 @@ async def websocket_endpoint_query(websocket: WebSocket):
     
     # Shared connection handling logic
     await _handle_websocket_connection(websocket, session_id, connection_id)
-
-async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
-    """Shared WebSocket connection handling logic."""
-    try:
-        while True:
-            # Keep connection alive - wait for any message (text or ping/pong)
-            # This keeps the connection open to receive agent status updates
-            try:
-                data = await websocket.receive_text()
-                # Client can send messages if needed, but we primarily use this for receiving
-                try:
-                    message = json.loads(data)
-                    if message.get("type") == "ping":
-                        # Respond to ping with pong
-                        await websocket.send_text(json.dumps({"type": "pong"}))
-                except json.JSONDecodeError:
-                    pass
-            except WebSocketDisconnect:
-                break
-            except Exception:
-                # Handle ping/pong or other WebSocket frames, but check if still connected
-                try:
-                    await websocket.receive()
-                except (WebSocketDisconnect, RuntimeError):
-                    break
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await websocket_manager.disconnect(websocket, session_id, connection_id)
 
 async def _handle_websocket_connection(websocket: WebSocket, session_id: str, connection_id: str):
     """Shared WebSocket connection handling logic."""
@@ -507,9 +482,16 @@ async def start_processing(
     """
     Start the agent processing pipeline.
 
+    Expected request format:
+    {
+        "sessionID": "<session-id>",
+        "userID": "<user-id>",
+        "agent_selection": "Full Test"
+    }
+
     Supports multiple modes:
-    - Full Test: Uses video_session_data from database
-    - Agent2: Minimal inputs (userID, sessionID)
+    - Full Test: Requires sessionID, userID
+    - Agent2: Requires userID, sessionID
     - Agent4: Requires script, voice, audio_option
     - Agent5: Requires userID, sessionID, supersessionid
     """
@@ -527,7 +509,7 @@ async def start_processing(
         if db:
             try:
                 db.close()
-            except:
+            except Exception:
                 pass
         db = None
     
@@ -882,7 +864,7 @@ async def restart_agent5_concat(request: RestartAgent5Request, db: Session = Dep
     # Verify clips exist in S3 before starting
     try:
         sections = ["hook", "concept", "process", "conclusion"]
-        agent5_prefix = f"scaffold_test/{request.userID}/{request.sessionID}/agent5/"
+        agent5_prefix = f"users/{request.userID}/{request.sessionID}/agent5/"
         
         missing_clips = []
         for section in sections:
@@ -1627,7 +1609,7 @@ async def render_animated_video(request: AnimatedVideoRequest) -> AgentTestRespo
             # Upload to S3
             video_filename = f"animated_video_{uuid.uuid4().hex[:8]}.mp4"
             supersessionid = f"{request.session_id}_animated"
-            video_s3_key = f"scaffold_test/test_user/{supersessionid}/{video_filename}"
+            video_s3_key = f"users/test_user/{supersessionid}/{video_filename}"
 
             with open(output_path, "rb") as f:
                 video_content = f.read()
@@ -1928,7 +1910,7 @@ async def generate_scene(request: SceneGenerateRequest):
         # Upload to S3 and return
         storage_service = StorageService()
         video_filename = f"scene_{uuid.uuid4().hex[:8]}.mp4"
-        video_s3_key = f"scaffold_test/test_user/scenes/{video_filename}"
+        video_s3_key = f"users/test_user/scenes/{video_filename}"
 
         with open(final_video_path, "rb") as f:
             video_content = f.read()
@@ -2020,7 +2002,7 @@ async def concatenate_videos(request: VideoConcatenateRequest):
 
         # Upload to S3
         s3_service = S3Service()
-        final_key = f"scaffold_test/concatenated_{int(time.time())}.mp4"
+        final_key = f"users/concatenated_{int(time.time())}.mp4"
         video_url = s3_service.upload_file(output_path, final_key)
 
         # Cleanup
