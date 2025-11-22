@@ -61,18 +61,22 @@ def get_secret(secret_name: str) -> str:
         # Get AWS region from settings (defaults to us-east-2)
         aws_region = settings.AWS_REGION or "us-east-2"
         
-        # Only initialize if credentials are provided
-        if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
-            raise ValueError(
-                "AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables."
+        # Initialize Secrets Manager client
+        # If credentials are provided, use them; otherwise boto3 will use instance profile
+        if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+            # Use explicit credentials if provided
+            client = boto3.client(
+                'secretsmanager',
+                region_name=aws_region,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
             )
-        
-        client = boto3.client(
-            'secretsmanager',
-            region_name=aws_region,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
-        )
+        else:
+            # Use instance profile (boto3 will automatically use EC2 instance profile)
+            client = boto3.client(
+                'secretsmanager',
+                region_name=aws_region
+            )
         
         response = client.get_secret_value(SecretId=secret_name)
         secret_value = response['SecretString']
