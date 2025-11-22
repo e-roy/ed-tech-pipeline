@@ -736,7 +736,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/video_pipeline
+      - DATABASE_URL=postgresql://postgres:CHANGE_PASSWORD@db:5432/video_pipeline
     depends_on:
       - db
 
