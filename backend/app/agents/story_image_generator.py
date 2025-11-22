@@ -172,57 +172,94 @@ def parse_segments_md(content: str) -> Tuple[Optional[str], List[Dict]]:
     return template_title, segments
 
 
-def generate_story_prompts(segment_data: Dict, num_images: int, has_diagram: bool = False) -> List[str]:
-    """Generate sequential storytelling prompts from segment data."""
+def generate_story_prompts(
+    segment_data: Dict,
+    num_images: int,
+    has_diagram: bool = False,
+    previous_segment_context: Optional[str] = None,
+    segment_number: int = 1,
+    total_segments: int = 4
+) -> List[str]:
+    """
+    Generate sequential storytelling prompts from segment data with continuity.
+
+    Args:
+        segment_data: Segment information including narration and visual guidance
+        num_images: Number of images to generate for this segment
+        has_diagram: Whether a reference diagram is available for style consistency
+        previous_segment_context: Visual context from the previous segment for continuity
+        segment_number: Current segment number (1-4)
+        total_segments: Total number of segments
+
+    Returns:
+        List of prompts for image generation
+    """
     narration = segment_data.get("narrationtext", "")
     visual_guidance = segment_data.get("visual_guidance_preview", "")
-    
+
     # Remove text-related terms from visual guidance
     text_terms = ["text overlay", "text", "labels", "caption", "annotation", "writing", "lettering"]
     for term in text_terms:
         visual_guidance = visual_guidance.replace(term, "").replace(term.title(), "").replace(term.upper(), "")
     visual_guidance = " ".join(visual_guidance.split())
-    
+
+    # Build style base with continuity
     style_base = "Educational storytelling style, cinematic 16:9 composition"
     if has_diagram:
         style_base += ", matching the style and color palette of the reference diagram"
-    
+
+    # Add continuity instruction if not the first segment
+    continuity_instruction = ""
+    if previous_segment_context and segment_number > 1:
+        continuity_instruction = f"Visual continuity from previous scene: {previous_segment_context}. Maintain consistent visual style, lighting, and color palette. "
+
+    # Add segment-specific styling based on position in narrative
+    segment_styling = ""
+    if segment_number == 1:
+        segment_styling = "Hook segment: Bold, attention-grabbing visuals with high energy. "
+    elif segment_number == 2:
+        segment_styling = "Concept segment: Clear, explanatory visuals that build on the hook. "
+    elif segment_number == 3:
+        segment_styling = "Process segment: Detailed, step-by-step visual progression. "
+    elif segment_number == 4:
+        segment_styling = "Conclusion segment: Cohesive summary visuals that tie everything together. "
+
     no_labels = "NO TEXT, NO LABELS, NO WORDS, NO LETTERING, NO TYPography, NO WRITING, NO ANNOTATIONS, NO CAPTIONS, NO WATERMARKS, NO SIGNATURES. Pure visual storytelling only. Absolutely no text elements whatsoever."
-    
+
     prompts = []
-    
+
     if num_images == 1:
-        prompt = f"{style_base}. {visual_guidance}. {narration}. Visual storytelling moment that answers the question."
+        prompt = f"{style_base}. {segment_styling}{continuity_instruction}{visual_guidance}. {narration}. Visual storytelling moment that answers the question."
         prompts.append(f"{prompt} {no_labels}")
     elif num_images == 2:
         prompts.append(
-            f"{style_base}, establishing shot. {visual_guidance}. "
+            f"{style_base}, establishing shot. {segment_styling}{continuity_instruction}{visual_guidance}. "
             f"Opening moment: The question is posed visually. {no_labels}"
         )
         prompts.append(
-            f"{style_base}, main scene. {narration}. "
+            f"{style_base}, main scene. {continuity_instruction}{narration}. "
             f"Answering moment: Visual answer to the question, clear narrative progression. {no_labels}"
         )
     elif num_images >= 3:
         prompts.append(
-            f"{style_base}, establishing shot. {visual_guidance}. "
+            f"{style_base}, establishing shot. {segment_styling}{continuity_instruction}{visual_guidance}. "
             f"Frame 1: Opening moment - The question is posed visually, curious and engaging. {no_labels}"
         )
         prompts.append(
-            f"{style_base}, middle scene. {narration}. "
+            f"{style_base}, middle scene. {continuity_instruction}{narration}. "
             f"Frame 2: Discovery moment - Visual progression toward the answer, engaging narrative. {no_labels}"
         )
         prompts.append(
-            f"{style_base}, conclusion scene. {narration}. "
+            f"{style_base}, conclusion scene. {continuity_instruction}{narration}. "
             f"Frame 3: Answer moment - Visual conclusion that answers the question, satisfying narrative resolution. {no_labels}"
         )
         for i in range(3, num_images):
             frame_num = i + 1
             prompts.append(
-                f"{style_base}, scene {frame_num}. {narration}. "
+                f"{style_base}, scene {frame_num}. {continuity_instruction}{narration}. "
                 f"Frame {frame_num}: Continued visual progression, maintaining narrative flow and style consistency. {no_labels}"
             )
-    
+
     return prompts
 
 
@@ -307,7 +344,10 @@ class StoryImageGeneratorAgent:
             # Create a lock for thread-safe cumulative_items updates
             items_lock = asyncio.Lock()
 
-            # Process segments in parallel
+            # Extract visual themes for continuity across all segments
+            visual_theme = self._extract_visual_theme(segments, template_title)
+
+            # Process segments in parallel with shared visual theme
             total_segments = len(segments)
             segment_tasks = [
                 self._process_segment(
@@ -322,11 +362,12 @@ class StoryImageGeneratorAgent:
                     input.session_id,
                     total_segments,
                     cumulative_items,
-                    items_lock
+                    items_lock,
+                    visual_theme
                 )
                 for segment in segments
             ]
-            
+
             segment_results = await asyncio.gather(*segment_tasks, return_exceptions=True)
             
             # Process results
@@ -386,6 +427,57 @@ class StoryImageGeneratorAgent:
                 error=str(e)
             )
     
+    def _extract_visual_theme(self, segments: List[Dict], template_title: str) -> str:
+        """
+        Extract a unified visual theme from all segments for continuity.
+
+        Args:
+            segments: List of all segments
+            template_title: Title of the template/video
+
+        Returns:
+            Visual theme description for consistent styling
+        """
+        # Combine all visual guidance to find common themes
+        all_visual_guidance = " ".join([
+            seg.get("visual_guidance_preview", "") for seg in segments
+        ])
+
+        # Extract key visual elements (simplified - could be enhanced with NLP)
+        common_elements = []
+
+        # Color-related keywords
+        color_keywords = ["blue", "green", "red", "warm", "cool", "vibrant", "bright", "dark", "light"]
+        for keyword in color_keywords:
+            if keyword in all_visual_guidance.lower():
+                common_elements.append(keyword)
+                break  # Take first color theme found
+
+        # Setting/environment keywords
+        setting_keywords = ["outdoor", "indoor", "nature", "laboratory", "classroom", "space", "ocean", "forest", "urban", "microscopic", "cosmic"]
+        for keyword in setting_keywords:
+            if keyword in all_visual_guidance.lower():
+                common_elements.append(keyword)
+                break
+
+        # Style keywords
+        style_keywords = ["realistic", "illustrated", "animated", "photographic", "artistic", "diagram", "3D"]
+        for keyword in style_keywords:
+            if keyword in all_visual_guidance.lower():
+                common_elements.append(keyword)
+                break
+
+        # Build theme description
+        if common_elements:
+            theme = f"Consistent visual theme: {', '.join(common_elements)} style. "
+        else:
+            theme = f"Consistent educational visual theme for {template_title}. "
+
+        theme += "Maintain unified color palette, lighting direction, and artistic style across all scenes."
+
+        logger.info(f"Extracted visual theme: {theme}")
+        return theme
+
     async def _update_cumulative_status(
         self,
         session_id: str,
@@ -426,6 +518,128 @@ class StoryImageGeneratorAgent:
                 items=cumulative_items
             )
 
+    async def _generate_single_image(
+        self,
+        prompt: str,
+        image_num: int,
+        segment_num: int,
+        segment_title: str,
+        template_title: str,
+        output_s3_prefix: str,
+        num_images: int,
+        max_passes: int,
+        max_verification_passes: int,
+        fast_mode: bool,
+        diagram_bytes: Optional[bytes],
+        session_id: str,
+        cumulative_items: list = None,
+        items_lock: asyncio.Lock = None
+    ) -> Dict:
+        """Generate a single image with retry logic."""
+        total_cost = 0.0
+        success = False
+        gen_attempt = 0
+
+        # Update cumulative status: mark image as processing
+        item_id = f"image_seg{segment_num}_img{image_num}"
+        if cumulative_items and items_lock:
+            await self._update_cumulative_status(
+                session_id,
+                cumulative_items,
+                items_lock,
+                item_id,
+                "processing"
+            )
+
+        while not success and gen_attempt < max_passes:
+            gen_attempt += 1
+
+            # Generate image
+            gen_success, gen_metadata = await self._generate_image_via_replicate(
+                prompt,
+                gen_attempt,
+                fast_mode,
+                diagram_bytes
+            )
+
+            if not gen_success:
+                total_cost += gen_metadata.get("cost", 0.0)
+                if gen_attempt < max_passes:
+                    await asyncio.sleep(2)  # Brief delay before retry
+                    continue
+                break
+
+            image_bytes = gen_metadata.get("image_bytes")
+            if not image_bytes:
+                break
+
+            total_cost += gen_metadata.get("cost", 0.0)
+
+            # Verify image
+            verify_success, verify_result, verify_error, verify_metadata = await self._verify_image_no_labels(
+                image_bytes,
+                max_verification_passes
+            )
+
+            total_cost += verify_metadata.get("cost", 0.0)
+
+            if verify_success:
+                # Upload to S3
+                s3_key = f"{output_s3_prefix}{template_title}/{segment_num}. {segment_title}/generated_images/image_{image_num}.png"
+                self.storage_service.upload_file_direct(
+                    image_bytes,
+                    s3_key,
+                    content_type="image/png"
+                )
+
+                # Remove image_bytes from metadata before serialization
+                gen_metadata_serializable = {k: v for k, v in gen_metadata.items() if k != "image_bytes"}
+                verify_metadata_serializable = {k: v for k, v in verify_metadata.items() if k != "image_bytes"}
+
+                # Update cumulative status: mark image as completed
+                if cumulative_items and items_lock:
+                    await self._update_cumulative_status(
+                        session_id,
+                        cumulative_items,
+                        items_lock,
+                        item_id,
+                        "completed"
+                    )
+
+                success = True
+
+                # Send WebSocket update for each image generated
+                if self.websocket_manager:
+                    await self.websocket_manager.broadcast_status(
+                        session_id,
+                        status="image_generated",
+                        progress=10 + (segment_num - 1) * 10 + (image_num * 2),
+                        details=f"Generated image {image_num} of {num_images} for segment {segment_num}: {segment_title}"
+                    )
+
+                return {
+                    "success": True,
+                    "cost": total_cost,
+                    "image_data": {
+                        "image_number": image_num,
+                        "s3_key": s3_key,
+                        "generation_metadata": gen_metadata_serializable,
+                        "verification_metadata": verify_metadata_serializable
+                    }
+                }
+            else:
+                if gen_attempt < max_passes:
+                    logger.warning(f"Segment {segment_num}, Image {image_num}: Verification failed, regenerating...")
+                    await asyncio.sleep(1)
+
+        # Failed after all attempts
+        logger.error(f"Segment {segment_num}, Image {image_num}: Failed after {max_passes} attempts")
+        return {
+            "success": False,
+            "cost": total_cost,
+            "error": f"Failed after {max_passes} attempts"
+        }
+
     async def _process_segment(
         self,
         segment: Dict,
@@ -439,7 +653,8 @@ class StoryImageGeneratorAgent:
         session_id: str,
         total_segments: int,
         cumulative_items: list = None,
-        items_lock: asyncio.Lock = None
+        items_lock: asyncio.Lock = None,
+        visual_theme: str = ""
     ) -> Dict:
         """Process a single segment and generate images."""
         segment_start_time = time.time()
@@ -454,112 +669,57 @@ class StoryImageGeneratorAgent:
                 progress=10 + (segment_num - 1) * 10,
                 details=f"Generating images for segment {segment_num} of {total_segments}: {segment_title}"
             )
-        
+
         try:
-            # Generate prompts
-            prompts = generate_story_prompts(segment, num_images, has_diagram=(diagram_bytes is not None))
+            # Generate prompts with continuity context
+            prompts = generate_story_prompts(
+                segment,
+                num_images,
+                has_diagram=(diagram_bytes is not None),
+                previous_segment_context=visual_theme,  # Use unified theme as continuity context
+                segment_number=segment_num,
+                total_segments=total_segments
+            )
             
-            # Generate images
+            # Generate images in parallel
             generated_images = []
             segment_cost = 0.0
-            
-            for img_idx, prompt in enumerate(prompts):
-                image_num = img_idx + 1
-                success = False
-                gen_attempt = 0
 
-                # Update cumulative status: mark image as processing
-                item_id = f"image_seg{segment_num}_img{image_num}"
-                if cumulative_items and items_lock:
-                    await self._update_cumulative_status(
-                        session_id,
-                        cumulative_items,
-                        items_lock,
-                        item_id,
-                        "processing"
-                    )
+            # Create tasks for all images in this segment
+            image_tasks = [
+                self._generate_single_image(
+                    prompt=prompt,
+                    image_num=img_idx + 1,
+                    segment_num=segment_num,
+                    segment_title=segment_title,
+                    template_title=template_title,
+                    output_s3_prefix=output_s3_prefix,
+                    num_images=num_images,
+                    max_passes=max_passes,
+                    max_verification_passes=max_verification_passes,
+                    fast_mode=fast_mode,
+                    diagram_bytes=diagram_bytes,
+                    session_id=session_id,
+                    cumulative_items=cumulative_items,
+                    items_lock=items_lock
+                )
+                for img_idx, prompt in enumerate(prompts)
+            ]
 
-                while not success and gen_attempt < max_passes:
-                    gen_attempt += 1
+            # Generate all images in parallel
+            image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
 
-                    # Generate image
-                    gen_success, gen_metadata = await self._generate_image_via_replicate(
-                        prompt,
-                        gen_attempt,
-                        fast_mode,
-                        diagram_bytes
-                    )
-
-                    if not gen_success:
-                        segment_cost += gen_metadata.get("cost", 0.0)
-                        if gen_attempt < max_passes:
-                            await asyncio.sleep(2)  # Brief delay before retry
-                            continue
-                        break
-
-                    image_bytes = gen_metadata.get("image_bytes")
-                    if not image_bytes:
-                        break
-
-                    segment_cost += gen_metadata.get("cost", 0.0)
-
-                    # Verify image
-                    verify_success, verify_result, verify_error, verify_metadata = await self._verify_image_no_labels(
-                        image_bytes,
-                        max_verification_passes
-                    )
-
-                    segment_cost += verify_metadata.get("cost", 0.0)
-
-                    if verify_success:
-                        # Upload to S3
-                        s3_key = f"{output_s3_prefix}{template_title}/{segment_num}. {segment_title}/generated_images/image_{image_num}.png"
-                        self.storage_service.upload_file_direct(
-                            image_bytes,
-                            s3_key,
-                            content_type="image/png"
-                        )
-
-                        # Remove image_bytes from metadata before serialization (it's already uploaded to S3)
-                        gen_metadata_serializable = {k: v for k, v in gen_metadata.items() if k != "image_bytes"}
-                        verify_metadata_serializable = {k: v for k, v in verify_metadata.items() if k != "image_bytes"}
-
-                        generated_images.append({
-                            "image_number": image_num,
-                            "s3_key": s3_key,
-                            "generation_metadata": gen_metadata_serializable,
-                            "verification_metadata": verify_metadata_serializable
-                        })
-
-                        # Update cumulative status: mark image as completed
-                        if cumulative_items and items_lock:
-                            await self._update_cumulative_status(
-                                session_id,
-                                cumulative_items,
-                                items_lock,
-                                item_id,
-                                "completed"
-                            )
-
-                        success = True
-
-                        # Send WebSocket update for each image generated
-                        if self.websocket_manager:
-                            await self.websocket_manager.broadcast_status(
-                                session_id,
-                                status="image_generated",
-                                progress=10 + (segment_num - 1) * 10 + (image_num * 2),
-                                details=f"Generated image {image_num} of {num_images} for segment {segment_num}: {segment_title}"
-                            )
-
-                        break
-                    else:
-                        if gen_attempt < max_passes:
-                            logger.warning(f"Segment {segment_num}, Image {image_num}: Verification failed, regenerating...")
-                            await asyncio.sleep(1)
-                
-                if not success:
-                    logger.error(f"Segment {segment_num}, Image {image_num}: Failed after {max_passes} attempts")
+            # Process results
+            for result in image_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Segment {segment_num}: Image generation failed with exception: {result}")
+                    continue
+                elif isinstance(result, dict) and result.get("success"):
+                    generated_images.append(result["image_data"])
+                    segment_cost += result.get("cost", 0.0)
+                else:
+                    # Failed image generation
+                    segment_cost += result.get("cost", 0.0) if isinstance(result, dict) else 0.0
             
             segment_duration = time.time() - segment_start_time
             
