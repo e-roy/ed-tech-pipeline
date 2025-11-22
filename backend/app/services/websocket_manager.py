@@ -243,3 +243,7 @@ class WebSocketManager:
             message["items"] = items
 
         await self.send_progress(session_id, message)
+
+
+# Create a singleton instance for use across the application
+websocket_manager = WebSocketManager()
