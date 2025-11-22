@@ -34,12 +34,31 @@ import {
 import { useAgentCreateStore } from "@/stores/agent-create-store";
 import { ScriptGenerationChainOfThought } from "@/components/generation/ScriptGenerationChainOfThought";
 import { useEffect, useState } from "react";
-import { Plus, Paperclip } from "lucide-react";
+import { Plus, Paperclip, Settings, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { api } from "@/trpc/react";
+import { useRouter, usePathname } from "next/navigation";
+import { toast } from "sonner";
 
 type AgentCreateInterfaceProps = {
   /**
@@ -85,6 +104,15 @@ export function AgentCreateInterface({
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoSuccess, setVideoSuccess] = useState(false);
 
+  // Delete session dialog state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Router and utils for navigation and cache invalidation
+  const router = useRouter();
+  const pathname = usePathname();
+  const utils = api.useUtils();
+
   // tRPC mutation for video approval
   const approveMutation = api.script.approve.useMutation({
     onSuccess: () => {
@@ -118,6 +146,65 @@ export function AgentCreateInterface({
       store.addMessage(errorMessage);
     },
   });
+
+  // tRPC mutation for deleting session
+  const deleteMutation = api.script.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Session deleted successfully");
+
+      // Invalidate history list to refresh
+      void utils.script.list.invalidate();
+
+      // Reset local state
+      reset();
+      setSessionId(null);
+
+      // Navigate away if we're on the session detail page
+      if (pathname?.includes("/history/")) {
+        router.push("/dashboard/create");
+      }
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete session: ${error.message}`);
+
+      // Add error message to chat
+      const errorMessage = {
+        role: "assistant" as const,
+        content: `Failed to delete session: ${error.message}`,
+        id: Date.now().toString(),
+      };
+      const store = useAgentCreateStore.getState();
+      store.addMessage(errorMessage);
+    },
+  });
+
+  // Handler for clearing session (local only)
+  const handleClearSession = () => {
+    reset();
+    setSessionId(null);
+  };
+
+  // Handler for copying session ID to clipboard
+  const handleCopySessionId = async () => {
+    if (displaySessionId) {
+      try {
+        await navigator.clipboard.writeText(displaySessionId);
+        setCopied(true);
+        toast.success("Session ID copied to clipboard");
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        toast.error("Failed to copy session ID");
+      }
+    }
+  };
+
+  // Handler for deleting session (from DB)
+  const handleDeleteSession = () => {
+    if (storeSessionId) {
+      deleteMutation.mutate({ sessionId: storeSessionId });
+    }
+    setShowDeleteDialog(false);
+  };
 
   // Handler for video creation
   const handleSubmitVideo = async () => {
@@ -207,11 +294,53 @@ export function AgentCreateInterface({
                   </Button>
                 )}
               </div>
-              {displaySessionId && (
-                <p className="text-muted-foreground my-auto text-xs">
-                  session id: {displaySessionId}
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                {displaySessionId && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        title="Session settings"
+                      >
+                        <Settings className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-80">
+                      <DropdownMenuItem
+                        onClick={handleCopySessionId}
+                        className="cursor-pointer font-mono text-xs"
+                      >
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className="text-muted-foreground truncate">
+                            {displaySessionId}
+                          </span>
+                          {copied ? (
+                            <Check className="h-4 w-4 shrink-0 text-green-600" />
+                          ) : (
+                            <Copy className="h-4 w-4 shrink-0" />
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={handleClearSession}
+                        className="cursor-pointer"
+                      >
+                        Clear Session
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => setShowDeleteDialog(true)}
+                        className="cursor-pointer text-red-600 focus:text-red-600"
+                      >
+                        Delete Session
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
             </div>
             <Conversation className="min-h-0 flex-1">
               <ConversationContent className="flex min-h-full flex-col">
@@ -545,6 +674,28 @@ export function AgentCreateInterface({
           <DocumentEditor />
         </ResizablePanel>
       </ResizablePanelGroup>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this session and all associated data
+              from the database. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSession}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
