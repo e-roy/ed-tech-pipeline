@@ -55,6 +55,27 @@ def _get_openai_api_key() -> Optional[str]:
         return key
 
 
+def _get_replicate_api_key() -> Optional[str]:
+    """
+    Get REPLICATE_API_KEY from AWS Secrets Manager with fallback to settings.
+    
+    Returns:
+        Replicate API key string, or None if not found
+    """
+    try:
+        from app.services.secrets import get_secret
+        return get_secret("pipeline/replicate-api-key")
+    except Exception as e:
+        logger.debug(f"Could not retrieve REPLICATE_API_KEY from Secrets Manager: {e}, falling back to settings")
+        key = settings.REPLICATE_API_KEY
+        if not key:
+            logger.warning(
+                "REPLICATE_API_KEY not set in Secrets Manager or settings - "
+                "video and image generation will fail."
+            )
+        return key
+
+
 def _write_errors_json(storage_service: StorageService, session_folder: str, error_data: Dict[str, Any]) -> None:
     """
     Write errors.json to the session folder in S3.
@@ -132,7 +153,7 @@ class VideoGenerationOrchestrator:
 
         # Initialize AI agents
         openai_api_key = _get_openai_api_key()
-        replicate_api_key = settings.REPLICATE_API_KEY
+        replicate_api_key = _get_replicate_api_key()
 
         if not openai_api_key:
             logger.warning(
@@ -142,8 +163,8 @@ class VideoGenerationOrchestrator:
 
         if not replicate_api_key:
             logger.warning(
-                "REPLICATE_API_KEY not set - some agents will fail at runtime. "
-                "Add it to .env file."
+                "REPLICATE_API_KEY not set - video and image generation will fail. "
+                "Add it to AWS Secrets Manager (pipeline/replicate-api-key) or .env file."
             )
 
         self.prompt_parser = PromptParserAgent(replicate_api_key) if replicate_api_key else None
