@@ -39,10 +39,9 @@ class ReplicateVideoService:
             logger.error("REPLICATE_API_KEY not configured in ReplicateVideoService")
             raise ValueError("REPLICATE_API_KEY not configured")
 
-        # Set the API token for the replicate client
-        import os
-        os.environ["REPLICATE_API_TOKEN"] = self.api_key
-        logger.debug(f"ReplicateVideoService initialized with API key (starts with: {self.api_key[:5]}...)")
+        # Create Replicate client with explicit API token (like other agents do)
+        self.client = replicate.Client(api_token=self.api_key)
+        logger.info(f"ReplicateVideoService initialized with API key (starts with: {self.api_key[:5]}..., length: {len(self.api_key)})")
 
     async def generate_video(
         self,
@@ -122,8 +121,8 @@ class ReplicateVideoService:
             if seed is not None:
                 input_data["seed"] = seed
 
-        # Run the model
-        output = replicate.run(model_id, input=input_data)
+        # Run the model using the client instance (explicit API token)
+        output = self.client.run(model_id, input=input_data)
 
         # Handle different output formats
         if isinstance(output, str):
@@ -199,7 +198,8 @@ class ReplicateVideoService:
             if seed is not None:
                 input_data["seed"] = seed
 
-        output = replicate.run(model_id, input=input_data)
+        # Run the model using the client instance (explicit API token)
+        output = self.client.run(model_id, input=input_data)
 
         # Handle output format
         if isinstance(output, str):
