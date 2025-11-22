@@ -112,6 +112,10 @@ deploy_simple.ps1
 quick_deploy.ps1
 openapi-temp.json
 
+# Security audit reports
+git-security-audit-report.txt
+*security-audit*.txt
+
 # Deployment guides with sensitive info
 backend/DEPLOY_SCAFFOLD_TEST_UI.md
 # Remotion dependencies
