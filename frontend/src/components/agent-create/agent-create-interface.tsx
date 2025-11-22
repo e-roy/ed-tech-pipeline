@@ -78,7 +78,7 @@ export function AgentCreateInterface({
   showNewChatButton = true,
 }: AgentCreateInterfaceProps) {
   const {
-    messages,
+    messages: storeMessages,
     isLoading,
     error,
     workflowStep,
@@ -88,9 +88,9 @@ export function AgentCreateInterface({
     reset,
     setSessionId,
     loadSession,
-    facts,
-    selectedFacts,
-    narration,
+    facts: storeFacts,
+    selectedFacts: storeSelectedFacts,
+    narration: storeNarration,
     childAge,
     childInterest,
     showFactSelectionPrompt,
@@ -98,6 +98,17 @@ export function AgentCreateInterface({
     handleSubmitFacts,
     setIsVideoGenerating,
   } = useAgentCreateStore();
+
+  // Only use store data if it matches the expected session
+  // This prevents showing stale data when navigating between routes
+  const sessionMatches = externalSessionId
+    ? externalSessionId === storeSessionId
+    : !storeSessionId;
+
+  const messages = sessionMatches ? storeMessages : [];
+  const facts = sessionMatches ? storeFacts : [];
+  const selectedFacts = sessionMatches ? storeSelectedFacts : [];
+  const narration = sessionMatches ? storeNarration : null;
 
   // Video generation state
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
@@ -258,13 +269,31 @@ export function AgentCreateInterface({
       loadSession(externalSessionId).catch((err) => {
         console.error("Failed to load session:", err);
       });
+    } else if (!externalSessionId && storeSessionId) {
+      // If there's no sessionId in URL but store has one, reset the store
+      reset();
+      setSessionId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSessionId]);
 
+  // Sync sessionId changes to URL (only on create page, not history page)
+  useEffect(() => {
+    // Only update URL if we're on the create page and sessionId has changed
+    if (
+      pathname === "/dashboard/create" &&
+      storeSessionId &&
+      storeSessionId !== externalSessionId
+    ) {
+      router.replace(`/dashboard/create?sessionId=${storeSessionId}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeSessionId]);
+
   const handleNewChat = () => {
     reset();
     setSessionId(null);
+    router.push("/dashboard/create");
   };
 
   const displaySessionId = externalSessionId ?? storeSessionId;
@@ -282,26 +311,25 @@ export function AgentCreateInterface({
             <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold">Chat</h2>
-                {showNewChatButton && (
+              </div>
+              <div className="flex items-center gap-4">
+                {displaySessionId && (
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
+                    variant="outline"
+                    size="sm"
                     onClick={handleNewChat}
                     title="Create new chat"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4" /> New Chat
                   </Button>
                 )}
-              </div>
-              <div className="flex items-center gap-2">
                 {displaySessionId && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6"
+                        className="h-8 w-8"
                         title="Session settings"
                       >
                         <Settings className="h-4 w-4" />

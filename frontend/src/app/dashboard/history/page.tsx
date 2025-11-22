@@ -119,7 +119,7 @@ function SessionCard({ session, onDelete, isDeleting }: SessionCardProps) {
   };
 
   const handleNavigate = () => {
-    router.push(`/dashboard/history/${session.id}`);
+    router.push(`/dashboard/create?sessionId=${session.id}`);
   };
 
   const sessionTitle = session.topic ?? "Untitled";

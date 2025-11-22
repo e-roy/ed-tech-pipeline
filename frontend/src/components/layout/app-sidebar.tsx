@@ -9,7 +9,7 @@ import {
   Scissors,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import * as React from "react";
 
 import {
@@ -94,6 +94,8 @@ export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar> & { user: User }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentSessionId = searchParams.get("sessionId");
   const { mounted } = useSidebar();
   const queryResult = api.script.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
@@ -107,10 +109,8 @@ export function AppSidebar({
     return sessions.slice(0, 20);
   }, [sessions]);
 
-  // Compute if we're on a history route (same on server and client)
-  const isOnHistoryRoute =
-    pathname.startsWith("/dashboard/history/") ||
-    pathname === "/dashboard/history";
+  // Compute if we're on a create route with session (same on server and client)
+  const isOnHistoryRoute = pathname === "/dashboard/create" && !!currentSessionId;
 
   // Only show active styling after mount to avoid hydration mismatch
   const isHistoryActive = mounted && isOnHistoryRoute;
@@ -169,8 +169,8 @@ export function AppSidebar({
                             ) : (
                               recentSessions.map((session) => {
                                 const isActive =
-                                  pathname ===
-                                  `/dashboard/history/${session.id}`;
+                                  pathname === "/dashboard/create" &&
+                                  currentSessionId === session.id;
                                 const topic = session.topic ?? "Untitled";
                                 return (
                                   <SidebarMenuSubItem key={session.id}>
@@ -182,7 +182,7 @@ export function AppSidebar({
                                           className="min-w-0"
                                         >
                                           <Link
-                                            href={`/dashboard/history/${session.id}`}
+                                            href={`/dashboard/create?sessionId=${session.id}`}
                                             className="block truncate"
                                           >
                                             {topic}
