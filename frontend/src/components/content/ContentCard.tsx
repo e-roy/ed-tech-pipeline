@@ -9,6 +9,8 @@ import {
   getAssetTypeFromKey,
   inferContentTypeFromKey,
 } from "./utils";
+import { Play } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 interface ContentCardProps {
   file: FileInfo;
@@ -34,6 +36,29 @@ export function ContentCard({
 
   const fileName = file.key.split("/").pop() ?? "unknown";
 
+  // Lazy loading for videos
+  const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const videoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isVideo || !videoRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVideoVisible(true);
+          }
+        });
+      },
+      { rootMargin: "50px" },
+    );
+
+    observer.observe(videoRef.current);
+
+    return () => observer.disconnect();
+  }, [isVideo]);
+
   return (
     <Card className="mt-0 overflow-hidden pt-0">
       <div className="bg-muted relative aspect-video">
@@ -45,11 +70,29 @@ export function ContentCard({
           />
         )}
         {isVideo && (
-          <video
-            src={file.presigned_url}
-            controls
-            className="h-full w-full object-cover"
-          />
+          <div ref={videoRef} className="relative h-full w-full">
+            {isVideoVisible ? (
+              <video
+                src={file.presigned_url}
+                controls
+                preload="metadata"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="relative h-full w-full">
+                <video
+                  src={file.presigned_url}
+                  preload="metadata"
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <div className="rounded-full bg-white/90 p-4">
+                    <Play className="h-8 w-8 text-black" />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {isAudio && (
           <div className="flex h-full items-center justify-center">

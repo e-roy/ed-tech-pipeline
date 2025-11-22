@@ -104,29 +104,33 @@ export function NarrationEditor() {
               <Loader2 className="h-4 w-4 animate-spin" />
               <AlertDescription>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">
-                      {lastMessage.progress.stage}
-                      {lastMessage.progress.section &&
-                        ` (${lastMessage.progress.section})`}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      {Math.round(
-                        (lastMessage.progress.completed /
-                          lastMessage.progress.total) *
-                          100,
-                      )}
-                      %
-                    </span>
-                  </div>
-                  <Progress
-                    value={
-                      (lastMessage.progress.completed /
-                        lastMessage.progress.total) *
-                      100
-                    }
-                    className="h-2"
-                  />
+                  {lastMessage.progress && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">
+                          {lastMessage.progress.stage}
+                          {lastMessage.progress.section &&
+                            ` (${lastMessage.progress.section})`}
+                        </span>
+                        <span className="text-muted-foreground text-xs">
+                          {Math.round(
+                            (lastMessage.progress.completed /
+                              lastMessage.progress.total) *
+                              100,
+                          )}
+                          %
+                        </span>
+                      </div>
+                      <Progress
+                        value={
+                          (lastMessage.progress.completed /
+                            lastMessage.progress.total) *
+                          100
+                        }
+                        className="h-2"
+                      />
+                    </>
+                  )}
                   <p className="text-muted-foreground text-xs">
                     {lastMessage.message}
                   </p>
@@ -188,7 +192,13 @@ export function NarrationEditor() {
                       {index + 1}
                     </Badge>
                     <CardTitle className="text-sm font-medium">
-                      {segment.type}
+                      {segment.type
+                        .split("_")
+                        .map(
+                          (word) =>
+                            word.charAt(0).toUpperCase() + word.slice(1),
+                        )
+                        .join(" ")}
                     </CardTitle>
                   </div>
                   <div className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -211,7 +221,7 @@ export function NarrationEditor() {
                     onChange={(e) =>
                       handleSegmentChange(index, "narration", e.target.value)
                     }
-                    className="min-h-[80px] resize-none text-sm"
+                    className="bg-background min-h-[80px] resize-none text-sm"
                   />
                 </div>
 
@@ -232,7 +242,7 @@ export function NarrationEditor() {
                         e.target.value,
                       )
                     }
-                    className="min-h-[60px] resize-none text-sm"
+                    className="bg-background min-h-[60px] resize-none text-sm"
                   />
                 </div>
 

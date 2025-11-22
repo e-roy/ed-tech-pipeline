@@ -74,12 +74,21 @@ export function useWebSocket(sessionId: string | null) {
           const messageData =
             typeof event.data === "string" ? event.data : String(event.data);
           const data = JSON.parse(messageData) as ProgressUpdate;
-          console.log(
-            "[WebSocket] Message received:",
-            data.progress.stage,
-            `${data.progress.completed}/${data.progress.total}`,
-            data.message,
-          );
+
+          // Safely log message with defensive checks
+          if (data.progress) {
+            console.log(
+              "[WebSocket] Message received:",
+              data.progress.stage,
+              `${data.progress.completed}/${data.progress.total}`,
+              data.message,
+            );
+          } else {
+            console.log(
+              "[WebSocket] Message received:",
+              data.message || data.status,
+            );
+          }
 
           console.log("[WebSocket] Message data:", data);
           setLastMessage(data);

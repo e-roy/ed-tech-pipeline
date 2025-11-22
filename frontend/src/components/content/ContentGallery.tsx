@@ -13,11 +13,16 @@ import {
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAssetTypeFromKey } from "./utils";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
+const ITEMS_PER_PAGE = 20;
 
 export function ContentGallery() {
   const [selectedFilter, setSelectedFilter] = useState<AssetType | "all">(
     "all",
   );
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Fetch all files from output folder
   const { data, isLoading, refetch } = api.storage.listFiles.useQuery({
@@ -36,6 +41,9 @@ export function ContentGallery() {
   // Filter files client-side
   const filteredFiles =
     data?.files.filter((file) => {
+      // Filter out JSON files since they are not media files
+      if (file.key.toLowerCase().endsWith('.json')) return false;
+      
       if (selectedFilter === "all") return true;
 
       // Extract asset type from key
@@ -43,6 +51,20 @@ export function ContentGallery() {
       if (!assetType) return false;
       return assetType === selectedFilter;
     }) ?? [];
+
+  // Pagination
+  const totalPages = Math.ceil(filteredFiles.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const paginatedFiles = filteredFiles.slice(
+    startIndex,
+    startIndex + ITEMS_PER_PAGE,
+  );
+
+  // Reset to page 1 when filter changes
+  const handleFilterChange = (filter: AssetType | "all") => {
+    setSelectedFilter(filter);
+    setCurrentPage(1);
+  };
 
   const handleDelete = async (fileKey: string) => {
     await deleteMutation.mutateAsync({ file_key: fileKey });
@@ -73,7 +95,7 @@ export function ContentGallery() {
         </div>
         <ContentFilters
           selectedFilter={selectedFilter}
-          onFilterChange={setSelectedFilter}
+          onFilterChange={handleFilterChange}
         />
       </div>
 
@@ -89,16 +111,44 @@ export function ContentGallery() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filteredFiles.map((file) => (
-            <ContentCard
-              key={file.key}
-              file={file}
-              onDelete={() => handleDelete(file.key)}
-              isDeleting={deleteMutation.isPending}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {paginatedFiles.map((file) => (
+              <ContentCard
+                key={file.key}
+                file={file}
+                onDelete={() => handleDelete(file.key)}
+                isDeleting={deleteMutation.isPending}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-muted-foreground text-sm">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
