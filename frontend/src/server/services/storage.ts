@@ -301,10 +301,9 @@ export async function getPresignedUrl(
     throw new Error("S3_BUCKET_NAME not configured");
   }
 
-  // Verify the file belongs to the user or is a test file
+  // Verify the file belongs to the user
   const expectedPrefix = `users/${userId}/`;
-  const isTestFile = fileKey.startsWith("scaffold_test/");
-  if (!fileKey.startsWith(expectedPrefix) && !isTestFile) {
+  if (!fileKey.startsWith(expectedPrefix)) {
     throw new Error("File does not belong to user");
   }
 
