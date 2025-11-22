@@ -270,21 +270,21 @@ export function EditingPageClient({
   const videoUrl = currentVideoUrl as string;
 
   return (
-    <div className="space-y-6">
-      {/* Video Player Card */}
-      <Card>
-        <CardHeader>
+    <div className="flex h-full flex-col gap-4 overflow-hidden">
+      {/* Video Player Card - takes most of the space */}
+      <Card className="flex flex-1 min-h-0 flex-col">
+        <CardHeader className="shrink-0 py-3">
           <CardTitle>Your Video</CardTitle>
           <CardDescription>
             {testVideoUrl ? "Test Video" : `Session ID: ${sessionId}`}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-lg overflow-hidden border bg-muted/50">
+        <CardContent className="flex-1 min-h-0 pb-3">
+          <div className="h-full rounded-lg overflow-hidden border bg-muted/50 flex items-center justify-center">
             <video
               ref={videoRef}
               controls
-              className="w-full h-auto"
+              className="max-w-full max-h-full object-contain"
               src={videoUrl}
               preload="metadata"
               onLoadedMetadata={handleVideoMetadata}
@@ -295,57 +295,53 @@ export function EditingPageClient({
         </CardContent>
       </Card>
 
-      {/* Video Metadata Card */}
-      {videoMetadata && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Video Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <p className="text-muted-foreground text-xs">Duration</p>
-                <p className="font-medium">
-                  {formatDuration(videoMetadata.duration)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Resolution</p>
-                <p className="font-medium">
-                  {videoMetadata.width} x {videoMetadata.height}
-                </p>
-              </div>
-              {sessionData?.created_at && (
-                <div>
-                  <p className="text-muted-foreground text-xs">Created</p>
-                  <p className="font-medium">
-                    {new Date(sessionData.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              )}
+      {/* Bottom section: Video Details + Actions */}
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-4">
+        {/* Video Metadata - inline */}
+        {videoMetadata && (
+          <div className="flex items-center gap-6 text-sm">
+            <div>
+              <span className="text-muted-foreground">Duration: </span>
+              <span className="font-medium">
+                {formatDuration(videoMetadata.duration)}
+              </span>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div>
+              <span className="text-muted-foreground">Resolution: </span>
+              <span className="font-medium">
+                {videoMetadata.width} x {videoMetadata.height}
+              </span>
+            </div>
+            {sessionData?.created_at && (
+              <div>
+                <span className="text-muted-foreground">Created: </span>
+                <span className="font-medium">
+                  {new Date(sessionData.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-3">
-        <Button onClick={handleDownload}>
-          <Download className="mr-2 h-4 w-4" />
-          Download Video
-        </Button>
-
-        <Button variant="outline" onClick={() => setIsEditorMode(true)}>
-          <Scissors className="mr-2 h-4 w-4" />
-          Open Editor
-        </Button>
-
-        <Link href="/dashboard/hardcode-create">
-          <Button variant="ghost">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Create
+        {/* Actions */}
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={handleDownload}>
+            <Download className="mr-2 h-4 w-4" />
+            Download Video
           </Button>
-        </Link>
+
+          <Button variant="outline" onClick={() => setIsEditorMode(true)}>
+            <Scissors className="mr-2 h-4 w-4" />
+            Open Editor
+          </Button>
+
+          <Link href="/dashboard/hardcode-create">
+            <Button variant="ghost">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Create
+            </Button>
+          </Link>
+        </div>
       </div>
     </div>
   );
