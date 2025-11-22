@@ -62,7 +62,7 @@ export function ContentGallery() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-y-auto">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Content Library</h2>
