@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # External Services
     REPLICATE_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
+    GOOGLE_AI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
 
     # AWS S3
     AWS_ACCESS_KEY_ID: str = ""
