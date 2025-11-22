@@ -31,28 +31,36 @@ class StorageService:
     """
 
     def __init__(self):
-        """Initialize S3 client with credentials from settings."""
+        """Initialize S3 client with credentials from settings or instance profile."""
         self.s3_client = None
         self.bucket_name = settings.S3_BUCKET_NAME
 
-        # Only initialize if credentials are provided
-        if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-            try:
+        # Try to initialize S3 client
+        # If credentials are provided, use them; otherwise boto3 will use instance profile
+        try:
+            if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+                # Use explicit credentials if provided
                 self.s3_client = boto3.client(
                     's3',
                     aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                     region_name=settings.AWS_REGION
                 )
-                logger.info(f"Storage service initialized with bucket: {self.bucket_name}")
-            except Exception as e:
-                logger.error(f"Failed to initialize S3 client: {e}")
-                self.s3_client = None
-        else:
-            logger.warning(
-                "AWS credentials not configured. Storage service will not work. "
-                "Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and S3_BUCKET_NAME to .env"
-            )
+                logger.info(f"Storage service initialized with explicit credentials, bucket: {self.bucket_name}")
+            else:
+                # Use instance profile (boto3 will automatically use EC2 instance profile)
+                self.s3_client = boto3.client(
+                    's3',
+                    region_name=settings.AWS_REGION
+                )
+                logger.info(f"Storage service initialized with instance profile, bucket: {self.bucket_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize S3 client: {e}")
+            self.s3_client = None
+            if not self.bucket_name:
+                logger.warning(
+                    "S3_BUCKET_NAME not configured. Add S3_BUCKET_NAME to .env"
+                )
 
     def generate_presigned_url(
         self,
