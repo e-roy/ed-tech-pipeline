@@ -520,6 +520,94 @@ export async function listAllS3Files(userId: string): Promise<
 }
 
 /**
+ * List files from a session-specific folder.
+ * Example: sessionId="abc123", subfolder="final" -> lists users/{userId}/abc123/final/
+ */
+export async function listSessionFiles(
+  userId: string,
+  sessionId: string,
+  subfolder?: string,
+): Promise<
+  Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }>
+> {
+  if (!env.S3_BUCKET_NAME) {
+    throw new Error("S3_BUCKET_NAME not configured");
+  }
+
+  // Build prefix: users/{userId}/{sessionId}/subfolder/
+  const basePrefix = `users/${userId}/${sessionId}/`;
+  const fullPrefix = subfolder
+    ? `${basePrefix}${subfolder}${subfolder.endsWith("/") ? "" : "/"}`
+    : basePrefix;
+
+  const client = getS3Client();
+  const files: Array<{
+    key: string;
+    name: string;
+    size: number;
+    last_modified: string | null;
+    content_type: string;
+    presigned_url: string;
+  }> = [];
+
+  let continuationToken: string | undefined;
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: env.S3_BUCKET_NAME,
+      Prefix: fullPrefix,
+      ContinuationToken: continuationToken,
+    });
+
+    const response = await client.send(command);
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (!obj.Key) continue;
+        const s3Key = obj.Key;
+
+        // Skip directory markers
+        if (s3Key.endsWith("/")) {
+          continue;
+        }
+
+        // Generate presigned URL
+        const presignedUrl = await getSignedUrl(
+          client,
+          new GetObjectCommand({
+            Bucket: env.S3_BUCKET_NAME,
+            Key: s3Key,
+          }),
+          { expiresIn: 3600 }, // 1 hour
+        );
+
+        // Extract file name
+        const fileName = s3Key.slice(fullPrefix.length);
+
+        files.push({
+          key: s3Key,
+          name: fileName,
+          size: obj.Size ?? 0,
+          last_modified: obj.LastModified?.toISOString() ?? null,
+          content_type: getContentTypeFromKey(s3Key),
+          presigned_url: presignedUrl,
+        });
+      }
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return files;
+}
+
+/**
  * Get all assets for a user from the database.
  * Queries videoAssets table filtered by userId via videoSessions join.
  */
