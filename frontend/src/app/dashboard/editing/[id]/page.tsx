@@ -21,7 +21,7 @@ export default async function EditingPage({ params }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-4">
       <div className="mb-4 shrink-0">
-        <h1 className="text-2xl font-semibold">Video Editor</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Video Editor</h1>
         <p className="text-muted-foreground text-sm">
           Preview and download your generated video
         </p>

@@ -40,6 +40,7 @@ type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
   toggleSidebar: () => void
+  mounted: boolean
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -68,6 +69,12 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
+  const [mounted, setMounted] = React.useState(false)
+
+  // Track when component is mounted to avoid hydration mismatch
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -122,8 +129,9 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      mounted,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, mounted]
   )
 
   return (

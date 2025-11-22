@@ -302,20 +302,20 @@ export function EditingPageClient({
           <div className="flex items-center gap-6 text-sm">
             <div>
               <span className="text-muted-foreground">Duration: </span>
-              <span className="font-medium">
+              <span className="font-medium text-foreground">
                 {formatDuration(videoMetadata.duration)}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Resolution: </span>
-              <span className="font-medium">
+              <span className="font-medium text-foreground">
                 {videoMetadata.width} x {videoMetadata.height}
               </span>
             </div>
             {sessionData?.created_at && (
               <div>
                 <span className="text-muted-foreground">Created: </span>
-                <span className="font-medium">
+                <span className="font-medium text-foreground">
                   {new Date(sessionData.created_at).toLocaleDateString()}
                 </span>
               </div>
@@ -330,13 +330,20 @@ export function EditingPageClient({
             Download Video
           </Button>
 
-          <Button variant="outline" onClick={() => setIsEditorMode(true)}>
+          <Button
+            variant="outline"
+            onClick={() => setIsEditorMode(true)}
+            className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+          >
             <Scissors className="mr-2 h-4 w-4" />
             Open Editor
           </Button>
 
           <Link href="/dashboard/hardcode-create">
-            <Button variant="ghost">
+            <Button
+              variant="outline"
+              className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+            >
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Create
             </Button>
