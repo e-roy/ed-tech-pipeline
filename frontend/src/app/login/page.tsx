@@ -24,7 +24,7 @@ export default async function LoginPage({
 
   // Redirect if already logged in (middleware also handles this, but good to have here too)
   if (session) {
-    redirect("/dashboard");
+    redirect("/dashboard/create");
   }
 
   return (
