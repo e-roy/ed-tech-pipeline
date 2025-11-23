@@ -192,9 +192,10 @@ async def create_timed_narration_track(audio_file_paths: List[str], output_path:
         start_time_seconds = i * segment_duration
         delay_ms = int(start_time_seconds * 1000)
 
-        # Add adelay filter to position this audio at the correct time
+        # Add atrim to limit audio to segment_duration, then adelay to position at correct time
+        # This prevents narration overlap between segments
         # adelay takes stereo input, so we delay both channels
-        filter_parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}]")
+        filter_parts.append(f"[{i}:a]atrim=0:{segment_duration},adelay={delay_ms}|{delay_ms}[a{i}]")
 
     # Mix all delayed audio tracks together, extending to total duration
     mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
@@ -323,6 +324,7 @@ async def concatenate_all_video_clips(clip_paths: List[str], output_path: str) -
 async def extract_last_frame_as_base64(video_url: str) -> str:
     """
     Extract the last frame from a video and return it as a base64 data URI.
+    Includes validation and multiple fallback strategies.
 
     Args:
         video_url: URL to the video file
@@ -333,6 +335,7 @@ async def extract_last_frame_as_base64(video_url: str) -> str:
     import base64
     import io
     import httpx
+    from PIL import Image
 
     # Download video (use long timeout for large files from Replicate)
     async with httpx.AsyncClient(timeout=300.0) as client:
@@ -347,27 +350,68 @@ async def extract_last_frame_as_base64(video_url: str) -> str:
         temp_video_path = temp_video.name
 
     try:
-        # Use FFmpeg to extract last frame as PNG to stdout
-        cmd = [
-            "ffmpeg",
-            "-sseof", "-3",  # Start 3 seconds from end
-            "-i", temp_video_path,
-            "-frames:v", "1",  # Extract 1 frame
-            "-f", "image2pipe",  # Output to pipe
-            "-c:v", "png",  # PNG format
-            "-"  # Output to stdout
+        # Try multiple extraction strategies in order of preference
+        strategies = [
+            # Strategy 1: Extract from 0.1s before end (safer than 0.033s)
+            {
+                "name": "0.1s before end",
+                "cmd": ["ffmpeg", "-sseof", "-0.1", "-i", temp_video_path,
+                       "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"]
+            },
+            # Strategy 2: Extract from 0.5s before end (even safer)
+            {
+                "name": "0.5s before end",
+                "cmd": ["ffmpeg", "-sseof", "-0.5", "-i", temp_video_path,
+                       "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"]
+            },
+            # Strategy 3: Extract last keyframe
+            {
+                "name": "last keyframe",
+                "cmd": ["ffmpeg", "-i", temp_video_path, "-vf", "select='eq(pict_type,I)'",
+                       "-vsync", "vfr", "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"]
+            }
         ]
 
-        result = subprocess.run(cmd, capture_output=True, check=False)
-        if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg frame extraction failed: {result.stderr.decode()}")
+        for strategy in strategies:
+            logger.info(f"Trying frame extraction strategy: {strategy['name']}")
 
-        # Convert frame bytes to base64 data URI
-        frame_b64 = base64.b64encode(result.stdout).decode('utf-8')
-        data_uri = f"data:image/png;base64,{frame_b64}"
+            result = subprocess.run(strategy["cmd"], capture_output=True, check=False)
 
-        logger.info(f"Extracted last frame as base64 ({len(frame_b64)} chars)")
-        return data_uri
+            if result.returncode != 0:
+                logger.warning(f"Strategy '{strategy['name']}' failed: {result.stderr.decode()[:200]}")
+                continue
+
+            # Check if we got any output
+            if not result.stdout or len(result.stdout) < 100:
+                logger.warning(f"Strategy '{strategy['name']}' returned empty/tiny output ({len(result.stdout)} bytes)")
+                continue
+
+            # Validate it's a valid PNG using PIL
+            try:
+                img = Image.open(io.BytesIO(result.stdout))
+                width, height = img.size
+                logger.info(f"Strategy '{strategy['name']}' succeeded: {width}x{height} PNG ({len(result.stdout)} bytes)")
+
+                # Verify minimum dimensions (avoid 1x1 or corrupt images)
+                if width < 10 or height < 10:
+                    logger.warning(f"Strategy '{strategy['name']}' produced tiny image: {width}x{height}")
+                    continue
+
+                # Convert to base64 data URI
+                frame_b64 = base64.b64encode(result.stdout).decode('utf-8')
+                data_uri = f"data:image/png;base64,{frame_b64}"
+
+                logger.info(f"Successfully extracted valid frame ({len(frame_b64)} chars)")
+                return data_uri
+
+            except Exception as e:
+                logger.warning(f"Strategy '{strategy['name']}' produced invalid PNG: {e}")
+                continue
+
+        # All strategies failed
+        raise RuntimeError(
+            f"All frame extraction strategies failed. Tried: {', '.join(s['name'] for s in strategies)}"
+        )
 
     finally:
         # Clean up temp file
@@ -1057,13 +1101,24 @@ async def agent_5_process(
                         if section_image_url:
                             # Use image-to-video with Agent 3 image (Kling requires start_image)
                             logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (image-to-video from Agent 3 image)")
-                            service = ReplicateVideoService(replicate_api_key)
-                            clip_url = await service.generate_video_from_image(
-                                prompt=clip_prompt,
-                                image_url=section_image_url,
-                                model=model,
-                                seed=section_seed
-                            )
+                            try:
+                                service = ReplicateVideoService(replicate_api_key)
+                                clip_url = await service.generate_video_from_image(
+                                    prompt=clip_prompt,
+                                    image_url=section_image_url,
+                                    model=model,
+                                    seed=section_seed
+                                )
+                            except Exception as e:
+                                # Graceful fallback: if image-to-video fails, use text-to-video with Minimax
+                                # (Kling doesn't support text-to-video, so we must use a different model)
+                                logger.warning(f"[{session_id}] Image-to-video failed for {section}: {e}. Falling back to text-to-video with Minimax.")
+                                clip_url = await generate_video_replicate(
+                                    clip_prompt,
+                                    replicate_api_key,
+                                    model="minimax",  # Minimax supports text-to-video
+                                    seed=section_seed
+                                )
                         else:
                             # Fallback: text-to-video (if no Agent 3 image available)
                             logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (text-to-video - no Agent 3 image)")
@@ -1077,17 +1132,28 @@ async def agent_5_process(
                         # Subsequent clips: extract last frame from previous clip, then image-to-video
                         logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (image-to-video with continuity)")
 
-                        # Extract last frame as base64 from previous clip
-                        frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
+                        try:
+                            # Extract last frame as base64 from previous clip
+                            frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
 
-                        # Generate next clip from the frame
-                        service = ReplicateVideoService(replicate_api_key)
-                        clip_url = await service.generate_video_from_image(
-                            prompt=clip_prompt,
-                            image_url=frame_data_uri,
-                            model=model,
-                            seed=section_seed
-                        )
+                            # Generate next clip from the frame
+                            service = ReplicateVideoService(replicate_api_key)
+                            clip_url = await service.generate_video_from_image(
+                                prompt=clip_prompt,
+                                image_url=frame_data_uri,
+                                model=model,
+                                seed=section_seed
+                            )
+                        except Exception as e:
+                            # Graceful fallback: if frame extraction or image-to-video fails, use text-to-video with Minimax
+                            # (Kling doesn't support text-to-video, so we must use a different model)
+                            logger.warning(f"[{session_id}] Frame continuity failed for clip {clip_idx+1}: {e}. Falling back to text-to-video with Minimax.")
+                            clip_url = await generate_video_replicate(
+                                clip_prompt,
+                                replicate_api_key,
+                                model="minimax",  # Minimax supports text-to-video
+                                seed=section_seed
+                            )
 
                     generated_clips.append(clip_url)
                     previous_clip_url = clip_url
@@ -1259,31 +1325,48 @@ async def agent_5_process(
 
             # Generate images in parallel for all sections
             async def generate_section_image(section: str) -> tuple[str, Optional[str]]:
-                """Generate a DALL-E image for a section and return (section, image_url)"""
+                """Generate a DALL-E image for a section with retry logic. Returns (section, image_url)"""
                 visual_prompt = visual_prompts[section]
 
                 logger.info(f"[{session_id}] Generating image for '{section}' with DALL-E")
                 logger.info(f"[{session_id}] Image prompt for '{section}': {visual_prompt[:150]}...")
 
-                try:
-                    # Generate image with DALL-E 3 (standard quality, 16:9 aspect ratio)
-                    result = await dalle_generator.generate_image(
-                        prompt=visual_prompt,
-                        style="educational",
-                        quality="standard"  # $0.04 per image
-                    )
+                # Retry logic: up to 3 attempts
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        logger.info(f"[{session_id}] DALL-E generation attempt {attempt}/{max_retries} for '{section}'")
 
-                    if result.get("success"):
-                        image_url = result["url"]
-                        logger.info(f"[{session_id}] Successfully generated image for '{section}': {image_url[:100]}...")
-                        return (section, image_url)
-                    else:
-                        logger.error(f"[{session_id}] Failed to generate image for '{section}': {result.get('error', 'Unknown error')}")
-                        return (section, None)
+                        # Generate image with DALL-E 3 (standard quality, 16:9 aspect ratio)
+                        result = await dalle_generator.generate_image(
+                            prompt=visual_prompt,
+                            style="educational",
+                            quality="standard"  # $0.04 per image
+                        )
 
-                except Exception as e:
-                    logger.error(f"[{session_id}] Exception generating image for '{section}': {e}")
-                    return (section, None)
+                        if result.get("success"):
+                            image_url = result["url"]
+                            logger.info(f"[{session_id}] Successfully generated image for '{section}' on attempt {attempt}/{max_retries}: {image_url[:100]}...")
+                            return (section, image_url)
+                        else:
+                            error_msg = result.get('error', 'Unknown error')
+                            logger.warning(f"[{session_id}] Failed to generate image for '{section}' (attempt {attempt}/{max_retries}): {error_msg}")
+                            if attempt < max_retries:
+                                continue  # Retry
+                            else:
+                                logger.error(f"[{session_id}] All {max_retries} attempts exhausted for '{section}'")
+                                return (section, None)
+
+                    except Exception as e:
+                        logger.error(f"[{session_id}] Exception generating image for '{section}' (attempt {attempt}/{max_retries}): {e}")
+                        if attempt < max_retries:
+                            continue  # Retry
+                        else:
+                            logger.error(f"[{session_id}] All {max_retries} attempts exhausted for '{section}'")
+                            return (section, None)
+
+                # Fallback (should never reach here, but just in case)
+                return (section, None)
 
             # Generate all images in parallel
             image_results = await asyncio.gather(*[generate_section_image(section) for section in sections])
