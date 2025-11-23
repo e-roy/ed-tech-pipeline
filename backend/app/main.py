@@ -71,6 +71,10 @@ app.add_middleware(
 from app.routes.video_editor import router as video_editor_router
 app.include_router(video_editor_router)
 
+# Include diagnostics router
+from app.routes.diagnostics import router as diagnostics_router
+app.include_router(diagnostics_router)
+
 
 # Request/Response models
 class ProcessRequest(BaseModel):

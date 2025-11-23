@@ -59,8 +59,11 @@ async def agent_4_process(
         storage_service = StorageService()
     
     # Query video_session table if db is provided (same as Agent2)
+    # Agent4 always queries the database when db is provided, using user_id and session_id from orchestrator
+    # The database connection uses DATABASE_URL from AWS Secrets Manager (via database.py)
     if db is not None:
         try:
+            logger.info(f"Agent4 querying video_session table for session_id={session_id}, user_id={user_id}")
             result = db.execute(
                 sql_text(
                     "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
@@ -85,10 +88,13 @@ async def agent_4_process(
                     "child_age": getattr(result, "child_age", None),
                     "child_interest": getattr(result, "child_interest", None),
                 }
-            logger.info(f"Agent4 loaded video_session data for session {session_id}")
+            logger.info(f"Agent4 successfully loaded video_session data for session {session_id} from database (using DATABASE_URL from Secrets Manager)")
         except Exception as e:
-            logger.error(f"Agent4 failed to query video_session: {e}")
+            logger.error(f"Agent4 failed to query video_session table: {e}")
             raise
+    elif video_session_data is None:
+        # If no db and no video_session_data provided, this is an error
+        raise ValueError(f"Agent4 requires either db session or video_session_data. Neither provided for session {session_id}")
     
     # Extract data from video_session (same as Agent2 does)
     topic = None

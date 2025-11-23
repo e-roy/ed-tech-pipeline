@@ -1,20 +1,53 @@
 """
 Database configuration and session management.
 """
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
+
+# Get DATABASE_URL from Secrets Manager first, then fall back to environment variable
+# This allows production (ECS) to use Secrets Manager while local dev uses .env file
+database_url = None
+
+# Try to get from AWS Secrets Manager first
+try:
+    from app.services.secrets import get_secret
+    try:
+        database_url = get_secret("pipeline/database-url")
+        logger.info("Retrieved DATABASE_URL from AWS Secrets Manager")
+    except Exception as e:
+        # Secrets Manager not available or secret doesn't exist - fall back to env var
+        logger.debug(f"Could not retrieve DATABASE_URL from Secrets Manager: {e}, falling back to environment variable")
+        database_url = None
+except ImportError:
+    # Secrets module not available (shouldn't happen, but handle gracefully)
+    logger.debug("Secrets module not available, using environment variable")
+    database_url = None
+except Exception:
+    # Any other error - fall back to env var
+    database_url = None
+
+# Fall back to environment variable if Secrets Manager didn't work
+if not database_url:
+    database_url = settings.DATABASE_URL
+    logger.debug("Using DATABASE_URL from environment variable")
+
+# Validate that we have a database URL
+if not database_url:
+    raise ValueError("DATABASE_URL is not configured. Set it in AWS Secrets Manager (pipeline/database-url) or environment variable (DATABASE_URL)")
 
 # Create SQLAlchemy engine
 # For Neon/SSL connections, configure SSL via connect_args to avoid certificate file requirements
-database_url = settings.DATABASE_URL
 connect_args = {}
 
 # If using Neon database, configure SSL without requiring certificate files
-if "neon" in database_url.lower():
+if database_url and "neon" in database_url.lower():
     import re
 
     # Remove ALL query parameters from URL (we'll set them via connect_args)
@@ -30,7 +63,7 @@ if "neon" in database_url.lower():
     }
 
 # Fallback: ensure SSL is at least preferred for PostgreSQL connections
-if database_url.startswith("postgresql") and "sslmode" not in connect_args:
+if database_url and database_url.startswith("postgresql") and "sslmode" not in connect_args:
     connect_args["sslmode"] = "prefer"
 
 engine = create_engine(
