@@ -1075,10 +1075,13 @@ async def agent_5_process(
             section_cost = len(generated_clips) * COST_PER_CLIP
             cost_per_section[section] = section_cost
 
+            # Initialize current_total_cost before loops
+            current_total_cost = sum(cost_per_section.values())
+
             # Update progress with cost info
             for clip_idx in range(len(generated_clips)):
                 completed_videos.append(f"{section}_{clip_idx}")
-                # Calculate current total cost for progress updates
+                # Update current total cost for progress updates
                 current_total_cost = sum(cost_per_section.values())
                 await send_status(
                     "Agent5",
@@ -1097,7 +1100,7 @@ async def agent_5_process(
 
             # Download and verify all clips with retry logic
             MAX_CLIP_RETRIES = 2
-            COST_PER_CLIP = 0.09  # ~$0.035/6s for Minimax + padding
+            RETRY_COST_PER_CLIP = 0.09  # Cost for retry clips (~$0.035/6s for Minimax + padding)
             clip_paths = []
 
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -1182,8 +1185,8 @@ async def agent_5_process(
                                             )
 
                                     # Track retry cost
-                                    cost_per_section[section] += COST_PER_CLIP
-                                    current_total_cost += COST_PER_CLIP
+                                    cost_per_section[section] += RETRY_COST_PER_CLIP
+                                    current_total_cost += RETRY_COST_PER_CLIP
 
                                     # Send status update about retry
                                     await send_status(
