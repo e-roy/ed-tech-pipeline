@@ -54,6 +54,11 @@ class Session(Base):
     # Results
     final_video_url = Column(String(500), nullable=True)
 
+    # Final video verification fields
+    final_video_verification_status = Column(String(50), nullable=True)  # 'passed', 'failed', 'warning', 'skipped'
+    final_video_verification_data = Column(JSON, nullable=True)  # Detailed verification check results
+    final_video_verified_at = Column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -83,6 +88,11 @@ class Asset(Base):
 
     # Metadata
     asset_metadata = Column(JSON, nullable=True)  # Additional info (dimensions, duration, etc.)
+
+    # Verification fields
+    verification_status = Column(String(50), nullable=True)  # 'passed', 'failed', 'warning', 'skipped'
+    verification_data = Column(JSON, nullable=True)  # Detailed verification check results
+    verified_at = Column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

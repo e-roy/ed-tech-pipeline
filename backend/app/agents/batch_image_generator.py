@@ -19,6 +19,7 @@ from app.agents.helpers.template_matcher import TemplateMatcher
 from app.agents.helpers.psd_customizer import PSDCustomizer
 from app.agents.helpers.dalle_generator import DALLEGenerator
 from app.services.storage import StorageService
+from app.services.image_verifier import ImageVerificationService
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +34,22 @@ class BatchImageGeneratorAgent:
     - Targets 60% template usage to minimize costs
     """
 
-    def __init__(self, openai_api_key: str = None):
+    def __init__(self, openai_api_key: str = None, websocket_manager=None, session_id: Optional[str] = None):
         """
         Initialize the Batch Image Generator Agent.
 
         Args:
             openai_api_key: OpenAI API key for DALL-E 3
+            websocket_manager: Optional WebSocket manager for real-time updates
+            session_id: Optional session ID for WebSocket updates
         """
         self.template_matcher = TemplateMatcher()
         self.psd_customizer = PSDCustomizer()
         self.dalle_generator = DALLEGenerator(api_key=openai_api_key)
         self.storage_service = StorageService()
+        self.websocket_manager = websocket_manager
+        self.session_id = session_id
+        self.image_verifier = ImageVerificationService(websocket_manager=websocket_manager, session_id=session_id)
 
     async def process(self, input: AgentInput) -> AgentOutput:
         """
@@ -363,6 +369,21 @@ class BatchImageGeneratorAgent:
                         # (For now, return a placeholder - storage integration needed)
                         url = template_match['preview_url']  # TODO: Upload customized version
 
+                        # Verify image quality
+                        logger.info(f"[{session_id}] Verifying {part_name} image {image_index + 1} (template)...")
+                        verification_result = await self.image_verifier.verify_image(
+                            image_url=url,
+                            image_index=image_index
+                        )
+
+                        if verification_result.failed:
+                            logger.warning(
+                                f"[{session_id}] Image {image_index + 1} verification failed: "
+                                f"{len(verification_result.failed_checks)} failures"
+                            )
+                            for check in verification_result.failed_checks:
+                                logger.warning(f"  - {check.check_name}: {check.message}")
+
                         duration = time.time() - start
 
                         return {
@@ -377,7 +398,8 @@ class BatchImageGeneratorAgent:
                                 "template_name": template_match['name'],
                                 "key_concepts": key_concepts,
                                 "visual_guidance": visual_guidance[:200]
-                            }
+                            },
+                            "verification": verification_result.to_dict()
                         }
                     except Exception as e:
                         logger.warning(
@@ -410,6 +432,21 @@ class BatchImageGeneratorAgent:
             if not result['success']:
                 raise Exception(result.get('error', 'DALL-E generation failed'))
 
+            # Verify image quality
+            logger.info(f"[{session_id}] Verifying {part_name} image {image_index + 1} (DALL-E)...")
+            verification_result = await self.image_verifier.verify_image(
+                image_url=result['url'],
+                image_index=image_index
+            )
+
+            if verification_result.failed:
+                logger.warning(
+                    f"[{session_id}] Image {image_index + 1} verification failed: "
+                    f"{len(verification_result.failed_checks)} failures"
+                )
+                for check in verification_result.failed_checks:
+                    logger.warning(f"  - {check.check_name}: {check.message}")
+
             duration = time.time() - start
 
             return {
@@ -424,7 +461,8 @@ class BatchImageGeneratorAgent:
                     "key_concepts": key_concepts,
                     "visual_guidance": visual_guidance[:200],
                     "prompt_used": result.get('prompt_used', '')[:200]
-                }
+                },
+                "verification": verification_result.to_dict()
             }
 
         except Exception as e:

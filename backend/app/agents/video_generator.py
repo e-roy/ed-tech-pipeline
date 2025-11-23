@@ -18,6 +18,7 @@ import replicate
 
 from app.agents.base import AgentInput, AgentOutput
 from app.services.storage import StorageService
+from app.services.video_verifier import VideoVerificationService
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +34,22 @@ class VideoGeneratorAgent:
     - Cost tracking per clip
     """
 
-    def __init__(self, replicate_api_key: str, storage_service: Optional[StorageService] = None):
+    def __init__(self, replicate_api_key: str, storage_service: Optional[StorageService] = None, websocket_manager=None, session_id: Optional[str] = None):
         """
         Initialize the Video Generator Agent.
 
         Args:
             replicate_api_key: Replicate API key for video generation
             storage_service: Optional storage service for S3 uploads (if not provided, will create one)
+            websocket_manager: Optional WebSocket manager for real-time updates
+            session_id: Optional session ID for WebSocket updates
         """
         self.api_key = replicate_api_key
         self.client = replicate.Client(api_token=replicate_api_key)
         self.storage_service = storage_service or StorageService()
+        self.websocket_manager = websocket_manager
+        self.session_id = session_id
+        self.video_verifier = VideoVerificationService(websocket_manager=websocket_manager, session_id=session_id)
 
         # Model configurations (Replicate model IDs)
         self.models = {
@@ -456,6 +462,23 @@ Create scene-specific prompts for each image view."""
                         clip_id=clip_id
                     )
 
+                # Verify video quality
+                logger.info(f"[{session_id}] Verifying clip {index + 1}...")
+                verification_result = await self.video_verifier.verify_clip(
+                    video_url=str(video_url),
+                    expected_duration=duration_seconds,
+                    clip_index=index
+                )
+
+                if verification_result.failed:
+                    logger.warning(
+                        f"[{session_id}] Clip {index + 1} verification failed: "
+                        f"{len(verification_result.failed_checks)} failures"
+                    )
+                    # Log failed checks
+                    for check in verification_result.failed_checks:
+                        logger.warning(f"  - {check.check_name}: {check.message}")
+
                 return {
                     "id": clip_id,
                     "url": str(video_url),
@@ -468,7 +491,8 @@ Create scene-specific prompts for each image view."""
                     "model": model,
                     "scene_prompt": scene_prompt[:100] + "...",
                     "motion_intensity": None,
-                    "audio_enabled": False
+                    "audio_enabled": False,
+                    "verification": verification_result.to_dict()
                 }
 
             elif model == "gen-4-turbo":
@@ -518,6 +542,23 @@ Create scene-specific prompts for each image view."""
                         clip_id=clip_id
                     )
 
+                # Verify video quality
+                logger.info(f"[{session_id}] Verifying clip {index + 1}...")
+                verification_result = await self.video_verifier.verify_clip(
+                    video_url=str(video_url),
+                    expected_duration=duration_seconds,
+                    clip_index=index
+                )
+
+                if verification_result.failed:
+                    logger.warning(
+                        f"[{session_id}] Clip {index + 1} verification failed: "
+                        f"{len(verification_result.failed_checks)} failures"
+                    )
+                    # Log failed checks
+                    for check in verification_result.failed_checks:
+                        logger.warning(f"  - {check.check_name}: {check.message}")
+
                 return {
                     "id": clip_id,
                     "url": str(video_url),
@@ -530,7 +571,8 @@ Create scene-specific prompts for each image view."""
                     "model": model,
                     "scene_prompt": scene_prompt[:100] + "...",
                     "motion_intensity": None,
-                    "audio_enabled": False
+                    "audio_enabled": False,
+                    "verification": verification_result.to_dict()
                 }
 
             else:

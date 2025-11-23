@@ -17,9 +17,9 @@ connect_args = {}
 if "neon" in database_url.lower():
     import re
 
-    # Remove sslmode from URL if present (we'll set it via connect_args)
-    database_url = re.sub(r"[&?]sslmode=[^&]*", "", database_url, flags=re.IGNORECASE)
-    database_url = re.sub(r"[&?]$", "", database_url)
+    # Remove ALL query parameters from URL (we'll set them via connect_args)
+    # This prevents parameters like channel_binding from being interpreted as part of the database name
+    database_url = re.sub(r"\?.*$", "", database_url)
 
     connect_args = {
         "sslmode": "require",

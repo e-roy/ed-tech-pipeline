@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # External Services
     REPLICATE_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
+    GOOGLE_AI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
 
     # AWS S3
     AWS_ACCESS_KEY_ID: str = ""
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     DEBUG: bool = True
+    USE_AWS_SECRETS: bool = False  # Set to True in production to use AWS Secrets Manager
 
     class Config:
         env_file = ".env"

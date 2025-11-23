@@ -22,6 +22,11 @@ openai==1.54.0
 # Image Processing
 pillow==10.4.0
 requests==2.32.3
+numpy==1.26.4
+
+# Video Processing & Verification
+ffmpeg-python==0.2.0
+opencv-python-headless==4.10.0.84
 
 # WebSocket
 websockets==12.0

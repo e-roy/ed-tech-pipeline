@@ -14,6 +14,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+from app.services.video_verifier import VideoVerificationService
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,15 +31,20 @@ class FFmpegCompositor:
     - Output 1080p final video
     """
 
-    def __init__(self, work_dir: Optional[str] = None):
+    def __init__(self, work_dir: Optional[str] = None, websocket_manager=None, session_id: Optional[str] = None):
         """
         Initialize FFmpeg compositor.
 
         Args:
             work_dir: Working directory for temporary files (default: system temp)
+            websocket_manager: Optional WebSocket manager for real-time updates
+            session_id: Optional session ID for WebSocket updates
         """
         self.work_dir = work_dir or tempfile.gettempdir()
         Path(self.work_dir).mkdir(parents=True, exist_ok=True)
+        self.websocket_manager = websocket_manager
+        self.session_id = session_id
+        self.video_verifier = VideoVerificationService(websocket_manager=websocket_manager, session_id=session_id)
 
         # Verify FFmpeg is installed
         try:
@@ -105,9 +112,28 @@ class FFmpegCompositor:
 
             logger.info(f"[{session_id}] Video composition complete: {final_path}")
 
+            # Verify final composed video quality
+            logger.info(f"[{session_id}] Verifying final composed video...")
+            video_duration = await self._get_video_duration(final_path)
+            verification_result = await self.video_verifier.verify_final_video(
+                video_url=final_path,
+                expected_duration=video_duration
+            )
+
+            if verification_result.failed:
+                logger.warning(
+                    f"[{session_id}] Final video verification failed: "
+                    f"{len(verification_result.failed_checks)} failures"
+                )
+                for check in verification_result.failed_checks:
+                    logger.warning(f"  - {check.check_name}: {check.message}")
+            else:
+                logger.info(f"[{session_id}] Final video passed verification")
+
             return {
                 "output_path": final_path,
-                "duration": await self._get_video_duration(final_path)
+                "duration": video_duration,
+                "verification": verification_result.to_dict()
             }
 
         except Exception as e:
