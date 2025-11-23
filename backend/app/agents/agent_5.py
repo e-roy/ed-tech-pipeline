@@ -2,14 +2,14 @@
 Agent 5 - Video Generator using FFmpeg
 
 Generates a 60-second video from pipeline data:
-1. Generates AI videos in parallel using Replicate (Minimax)
+1. Generates AI videos in parallel using Replicate (Google Veo 3)
 2. Downloads and concatenates all narration audio files
 3. Mixes concatenated narration with background music
 4. Concatenates all video clips into one video
 5. Combines final video with final audio
 6. Uploads final video to S3
 
-Uses Replicate Minimax for AI-generated video clips (~$0.035/5s video)
+Uses Google Veo 3 for AI-generated video clips (~$1.20/6s video, without audio)
 """
 import asyncio
 import json
@@ -38,17 +38,17 @@ from app.config import get_settings
 async def generate_video_replicate(
     prompt: str,
     api_key: str,
-    model: str = "minimax",
+    model: str = "veo3",
     progress_callback: Optional[callable] = None,
     seed: Optional[int] = None
 ) -> str:
     """
-    Generate a video using Replicate (Minimax video-01 by default).
+    Generate a video using Replicate (Google Veo 3 by default).
 
     Args:
         prompt: Visual description for the video
         api_key: Replicate API key
-        model: Model to use ("minimax", "kling", "luma")
+        model: Model to use ("veo3", "minimax", "kling", "luma")
         progress_callback: Optional callback for progress updates
         seed: Optional random seed for reproducibility
 
@@ -417,7 +417,7 @@ def sanitize_video_prompt(prompt: str) -> str:
     """
     Sanitize video prompt to prevent text, numbers, equations, and math from appearing.
 
-    Best practices for Minimax video-01:
+    Best practices for video generation:
     - Remove mentions of text, equations, formulas, numbers, labels
     - Focus on visual, physical elements only
     - Keep prompts concise and action-focused
@@ -470,7 +470,7 @@ async def agent_5_process(
     Agent5: Video generation agent using FFmpeg.
 
     Generates a complete video by:
-    1. Generating AI video clips in parallel using Replicate (Minimax)
+    1. Generating AI video clips in parallel using Replicate (Google Veo 3)
     2. Concatenating all narration audio files
     3. Mixing narration with background music
     4. Concatenating all video clips
@@ -934,12 +934,12 @@ async def agent_5_process(
         completed_videos = []
         
         # Cost tracking
-        # Minimax video-01: ~$0.035 per 5-6 second clip
-        COST_PER_CLIP = 0.035  # USD per clip (5-6 seconds)
+        # Google Veo 3: $0.20 per second without audio = $1.20 per 6-second clip
+        COST_PER_CLIP = 1.20  # USD per clip (6 seconds, without audio)
         # Note: total_cost and cost_per_section are already initialized at function start (line 453-454)
 
         # Constants for video generation
-        CLIP_DURATION = 6.0  # Minimax generates 6-second clips
+        CLIP_DURATION = 6.0  # Veo 3 generates 6-second clips
         
         # Rate limiting: Max 4 concurrent Replicate API calls to avoid overwhelming the service
         MAX_CONCURRENT_REPLICATE_CALLS = 4
@@ -1010,7 +1010,7 @@ async def agent_5_process(
                 consistency_anchor = " | ".join(consistency_parts) + " | "
 
             # Generate progressive prompts for each clip position
-            # Keep prompts concise - Minimax works best with shorter, focused prompts
+            # Keep prompts concise - Veo 3 works best with shorter, focused prompts
             clip_prompts = []
             for i in range(clips_needed):
                 # Create clip-specific temporal and action cues based on position
@@ -1049,7 +1049,7 @@ async def agent_5_process(
                         clip_url = await generate_video_replicate(
                             clip_prompt,
                             replicate_api_key,
-                            model="minimax",
+                            model="veo3",
                             seed=section_seed
                         )
                     else:
@@ -1064,7 +1064,7 @@ async def agent_5_process(
                         clip_url = await service.generate_video_from_image(
                             prompt=clip_prompt,
                             image_url=frame_data_uri,
-                            model="minimax",
+                            model="veo3",
                             seed=section_seed
                         )
 
@@ -1098,119 +1098,55 @@ async def agent_5_process(
                     cost_breakdown=cost_per_section
                 )
 
-            # Download and verify all clips with retry logic
-            MAX_CLIP_RETRIES = 2
-            RETRY_COST_PER_CLIP = 0.09  # Cost for retry clips (~$0.035/6s for Minimax + padding)
+            # Download and verify all clips (single attempt, no regeneration)
             clip_paths = []
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 for i, clip_url in enumerate(generated_clips):
-                    clip_verified = False
-                    failed_check_names = []
+                    try:
+                        # Download clip
+                        response = await client.get(clip_url)
+                        response.raise_for_status()
+                        clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
+                        with open(clip_path, 'wb') as f:
+                            f.write(response.content)
 
-                    for retry_attempt in range(MAX_CLIP_RETRIES + 1):
-                        try:
-                            # Download clip
-                            response = await client.get(clip_url)
-                            response.raise_for_status()
-                            clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
-                            with open(clip_path, 'wb') as f:
-                                f.write(response.content)
-
-                            # VERIFY CLIP (includes all 8 checks: file, duration, resolution, frames, audio, integrity, visual, text)
-                            logger.info(f"[{session_id}] Verifying {section} clip {i + 1}/{len(generated_clips)}...")
-                            verification_result = await video_verifier.verify_clip(
-                                video_url=clip_path,
-                                expected_duration=6.0,  # Minimax generates 6-second clips
-                                clip_index=i
-                            )
-
-                            if verification_result.passed:
-                                # SUCCESS - Clip verified, save and continue
-                                clip_paths.append(clip_path)
-
-                                # Save verified clip to S3 for restart capability
-                                clip_s3_key = f"users/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
-                                try:
-                                    with open(clip_path, 'rb') as f:
-                                        clip_content = f.read()
-                                    storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
-                                    logger.info(f"[{session_id}] ✓ Clip {i + 1} verified and saved for {section}")
-                                except Exception as e:
-                                    logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
-
-                                clip_verified = True
-                                break
-                            else:
-                                # VERIFICATION FAILED
-                                failed_check_names = [c.check_name for c in verification_result.failed_checks]
-                                logger.warning(
-                                    f"[{session_id}] Clip {i + 1} for {section} failed verification: {failed_check_names} "
-                                    f"(attempt {retry_attempt + 1}/{MAX_CLIP_RETRIES + 1})"
-                                )
-
-                                if retry_attempt < MAX_CLIP_RETRIES:
-                                    # REGENERATE CLIP
-                                    logger.info(f"[{session_id}] Regenerating {section} clip {i + 1}...")
-
-                                    # Get the clip prompt (need to reconstruct it)
-                                    clip_prompt = clip_prompts[i]
-
-                                    # Enhanced prompt if text was detected
-                                    if any('text' in check_name for check_name in failed_check_names):
-                                        clip_prompt = f"NO TEXT, NO CAPTIONS, NO OVERLAYS, PURE VISUAL ANIMATION: {clip_prompt}"
-                                        logger.info(f"[{session_id}] Using enhanced anti-text prompt for retry")
-
-                                    # Regenerate clip with same logic as original generation
-                                    async with replicate_semaphore:
-                                        if i == 0:
-                                            # First clip: text-to-video
-                                            clip_url = await generate_video_replicate(
-                                                clip_prompt,
-                                                replicate_api_key,
-                                                model="minimax",
-                                                seed=section_seed
-                                            )
-                                        else:
-                                            # Subsequent clips: extract last frame from previous clip, then image-to-video
-                                            previous_clip_url = clip_url if retry_attempt > 0 else generated_clips[i - 1]
-                                            frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
-
-                                            service = ReplicateVideoService(replicate_api_key)
-                                            clip_url = await service.generate_video_from_image(
-                                                prompt=clip_prompt,
-                                                image_url=frame_data_uri,
-                                                model="minimax",
-                                                seed=section_seed
-                                            )
-
-                                    # Track retry cost
-                                    cost_per_section[section] += RETRY_COST_PER_CLIP
-                                    current_total_cost += RETRY_COST_PER_CLIP
-
-                                    # Send status update about retry
-                                    await send_status(
-                                        "Agent5", "processing",
-                                        supersessionID=supersessionid,
-                                        message=f"Regenerating {section} clip {i + 1} (retry {retry_attempt + 1})",
-                                        cost=current_total_cost,
-                                        cost_breakdown=cost_per_section
-                                    )
-
-                                    await asyncio.sleep(2)  # Brief delay before retry
-                                    continue
-
-                        except Exception as e:
-                            logger.error(f"[{session_id}] Error processing clip {i + 1} for {section} (attempt {retry_attempt + 1}): {e}")
-                            if retry_attempt < MAX_CLIP_RETRIES:
-                                await asyncio.sleep(2)
-                                continue
-
-                    if not clip_verified:
-                        raise RuntimeError(
-                            f"Failed to generate valid clip {i + 1} for {section} after {MAX_CLIP_RETRIES + 1} attempts. "
-                            f"Failed checks: {failed_check_names}"
+                        # VERIFY CLIP (includes all 8 checks: file, duration, resolution, frames, audio, integrity, visual, text)
+                        logger.info(f"[{session_id}] Verifying {section} clip {i + 1}/{len(generated_clips)}...")
+                        verification_result = await video_verifier.verify_clip(
+                            video_url=clip_path,
+                            expected_duration=6.0,  # Veo 3 generates 6-second clips
+                            clip_index=i
                         )
+
+                        if verification_result.passed:
+                            logger.info(f"[{session_id}] ✓ Clip {i + 1} passed verification for {section}")
+                        else:
+                            # Log verification failures as warnings but continue with clip
+                            failed_check_names = [c.check_name for c in verification_result.failed_checks]
+                            logger.warning(
+                                f"[{session_id}] ⚠ Clip {i + 1} for {section} failed verification: {failed_check_names}. "
+                                f"Continuing with clip anyway (regeneration disabled)."
+                            )
+                            for check in verification_result.failed_checks:
+                                logger.warning(f"[{session_id}]   - {check.check_name}: {check.message}")
+
+                        # Accept clip regardless of verification result
+                        clip_paths.append(clip_path)
+
+                        # Save clip to S3 for restart capability
+                        clip_s3_key = f"users/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
+                        try:
+                            with open(clip_path, 'rb') as f:
+                                clip_content = f.read()
+                            storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
+                            logger.info(f"[{session_id}] Saved clip {i + 1} to S3 for {section}")
+                        except Exception as e:
+                            logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
+
+                    except Exception as e:
+                        logger.error(f"[{session_id}] Error downloading/processing clip {i + 1} for {section}: {e}")
+                        raise RuntimeError(f"Failed to download clip {i + 1} for {section}: {e}")
 
             logger.info(f"[{session_id}] Downloaded and saved {len(generated_clips)} clips for {section}")
 

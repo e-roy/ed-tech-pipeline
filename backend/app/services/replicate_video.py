@@ -20,6 +20,7 @@ class ReplicateVideoService:
         "minimax": "minimax/video-01",  # Cheapest ~$0.035/5s
         "kling": "kwaivgi/kling-v1.5-pro",  # Higher quality ~$0.15/5s
         "luma": "luma/dream-machine",  # High quality ~$0.20/5s
+        "veo3": "google/veo-3",  # Google Veo 3 - High quality ~$1.20/6s (without audio)
     }
 
     def __init__(self, api_key: Optional[str] = None):
@@ -55,7 +56,7 @@ class ReplicateVideoService:
 
         Args:
             prompt: Text description of the video to generate
-            model: Model to use ("minimax", "kling", "luma")
+            model: Model to use ("minimax", "kling", "luma", "veo3")
             duration: Approximate video duration (model-dependent)
             seed: Optional random seed for reproducibility
 
@@ -112,6 +113,16 @@ class ReplicateVideoService:
                 "aspect_ratio": "16:9",
             }
             # Luma may not support seed - only add if provided
+            if seed is not None:
+                input_data["seed"] = seed
+        elif "veo-3" in model_id or "veo3" in model_id:
+            input_data = {
+                "prompt": prompt,
+                "duration": 6,  # 6-second clips to match pipeline
+                "aspect_ratio": "16:9",
+                "resolution": "1080p",
+                "generate_audio": False,  # Disable audio to save cost (agent 5 adds its own audio)
+            }
             if seed is not None:
                 input_data["seed"] = seed
         else:
@@ -190,6 +201,17 @@ class ReplicateVideoService:
             }
             if seed is not None:
                 input_data["seed"] = seed
+        elif "veo-3" in model_id or "veo3" in model_id:
+            input_data = {
+                "prompt": prompt,
+                "image": image_url,
+                "duration": 6,  # 6-second clips to match pipeline
+                "aspect_ratio": "16:9",
+                "resolution": "1080p",
+                "generate_audio": False,  # Disable audio to save cost
+            }
+            if seed is not None:
+                input_data["seed"] = seed
         else:
             input_data = {
                 "prompt": prompt,
@@ -229,7 +251,7 @@ async def generate_scene_videos(
     Args:
         script: Script data with visual_prompt for each section
         api_key: Replicate API key
-        model: Model to use ("minimax", "kling", "luma")
+        model: Model to use ("minimax", "kling", "luma", "veo3")
         progress_callback: Async callback for progress updates
 
     Returns:
