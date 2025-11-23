@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Trash2, ArrowRight } from "lucide-react";
+import { Trash2, ArrowRight, Loader2 } from "lucide-react";
 import {
   Empty,
   EmptyHeader,
@@ -17,7 +17,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -30,6 +29,9 @@ import {
 export default function HistoryPage() {
   const { data: sessions, isLoading } = api.script.list.useQuery();
   const utils = api.useUtils();
+  const router = useRouter();
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const deleteMutation = (
     api.script as typeof api.script & {
@@ -46,6 +48,54 @@ export default function HistoryPage() {
       );
     },
   });
+
+  // Handle bulk delete all
+  const handleDeleteAll = async () => {
+    if (!sessions || sessions.length === 0 || isDeletingAll) return;
+
+    setIsDeletingAll(true);
+    const sessionIds = sessions.map((s) => s.id);
+    const failedDeletions: string[] = [];
+    let deletedCount = 0;
+
+    try {
+      // Delete each session with 200ms delay
+      for (let i = 0; i < sessionIds.length; i++) {
+        const sessionId = sessionIds[i];
+        try {
+          await deleteMutation.mutateAsync({ sessionId });
+          deletedCount++;
+          
+          // Wait 200ms before next deletion (except for the last one)
+          if (i < sessionIds.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+        } catch (error) {
+          failedDeletions.push(sessionId);
+        }
+      }
+
+      // Refresh the list
+      await utils.script.list.invalidate();
+
+      // Show results
+      if (failedDeletions.length === 0) {
+        toast.success(`Successfully deleted ${deletedCount} session(s)`);
+      } else {
+        toast.error(
+          `Deleted ${deletedCount} session(s). Failed to delete ${failedDeletions.length} session(s).`
+        );
+      }
+
+      // Navigate away if we're on a session page (sessions might be deleted)
+      router.push("/dashboard/create");
+    } catch (error) {
+      toast.error("An error occurred during bulk deletion");
+    } finally {
+      setIsDeletingAll(false);
+      setShowDeleteAllDialog(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -65,11 +115,23 @@ export default function HistoryPage() {
 
   return (
     <div className="flex h-full flex-col p-4">
-      <div className="mb-4">
-        <h1 className="text-2xl font-semibold">History</h1>
-        <p className="text-muted-foreground text-sm">
-          {sessions?.length ?? 0} session{sessions?.length !== 1 ? "s" : ""}
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">History</h1>
+          <p className="text-muted-foreground text-sm">
+            {sessions?.length ?? 0} session{sessions?.length !== 1 ? "s" : ""}
+          </p>
+        </div>
+        {sessions && sessions.length > 0 && (
+          <Button
+            variant="destructive"
+            onClick={() => setShowDeleteAllDialog(true)}
+            disabled={isDeletingAll}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete All
+          </Button>
+        )}
       </div>
 
       {!sessions || sessions.length === 0 ? (
@@ -95,6 +157,55 @@ export default function HistoryPage() {
           ))}
         </div>
       )}
+
+      {/* Delete All Confirmation Dialog */}
+      <AlertDialog
+        open={showDeleteAllDialog}
+        onOpenChange={(open) => {
+          // Prevent closing during deletion
+          if (!isDeletingAll && !open) {
+            setShowDeleteAllDialog(false);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isDeletingAll ? "Deleting All Sessions..." : "Delete All Sessions"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isDeletingAll ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>Please wait while all sessions are being deleted...</span>
+                </div>
+              ) : (
+                <>
+                  Are you sure you want to delete all {sessions?.length ?? 0} session
+                  {sessions && sessions.length !== 1 ? "s" : ""}? This action cannot be undone.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => setShowDeleteAllDialog(false)}
+              disabled={isDeletingAll}
+            >
+              Cancel
+            </AlertDialogCancel>
+            {!isDeletingAll && (
+              <Button
+                onClick={handleDeleteAll}
+                variant="destructive"
+                type="button"
+              >
+                Delete All
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -170,13 +281,14 @@ function SessionCard({ session, onDelete, isDeleting }: SessionCardProps) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
+                <Button
                   onClick={handleDelete}
                   disabled={isDeleting}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  variant="destructive"
+                  type="button"
                 >
                   {isDeleting ? "Deleting..." : "Delete"}
-                </AlertDialogAction>
+                </Button>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

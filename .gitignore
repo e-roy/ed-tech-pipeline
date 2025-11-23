@@ -110,6 +110,7 @@ backend/pipeline_orchestrator.pem
 deploy_ec2.ps1
 deploy_simple.ps1
 quick_deploy.ps1
+backend/start-local.ps1
 openapi-temp.json
 
 # Security audit reports
