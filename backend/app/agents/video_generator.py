@@ -18,6 +18,7 @@ import replicate
 
 from app.agents.base import AgentInput, AgentOutput
 from app.services.storage import StorageService
+from app.services.video_verifier import VideoVerificationService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class VideoGeneratorAgent:
         self.api_key = replicate_api_key
         self.client = replicate.Client(api_token=replicate_api_key)
         self.storage_service = storage_service or StorageService()
+        self.video_verifier = VideoVerificationService()
 
         # Model configurations (Replicate model IDs)
         self.models = {
@@ -456,6 +458,23 @@ Create scene-specific prompts for each image view."""
                         clip_id=clip_id
                     )
 
+                # Verify video quality
+                logger.info(f"[{session_id}] Verifying clip {index + 1}...")
+                verification_result = await self.video_verifier.verify_clip(
+                    video_url=str(video_url),
+                    expected_duration=duration_seconds,
+                    clip_index=index
+                )
+
+                if verification_result.failed:
+                    logger.warning(
+                        f"[{session_id}] Clip {index + 1} verification failed: "
+                        f"{len(verification_result.failed_checks)} failures"
+                    )
+                    # Log failed checks
+                    for check in verification_result.failed_checks:
+                        logger.warning(f"  - {check.check_name}: {check.message}")
+
                 return {
                     "id": clip_id,
                     "url": str(video_url),
@@ -468,7 +487,8 @@ Create scene-specific prompts for each image view."""
                     "model": model,
                     "scene_prompt": scene_prompt[:100] + "...",
                     "motion_intensity": None,
-                    "audio_enabled": False
+                    "audio_enabled": False,
+                    "verification": verification_result.to_dict()
                 }
 
             elif model == "gen-4-turbo":
@@ -518,6 +538,23 @@ Create scene-specific prompts for each image view."""
                         clip_id=clip_id
                     )
 
+                # Verify video quality
+                logger.info(f"[{session_id}] Verifying clip {index + 1}...")
+                verification_result = await self.video_verifier.verify_clip(
+                    video_url=str(video_url),
+                    expected_duration=duration_seconds,
+                    clip_index=index
+                )
+
+                if verification_result.failed:
+                    logger.warning(
+                        f"[{session_id}] Clip {index + 1} verification failed: "
+                        f"{len(verification_result.failed_checks)} failures"
+                    )
+                    # Log failed checks
+                    for check in verification_result.failed_checks:
+                        logger.warning(f"  - {check.check_name}: {check.message}")
+
                 return {
                     "id": clip_id,
                     "url": str(video_url),
@@ -530,7 +567,8 @@ Create scene-specific prompts for each image view."""
                     "model": model,
                     "scene_prompt": scene_prompt[:100] + "...",
                     "motion_intensity": None,
-                    "audio_enabled": False
+                    "audio_enabled": False,
+                    "verification": verification_result.to_dict()
                 }
 
             else:
