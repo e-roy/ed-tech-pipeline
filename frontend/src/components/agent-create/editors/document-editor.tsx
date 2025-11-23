@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NarrationEditor } from "./narration-editor";
-import { FactsView } from "./facts-view";
-import { VideoView } from "./video-view";
-import { DebugView } from "./debug-view";
+import { FactsView } from "../views/facts-view";
+import { VideoView } from "../views/video-view";
+import { DebugView } from "../views/debug-view";
 import { useAgentCreateStore } from "@/stores/agent-create-store";
 import { api } from "@/trpc/react";
 import { useSession } from "next-auth/react";
@@ -118,7 +118,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
       className={cn("bg-background flex h-full flex-col border-l", className)}
       {...props}
     >
-      <div className="flex items-center gap-2 border-b px-4 py-3">
+      <div className="flex h-15 items-center gap-2 border-b px-4 py-3">
         <FileTextIcon className="text-muted-foreground size-5" />
         {showToggleButtons ? (
           <div className="flex items-center gap-2">

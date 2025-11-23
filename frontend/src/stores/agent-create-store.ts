@@ -22,6 +22,7 @@ interface AgentCreateState {
   // State
   messages: Message[];
   isLoading: boolean;
+  isSessionLoading: boolean;
   error: Error | null;
   workflowStep: WorkflowStep;
   facts: Fact[];
@@ -41,6 +42,7 @@ interface AgentCreateState {
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
   setIsLoading: (loading: boolean) => void;
+  setIsSessionLoading: (loading: boolean) => void;
   setError: (error: Error | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
   setFacts: (facts: Fact[]) => void;
@@ -208,6 +210,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       // Initial state
       messages: [],
       isLoading: false,
+      isSessionLoading: false,
       error: null,
       workflowStep: "input",
       facts: [],
@@ -230,6 +233,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         })),
       setMessages: (messages) => set({ messages }),
       setIsLoading: (loading) => set({ isLoading: loading }),
+      setIsSessionLoading: (loading) => set({ isSessionLoading: loading }),
       setError: (error) => set({ error }),
       setWorkflowStep: (step) => set({ workflowStep: step }),
       setFacts: (facts) => set({ facts }),
@@ -270,6 +274,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         set({
           messages: [],
           isLoading: false,
+          isSessionLoading: false,
           error: null,
           workflowStep: "input",
           facts: [],
@@ -569,7 +574,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       loadSession: async (sessionId) => {
         const state = get();
         try {
-          state.setIsLoading(true);
+          state.setIsSessionLoading(true);
           state.setError(null);
 
           const response = await fetch(
@@ -662,7 +667,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             state.setError(error);
           }
         } finally {
-          state.setIsLoading(false);
+          state.setIsSessionLoading(false);
         }
       },
     }),
