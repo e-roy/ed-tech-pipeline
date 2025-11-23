@@ -167,6 +167,14 @@ The narration should be:
 - Suitable for voice-over
 - Timed appropriately for the duration
 
+WORD COUNT CONSTRAINTS (based on natural speaking pace of ~2.5 words per second):
+- HOOK (10-15s): Maximum 35 words
+- CONCEPT (15-20s): Maximum 50 words
+- PROCESS (20-25s): Maximum 60 words
+- CONCLUSION (10s): Maximum 25 words
+
+CRITICAL: Stay well within these word limits to ensure smooth, natural narration. Shorter is better than longer.
+
 The visual guidance should be:
 - Specific and actionable
 - Describe scenes, graphics, text overlays, or animations
@@ -335,3 +343,34 @@ Respond with ONLY the JSON object, no additional text."""
             logger.warning(
                 f"Total script duration {total_duration}s is outside recommended range (45-75s)"
             )
+
+        # Validate word counts against recommended limits (based on 2.5 words/second speaking pace)
+        # These are soft limits - we log warnings but don't fail validation
+        word_count_limits = {
+            "hook": 35,      # 10-15s max
+            "concept": 50,   # 15-20s max
+            "process": 60,   # 20-25s max
+            "conclusion": 25 # 10s max
+        }
+
+        for part in required_parts:
+            narration = script[part]["narration"]
+            word_count = len(narration.split())
+            limit = word_count_limits.get(part, 50)
+            duration = script[part]["duration"]
+
+            # Calculate words per second for this segment
+            words_per_second = word_count / duration if duration > 0 else 0
+
+            if word_count > limit:
+                logger.warning(
+                    f"Script part '{part}' has {word_count} words (limit: {limit}). "
+                    f"This requires {words_per_second:.1f} words/second (recommended: 2.5). "
+                    f"Audio may need speed adjustment."
+                )
+            elif words_per_second > 3.0:
+                # Flag if speaking pace exceeds 3 words/second (too fast even with 1.25x speed)
+                logger.warning(
+                    f"Script part '{part}' requires {words_per_second:.1f} words/second pace. "
+                    f"This may sound rushed even with speed adjustment."
+                )

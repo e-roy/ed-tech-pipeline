@@ -271,6 +271,9 @@ class ReplicateVideoService:
                 "prompt": prompt,
                 "start_image": image_url,
                 "aspect_ratio": "16:9",
+                "duration": 5,  # Explicit 5-second clips
+                "cfg_scale": 0.8,  # Higher adherence to source image (default is 0.5)
+                "negative_prompt": "camera zoom, rapid panning, morphing, transformation, sudden movements"
             }
             if seed is not None:
                 input_data["seed"] = seed
