@@ -35,6 +35,12 @@ declare module "next-auth" {
   }
 }
 
+declare module "@auth/core/adapters" {
+  interface AdapterUser {
+    role: UserRole;
+  }
+}
+
 /**
  * Options for NextAuth.js used to configure adapters, providers, callbacks, etc.
  *
@@ -91,6 +97,7 @@ export const authConfig = {
           name: user.name,
           username: user.username,
           image: user.image,
+          role: (user.role ?? "user") as UserRole,
         };
       },
     }),

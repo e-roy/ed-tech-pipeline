@@ -14,6 +14,7 @@ import {
   deleteUserFile,
   getPresignedUrl,
   listSessionFiles,
+  listDirectoryStructure,
 } from "@/server/services/storage";
 
 export const storageRouter = createTRPCRouter({
@@ -150,6 +151,53 @@ export const storageRouter = createTRPCRouter({
             error instanceof Error
               ? error.message
               : "Failed to list session files",
+        });
+      }
+    }),
+
+  /**
+   * List directory structure for a session (folders and files).
+   * Returns folders and files organized hierarchically.
+   * Admin-only endpoint for debugging.
+   */
+  listSessionDirectory: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        subfolder: z.string().optional(), // e.g., "process", "images", etc.
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      // Admin-only endpoint
+      if (ctx.session.user.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Admin access required",
+        });
+      }
+
+      try {
+        const prefix = input.subfolder || "";
+        const result = await listDirectoryStructure(
+          ctx.session.user.id,
+          `${input.sessionId}/${prefix}`,
+        );
+
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to list session directory",
         });
       }
     }),

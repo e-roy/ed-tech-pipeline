@@ -28,6 +28,7 @@ interface AgentCreateState {
   selectedFacts: Fact[];
   narration: Narration | null;
   sessionId: string | null;
+  sessionStatus: string | null;
   thinkingStatus: ThinkingStatus;
   factsLocked: boolean;
   childAge: string | null;
@@ -213,6 +214,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
       selectedFacts: [],
       narration: null,
       sessionId: null,
+      sessionStatus: null,
       thinkingStatus: null,
       factsLocked: false,
       childAge: null,
@@ -273,6 +275,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           facts: [],
           selectedFacts: [],
           narration: null,
+          sessionStatus: null,
           thinkingStatus: null,
           factsLocked: false,
           childAge: null,
@@ -611,6 +614,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
           set({
             sessionId: data.session.id,
+            sessionStatus: data.session.status,
             messages: data.messages.map((m) => {
               const message: Message = {
                 role: m.role as "user" | "assistant",

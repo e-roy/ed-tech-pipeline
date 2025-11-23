@@ -79,6 +79,7 @@ export function AgentCreateInterface({
     thinkingStatus,
     handleSubmit,
     sessionId: storeSessionId,
+    sessionStatus,
     reset,
     setSessionId,
     loadSession,
@@ -554,55 +555,62 @@ export function AgentCreateInterface({
                             </div>
                             <p className="text-muted-foreground text-sm">
                               You can review and edit the script on the right.
-                              When you&apos;re ready, you can proceed to
-                              generate the video.
+                              {sessionStatus !== "video_generating" &&
+                                sessionStatus !== "video_complete" &&
+                                sessionStatus !== "video_failed" &&
+                                " When you're ready, you can proceed to generate the video."}
                             </p>
 
-                            <Alert className="bg-primary/10">
-                              <AlertDescription>
-                                <div className="flex w-full items-center justify-between">
-                                  <div className="flex flex-col gap-1">
-                                    <span className="text-sm font-medium">
-                                      {selectedFacts.length} fact
-                                      {selectedFacts.length !== 1
-                                        ? "s"
-                                        : ""}{" "}
-                                      selected
-                                    </span>
-                                    {videoSuccess && (
-                                      <span className="text-xs text-green-600">
-                                        ✓ Video generation started!
-                                      </span>
-                                    )}
-                                    {videoError && (
-                                      <span className="text-xs text-red-600">
-                                        ✗ {videoError}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <Button
-                                    onClick={handleSubmitVideo}
-                                    size="sm"
-                                    disabled={
-                                      isLoading ||
-                                      isGeneratingVideo ||
-                                      !storeSessionId
-                                    }
-                                  >
-                                    {isGeneratingVideo ? (
-                                      <>
-                                        <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                                        Generating...
-                                      </>
-                                    ) : videoSuccess ? (
-                                      "✓ Video Started"
-                                    ) : (
-                                      "Create Video"
-                                    )}
-                                  </Button>
-                                </div>
-                              </AlertDescription>
-                            </Alert>
+                            {/* Only show Create Video button if video hasn't been started */}
+                            {sessionStatus !== "video_generating" &&
+                              sessionStatus !== "video_complete" &&
+                              sessionStatus !== "video_failed" && (
+                                <Alert className="bg-primary/10">
+                                  <AlertDescription>
+                                    <div className="flex w-full items-center justify-between">
+                                      <div className="flex flex-col gap-1">
+                                        <span className="text-sm font-medium">
+                                          {selectedFacts.length} fact
+                                          {selectedFacts.length !== 1
+                                            ? "s"
+                                            : ""}{" "}
+                                          selected
+                                        </span>
+                                        {videoSuccess && (
+                                          <span className="text-xs text-green-600">
+                                            ✓ Video generation started!
+                                          </span>
+                                        )}
+                                        {videoError && (
+                                          <span className="text-xs text-red-600">
+                                            ✗ {videoError}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <Button
+                                        onClick={handleSubmitVideo}
+                                        size="sm"
+                                        disabled={
+                                          isLoading ||
+                                          isGeneratingVideo ||
+                                          !storeSessionId
+                                        }
+                                      >
+                                        {isGeneratingVideo ? (
+                                          <>
+                                            <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                            Generating...
+                                          </>
+                                        ) : videoSuccess ? (
+                                          "✓ Video Started"
+                                        ) : (
+                                          "Create Video"
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </AlertDescription>
+                                </Alert>
+                              )}
                           </div>
                         </MessageContent>
                       </Message>

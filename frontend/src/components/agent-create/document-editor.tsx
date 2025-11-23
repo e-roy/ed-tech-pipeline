@@ -10,6 +10,7 @@ import {
   FileText,
   User,
   Video,
+  Settings,
 } from "lucide-react";
 import { useState, type HTMLAttributes } from "react";
 import { Button } from "@/components/ui/button";
@@ -18,12 +19,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { NarrationEditor } from "./narration-editor";
 import { FactsView } from "./facts-view";
 import { VideoView } from "./video-view";
+import { DebugView } from "./debug-view";
 import { useAgentCreateStore } from "@/stores/agent-create-store";
 import { api } from "@/trpc/react";
+import { useSession } from "next-auth/react";
 
 export type DocumentEditorProps = HTMLAttributes<HTMLDivElement>;
 
-type ViewMode = "facts" | "script" | "video";
+type ViewMode = "facts" | "script" | "video" | "debug";
 
 export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
   const {
@@ -44,6 +47,8 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
   } = useAgentCreateStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>("script");
+  const { data: session } = useSession();
+  const isAdmin = (session?.user as { role?: string })?.role === "admin";
 
   // Poll S3 for final video in users/{userId}/{sessionId}/final/
   // Poll every 60 seconds while video is generating, otherwise check once
@@ -95,11 +100,11 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
         ? "edit-narration"
         : "edit";
 
-  // Show toggle buttons when both confirmed facts and script exist
+  // Show toggle buttons when both confirmed facts and script exist, or if admin
   const hasConfirmedFacts = selectedFacts.length > 0;
   const hasScript = narration !== null;
   const showToggleButtons =
-    hasConfirmedFacts && hasScript && mode !== "select-facts";
+    (hasConfirmedFacts && hasScript && mode !== "select-facts") || isAdmin;
 
   // Check if we have student info
   const hasStudentInfo = childAge ?? childInterest;
@@ -144,6 +149,17 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
               <Video className="mr-2 size-4" />
               Video
             </Button>
+            {isAdmin && (
+              <Button
+                variant={viewMode === "debug" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("debug")}
+                className="h-8"
+              >
+                <Settings className="mr-2 size-4" />
+                Debug
+              </Button>
+            )}
           </div>
         ) : null}
         {isLoading && (
@@ -164,7 +180,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
       </div>
       <ScrollArea className="max-h-[calc(100vh-60px)] flex-1">
         <div className="h-full p-4">
-          {hasStudentInfo && (
+          {hasStudentInfo && viewMode !== "debug" && (
             <div className="bg-muted/50 mb-4 rounded-lg border p-3">
               <div className="mb-2 flex items-center gap-2">
                 <User className="text-muted-foreground size-4" />
@@ -256,6 +272,8 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
               <FactsView facts={selectedFacts} />
             ) : viewMode === "script" ? (
               narration && <NarrationEditor />
+            ) : viewMode === "debug" ? (
+              sessionId && <DebugView sessionId={sessionId} />
             ) : (
               <VideoView
                 videoUrl={finalVideo?.presigned_url}

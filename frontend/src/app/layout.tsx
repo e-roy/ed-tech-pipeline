@@ -4,6 +4,7 @@ import { type Metadata } from "next";
 import { Geist } from "next/font/google";
 
 import { TRPCReactProvider } from "@/trpc/react";
+import { SessionProviderWrapper } from "@/components/layout/session-provider-wrapper";
 
 export const metadata: Metadata = {
   title: "AI Ad Video Generator",
@@ -22,7 +23,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geist.variable}`} suppressHydrationWarning>
       <body>
-        <TRPCReactProvider>{children}</TRPCReactProvider>
+        <SessionProviderWrapper>
+          <TRPCReactProvider>{children}</TRPCReactProvider>
+        </SessionProviderWrapper>
       </body>
     </html>
   );
