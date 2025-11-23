@@ -151,7 +151,7 @@ async def agent_4_process(
             logger.warning(f"[SCRIPT TRACE] Agent4 extract_script_from_generated_script returned None or empty for session {session_id}")
     
     # If script is still empty, wait for Agent2 to write it (they run in parallel)
-    if not script and db is not None:
+    if not script:
         logger.info(f"Agent4 waiting for Agent2 to generate script for session {session_id}")
         max_retries = 30  # Wait up to 30 seconds
         retry_count = 0
@@ -159,31 +159,52 @@ async def agent_4_process(
             await asyncio.sleep(1)  # Wait 1 second between retries
             retry_count += 1
             
-            # Re-query database for updated script
-            result = db.execute(
-                sql_text(
-                    "SELECT generated_script FROM video_session WHERE id = :session_id AND user_id = :user_id"
-                ),
-                {"session_id": session_id, "user_id": user_id},
-            ).fetchone()
+            # Try to get script from database if db is available
+            if db is not None:
+                try:
+                    result = db.execute(
+                        sql_text(
+                            "SELECT generated_script FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                        ),
+                        {"session_id": session_id, "user_id": user_id},
+                    ).fetchone()
+                    
+                    if result:
+                        if hasattr(result, "_mapping"):
+                            generated_script = dict(result._mapping).get("generated_script")
+                        else:
+                            generated_script = getattr(result, "generated_script", None)
+                        
+                        if generated_script:
+                            from app.agents.agent_2 import extract_script_from_generated_script
+                            extracted_script = extract_script_from_generated_script(generated_script)
+                            if extracted_script:
+                                script = extracted_script
+                                logger.info(f"Agent4 found script from database after {retry_count} seconds")
+                                break
+                except Exception as e:
+                    logger.debug(f"Agent4 database query failed while waiting for script: {e}")
             
-            if result:
-                if hasattr(result, "_mapping"):
-                    generated_script = dict(result._mapping).get("generated_script")
-                else:
-                    generated_script = getattr(result, "generated_script", None)
-                
-                if generated_script:
-                    from app.agents.agent_2 import extract_script_from_generated_script
-                    extracted_script = extract_script_from_generated_script(generated_script)
-                    if extracted_script:
-                        script = extracted_script
-                        logger.info(f"Agent4 found script after {retry_count} seconds")
+            # Try to get script from S3 (Agent2 writes agent_2_data.json to S3)
+            if not script and storage_service and storage_service.s3_client:
+                try:
+                    s3_key_agent2 = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
+                    response = storage_service.s3_client.get_object(
+                        Bucket=storage_service.bucket_name,
+                        Key=s3_key_agent2
+                    )
+                    agent_2_data = json.loads(response['Body'].read().decode('utf-8'))
+                    if agent_2_data.get("script"):
+                        script = agent_2_data["script"]
+                        logger.info(f"Agent4 found script from S3 after {retry_count} seconds")
                         break
+                except Exception as e:
+                    # S3 file doesn't exist yet or other error - continue waiting
+                    logger.debug(f"Agent4 S3 check failed (file may not exist yet): {e}")
         
         if not script:
             raise ValueError(
-                f"Agent4 could not find script in video_session after waiting {max_retries} seconds. "
+                f"Agent4 could not find script after waiting {max_retries} seconds. "
                 f"Agent2 may not have generated the script yet or there was an error. "
                 f"Topic: {bool(topic)}, Confirmed Facts: {bool(confirmed_facts)}, Generation Script: {bool(generation_script)}"
             )

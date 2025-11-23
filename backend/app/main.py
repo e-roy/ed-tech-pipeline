@@ -502,75 +502,15 @@ async def start_processing(
     
     # Handle Full Test mode
     if agent_selection == "Full Test":
-        video_session_data = request.video_session_data
-        session_id: Optional[str] = None
-        user_id: Optional[str] = None
-
-        if video_session_data:
-            session_id = video_session_data.get("id") or request.sessionID
-            user_id = video_session_data.get("user_id") or request.userID
-        else:
-            if not request.sessionID or not request.userID:
-                raise HTTPException(
-                    status_code=400,
-                    detail="sessionID and userID are required for Full Test when video_session_data is not provided",
-                )
-            session_id = request.sessionID.strip()
-            user_id = request.userID.strip()
-
-            # Try to load from database if available
-            if db is not None:
-                try:
-                    result = db.execute(
-                        sql_text(
-                            "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
-                        ),
-                        {"session_id": session_id, "user_id": user_id},
-                    ).fetchone()
-
-                    if not result:
-                        # No data in database, use minimal fallback for scaffold test
-                        logger.warning(f"No video_session found for session_id={session_id}, using minimal data")
-                        video_session_data = {
-                            "id": session_id,
-                            "user_id": user_id,
-                            "topic": "Sample Topic",  # Default for scaffold test
-                        }
-                    elif hasattr(result, "_mapping"):
-                        video_session_data = dict(result._mapping)
-                    else:
-                        # Fallback for older SQLAlchemy versions
-                        video_session_data = {
-                            "id": getattr(result, "id", None),
-                            "user_id": getattr(result, "user_id", None),
-                            "generated_script": getattr(result, "generated_script", None),
-                        }
-                except Exception as e:
-                    # Database query failed (table doesn't exist, etc), use minimal fallback
-                    logger.warning(f"Error querying video_session (using fallback): {e}")
-                    video_session_data = {
-                        "id": session_id,
-                        "user_id": user_id,
-                        "topic": "Sample Topic",  # Default for scaffold test
-                    }
-            else:
-                # No database available, create minimal video_session_data
-                logger.warning("Database not available, creating minimal video_session_data for scaffold test")
-                video_session_data = {
-                    "id": session_id,
-                    "user_id": user_id,
-                    "topic": "Sample Topic",  # Default for scaffold test
-                }
-
-        if not session_id:
-            raise HTTPException(status_code=400, detail="Missing session ID for Full Test")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="Missing user ID for Full Test")
-        if not session_id or not user_id:
+        # Validate required fields
+        if not request.sessionID or not request.userID:
             raise HTTPException(
                 status_code=400,
                 detail="sessionID and userID are required for Full Test",
             )
+        
+        session_id = request.sessionID.strip()
+        user_id = request.userID.strip()
 
         # Use orchestrator to coordinate the Full Test process
         async def run_orchestrator():
@@ -600,11 +540,11 @@ async def start_processing(
             try:
                 from app.services.orchestrator import VideoGenerationOrchestrator
                 orchestrator = VideoGenerationOrchestrator(websocket_manager)
+                # Orchestrator will query video_session table itself using userId and sessionId
                 await orchestrator.start_full_test_process(
                     userId=user_id,
                     sessionId=session_id,
-                    db=db,  # Pass db to orchestrator, which will pass it to agents for their own queries
-                    video_session_data=video_session_data  # Pass video_session_data as fallback if db is not available
+                    db=db  # Pass db to orchestrator, which will query video_session table
                 )
                 logger.info(f"Orchestrator completed for session {session_id}")
             except Exception as e:

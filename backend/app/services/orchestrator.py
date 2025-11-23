@@ -8,6 +8,7 @@ Updated to integrate script-based image generation workflow.
 ORCHESTRATOR_VERSION = "1.2.0-semantic-progression"
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text as sql_text
 from app.models.database import Session as SessionModel, Asset, GenerationCost, Script
 from app.services.websocket_manager import WebSocketManager
 from app.agents.base import AgentInput
@@ -3022,25 +3023,80 @@ class VideoGenerationOrchestrator:
             "duration": final_video_result.get("duration", 0.0)
         }
 
+    def _log_webhook_entry(
+        self,
+        db: Optional[Session],
+        sessionId: str,
+        event_type: str,
+        video_url: Optional[str],
+        status: str,
+        payload: Dict[str, Any],
+        error_message: Optional[str] = None
+    ) -> None:
+        """
+        Helper method to insert webhook_log entry into database.
+        
+        Args:
+            db: Database session (if None, logging is skipped)
+            sessionId: Session identifier
+            event_type: Event type (e.g., "video_complete", "video_failed")
+            video_url: Video URL if available
+            status: Status ("received" or "failed")
+            payload: Payload data as dict
+            error_message: Error message if applicable
+        """
+        if db is None:
+            logger.warning(f"Orchestrator: Cannot log webhook entry - no database session available")
+            return
+        
+        try:
+            # Generate ID similar to nanoid format (21 characters, URL-safe)
+            log_id = secrets.token_urlsafe(16)[:21]
+            
+            # Insert into webhook_log table
+            db.execute(
+                sql_text("""
+                    INSERT INTO webhook_log (
+                        id, event_type, session_id, video_url, status, payload, error_message, created_at
+                    ) VALUES (
+                        :id, :event_type, :session_id, :video_url, :status, :payload::jsonb, :error_message, NOW()
+                    )
+                """),
+                {
+                    "id": log_id,
+                    "event_type": event_type,
+                    "session_id": sessionId,
+                    "video_url": video_url,
+                    "status": status,
+                    "payload": json.dumps(payload),
+                    "error_message": error_message
+                }
+            )
+            db.commit()
+            logger.info(f"Orchestrator inserted webhook_log entry (event_type={event_type}, status={status}) for session {sessionId}")
+        except Exception as e:
+            # Log error but don't fail - this is just logging
+            logger.error(f"Orchestrator failed to insert webhook_log entry: {e}", exc_info=True)
+            if db:
+                db.rollback()
+    
     async def start_full_test_process(
         self,
         userId: str,
         sessionId: str,
-        db: Optional[Session] = None,
-        video_session_data: Optional[dict] = None
+        db: Optional[Session] = None
     ) -> None:
         """
         Start the Full Test pipeline process.
         
         Coordinates Agent2 and Agent4 in parallel, then Agent5 sequentially.
-        Creates S3 folder structure, sends orchestrator status updates, and forwards
-        standardized agent status messages to WebSocket.
+        Queries video_session table using userId and sessionId, then provides
+        that data to Agent2 and Agent4 so they can run in parallel.
         
         Args:
             userId: User identifier
             sessionId: Session identifier
-            db: Optional database session to pass to agents (agents will query database themselves)
-            video_session_data: Optional video session data to pass to agents if db is not available
+            db: Optional database session (if None, will try to create one)
         """
         from app.agents.agent_2 import agent_2_process
         from app.agents.agent_4 import agent_4_process
@@ -3052,6 +3108,143 @@ class VideoGenerationOrchestrator:
                 userId, sessionId, "starting",
                 {"message": "Orchestrator starting Full Test process"}
             )
+            
+            # Query video_session table using userId and sessionId
+            # This is required - if we can't get the data, we should fail
+            video_session_data = None
+            if db is None:
+                # Try to create database session if not provided
+                try:
+                    from app.database import SessionLocal
+                    db = SessionLocal()
+                    logger.info(f"Orchestrator created database session for querying video_session")
+                except Exception as e:
+                    logger.error(f"Orchestrator could not create database session: {e}", exc_info=True)
+                    
+                    # Try to log error to webhook_log (attempt to create temp session)
+                    error_msg = f"Orchestrator failed to create database session: {e}"
+                    try:
+                        # Try one more time to create a session just for logging
+                        temp_db = SessionLocal()
+                        error_payload = {
+                            "status": "video_failed",
+                            "sessionId": sessionId,
+                            "error": error_msg,
+                            "reason": "Database session creation failed"
+                        }
+                        self._log_webhook_entry(
+                            db=temp_db,
+                            sessionId=sessionId,
+                            event_type="video_failed",
+                            video_url=None,
+                            status="failed",
+                            payload=error_payload,
+                            error_message=error_msg
+                        )
+                        temp_db.close()
+                    except Exception as log_error:
+                        logger.error(f"Failed to log database creation error to webhook_log: {log_error}")
+                    
+                    raise ValueError(error_msg)
+            
+            if db is not None:
+                try:
+                    logger.info(f"Orchestrator querying video_session table for session_id={sessionId}, user_id={userId}")
+                    result = db.execute(
+                        sql_text(
+                            "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
+                        ),
+                        {"session_id": sessionId, "user_id": userId},
+                    ).fetchone()
+                    
+                    if result:
+                        # Convert result to dict
+                        if hasattr(result, "_mapping"):
+                            video_session_data = dict(result._mapping)
+                        else:
+                            video_session_data = {
+                                "id": getattr(result, "id", None),
+                                "user_id": getattr(result, "user_id", None),
+                                "topic": getattr(result, "topic", None),
+                                "confirmed_facts": getattr(result, "confirmed_facts", None),
+                                "generated_script": getattr(result, "generated_script", None),
+                                "learning_objective": getattr(result, "learning_objective", None),
+                                "child_age": getattr(result, "child_age", None),
+                                "child_interest": getattr(result, "child_interest", None),
+                            }
+                        logger.info(f"Orchestrator successfully loaded video_session data for session {sessionId}")
+                    else:
+                        error_msg = f"Orchestrator: No video_session found for session_id={sessionId}, user_id={userId}"
+                        logger.error(error_msg)
+                        
+                        # Log error to webhook_log
+                        error_payload = {
+                            "status": "video_failed",
+                            "sessionId": sessionId,
+                            "error": error_msg,
+                            "reason": "Video session not found in database"
+                        }
+                        self._log_webhook_entry(
+                            db=db,
+                            sessionId=sessionId,
+                            event_type="video_failed",
+                            video_url=None,
+                            status="failed",
+                            payload=error_payload,
+                            error_message=error_msg
+                        )
+                        raise ValueError(error_msg)
+                except ValueError:
+                    # Re-raise ValueError (no video_session found) - already logged above
+                    raise
+                except Exception as e:
+                    logger.error(f"Orchestrator failed to query video_session table: {e}", exc_info=True)
+                    
+                    # Log error to webhook_log
+                    error_payload = {
+                        "status": "video_failed",
+                        "sessionId": sessionId,
+                        "error": str(e),
+                        "reason": f"Database query failed: {type(e).__name__}"
+                    }
+                    self._log_webhook_entry(
+                        db=db,
+                        sessionId=sessionId,
+                        event_type="video_failed",
+                        video_url=None,
+                        status="failed",
+                        payload=error_payload,
+                        error_message=str(e)
+                    )
+                    raise ValueError(f"Orchestrator failed to query video_session table: {e}")
+            else:
+                error_msg = "Orchestrator: No database available - cannot query video_session table"
+                logger.error(error_msg)
+                
+                # Can't log to webhook_log if db is None, but we can try to create a session
+                try:
+                    from app.database import SessionLocal
+                    temp_db = SessionLocal()
+                    error_payload = {
+                        "status": "video_failed",
+                        "sessionId": sessionId,
+                        "error": error_msg,
+                        "reason": "Database connection unavailable"
+                    }
+                    self._log_webhook_entry(
+                        db=temp_db,
+                        sessionId=sessionId,
+                        event_type="video_failed",
+                        video_url=None,
+                        status="failed",
+                        payload=error_payload,
+                        error_message=error_msg
+                    )
+                    temp_db.close()
+                except Exception as log_error:
+                    logger.error(f"Failed to log error to webhook_log (db unavailable): {log_error}")
+                
+                raise ValueError(error_msg)
             
             # Create S3 folder structure: users/{userId}/{sessionId}/
             s3_folder_prefix = f"users/{userId}/{sessionId}/"
@@ -3164,16 +3357,36 @@ class VideoGenerationOrchestrator:
             )
             
             # Run both agents in parallel
+            # If either agent fails, asyncio.gather will raise immediately and stop the pipeline
             try:
                 agent2_result, agent4_result = await asyncio.gather(agent2_task, agent4_task)
                 logger.info(f"Agent2 and Agent4 completed successfully for session {sessionId}")
             except Exception as e:
-                logger.error(f"Agent2 or Agent4 failed: {e}")
+                logger.error(f"Agent2 or Agent4 failed: {e}", exc_info=True)
+                
+                # Log error to webhook_log
+                error_payload = {
+                    "status": "video_failed",
+                    "sessionId": sessionId,
+                    "error": str(e),
+                    "reason": f"Agent execution failed: {type(e).__name__}",
+                    "failedAgent": "Agent2 or Agent4"
+                }
+                self._log_webhook_entry(
+                    db=db,
+                    sessionId=sessionId,
+                    event_type="video_failed",
+                    video_url=None,
+                    status="failed",
+                    payload=error_payload,
+                    error_message=str(e)
+                )
+                
                 await self._send_orchestrator_status(
                     userId, sessionId, "error",
                     {"error": str(e), "reason": f"Agent execution failed: {type(e).__name__}"}
                 )
-                raise
+                raise  # Stop pipeline immediately - do not proceed to Agent5
             
             # After Agent2+Agent4 complete successfully, trigger Agent5 synchronously
             await self._send_orchestrator_status(
@@ -3213,6 +3426,23 @@ class VideoGenerationOrchestrator:
                 # Extract video URL from Agent5 result
                 video_url = agent5_result if isinstance(agent5_result, str) else None
                 
+                # Update webhook_log table in database if video URL is available
+                if video_url:
+                    payload_data = {
+                        "status": "video_complete",
+                        "videoUrl": video_url,
+                        "sessionId": sessionId
+                    }
+                    self._log_webhook_entry(
+                        db=db,
+                        sessionId=sessionId,
+                        event_type="video_complete",
+                        video_url=video_url,
+                        status="received",
+                        payload=payload_data,
+                        error_message=None
+                    )
+                
                 # Send orchestrator finished status with video link and all info
                 await self._send_orchestrator_status(
                     userId, sessionId, "finished",
@@ -3228,7 +3458,26 @@ class VideoGenerationOrchestrator:
                 logger.info(f"Full Test process completed successfully for session {sessionId}")
                 
             except Exception as e:
-                logger.error(f"Agent5 failed: {e}")
+                logger.error(f"Agent5 failed: {e}", exc_info=True)
+                
+                # Log error to webhook_log
+                error_payload = {
+                    "status": "video_failed",
+                    "sessionId": sessionId,
+                    "error": str(e),
+                    "reason": f"Agent5 failed: {type(e).__name__}",
+                    "failedAgent": "Agent5"
+                }
+                self._log_webhook_entry(
+                    db=db,
+                    sessionId=sessionId,
+                    event_type="video_failed",
+                    video_url=None,
+                    status="failed",
+                    payload=error_payload,
+                    error_message=str(e)
+                )
+                
                 await self._send_orchestrator_status(
                     userId, sessionId, "error",
                     {"error": str(e), "reason": f"Agent5 failed: {type(e).__name__}"}
@@ -3237,6 +3486,41 @@ class VideoGenerationOrchestrator:
                 
         except Exception as e:
             logger.exception(f"Orchestrator error in start_full_test_process: {e}")
+            
+            # Log error to webhook_log (db is a function parameter, so it's always available)
+            try:
+                error_payload = {
+                    "status": "video_failed",
+                    "sessionId": sessionId,
+                    "error": str(e),
+                    "reason": f"Orchestrator failed: {type(e).__name__}",
+                    "failedStage": "orchestrator"
+                }
+                # Try to use db if available, or create a temporary session for logging
+                log_db = db
+                if log_db is None:
+                    try:
+                        from app.database import SessionLocal
+                        log_db = SessionLocal()
+                    except Exception:
+                        log_db = None
+                
+                if log_db is not None:
+                    self._log_webhook_entry(
+                        db=log_db,
+                        sessionId=sessionId,
+                        event_type="video_failed",
+                        video_url=None,
+                        status="failed",
+                        payload=error_payload,
+                        error_message=str(e)
+                    )
+                    # Close temporary session if we created it
+                    if db is None and log_db:
+                        log_db.close()
+            except Exception as log_error:
+                logger.error(f"Failed to log orchestrator error to webhook_log: {log_error}")
+            
             # Try to send error status (may fail if WebSocket is down)
             try:
                 await self._send_orchestrator_status(
