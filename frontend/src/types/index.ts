@@ -1,3 +1,8 @@
+export enum UserRole {
+  USER = "user",
+  ADMIN = "admin",
+}
+
 export enum SessionStage {
   CREATED = "created",
   IMAGE_GENERATION = "image_generation",

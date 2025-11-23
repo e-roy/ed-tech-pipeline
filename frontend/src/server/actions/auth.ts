@@ -111,6 +111,7 @@ export async function signupAction(formData: FormData) {
         email,
         username: email.split("@")[0], // Use email prefix as username
         password: hashedPassword,
+        role: "user", // Set default role
       })
       .returning();
     newUser = insertedUser;

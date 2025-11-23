@@ -14,6 +14,7 @@ import {
 import { eq, or } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { env } from "@/env";
+import { UserRole } from "@/types";
 
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
@@ -25,15 +26,13 @@ declare module "next-auth" {
   interface Session extends DefaultSession {
     user: {
       id: string;
-      // ...other properties
-      // role: UserRole;
+      role: UserRole;
     } & DefaultSession["user"];
   }
 
-  // interface User {
-  //   // ...other properties
-  //   // role: UserRole;
-  // }
+  interface User {
+    role: UserRole;
+  }
 }
 
 /**
@@ -118,6 +117,7 @@ export const authConfig = {
         session.user = {
           ...session.user,
           id: user.id,
+          role: (user as any).role as UserRole || UserRole.USER,
         };
       }
       return session;
