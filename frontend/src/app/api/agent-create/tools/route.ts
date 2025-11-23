@@ -366,81 +366,95 @@ Be supportive and guide the teacher through the process naturally.`;
   };
 
   try {
+    // Create a promise to track when onFinish completes
+    let onFinishComplete: (() => void) | null = null;
+    const onFinishPromise = new Promise<void>((resolve) => {
+      onFinishComplete = resolve;
+    });
+
     const result = streamText({
       model: openai("gpt-4o-mini"),
       system: systemPrompt,
       messages: allMessages,
       tools: toolsWithSessionId,
       onFinish: async (finishResult) => {
-        // Capture tool results for response
-        if (finishResult.toolResults) {
-          capturedToolResults = [...finishResult.toolResults];
-        }
+        try {
+          // Capture tool results for response
+          if (finishResult.toolResults) {
+            capturedToolResults = [...finishResult.toolResults];
+          }
 
-        // Capture assistant text response
-        assistantTextResponse = finishResult.text;
+          // Capture assistant text response
+          assistantTextResponse = finishResult.text;
 
-        // Save assistant response to database (non-blocking)
-        if (assistantTextResponse) {
-          saveConversationMessage(sessionId, {
-            role: "assistant",
-            content: assistantTextResponse,
-          }).catch(() => {
-            // Silently fail - non-blocking operation
-          });
-        }
+          // Save assistant response to database (non-blocking)
+          if (assistantTextResponse) {
+            saveConversationMessage(sessionId, {
+              role: "assistant",
+              content: assistantTextResponse,
+            }).catch(() => {
+              // Silently fail - non-blocking operation
+            });
+          }
 
-        // Process tool results and save to database (non-blocking)
-        if (finishResult.toolCalls && finishResult.toolResults) {
-          for (let i = 0; i < finishResult.toolCalls.length; i++) {
-            const toolCall = finishResult.toolCalls[i];
-            const toolResult = finishResult.toolResults[i];
-            if (toolCall?.toolName && toolResult) {
-              processToolResult(toolCall.toolName, toolResult, sessionId);
+          // Process tool results and save to database (non-blocking)
+          if (finishResult.toolCalls && finishResult.toolResults) {
+            for (let i = 0; i < finishResult.toolCalls.length; i++) {
+              const toolCall = finishResult.toolCalls[i];
+              const toolResult = finishResult.toolResults[i];
+              if (toolCall?.toolName && toolResult) {
+                processToolResult(toolCall.toolName, toolResult, sessionId);
 
-              // Extract and save assistant message from tool result if present
-              try {
-                // Unwrap AI SDK tool result wrapper
-                let actualResult: unknown = toolResult;
-                if (typeof toolResult === "object" && toolResult !== null) {
-                  const wrapped = toolResult as {
-                    output?: unknown;
-                    type?: string;
-                  };
-                  if (
-                    wrapped.type === "tool-result" &&
-                    wrapped.output !== undefined
-                  ) {
-                    actualResult = wrapped.output;
+                // Extract and save assistant message from tool result if present
+                try {
+                  // Unwrap AI SDK tool result wrapper
+                  let actualResult: unknown = toolResult;
+                  if (typeof toolResult === "object" && toolResult !== null) {
+                    const wrapped = toolResult as {
+                      output?: unknown;
+                      type?: string;
+                    };
+                    if (
+                      wrapped.type === "tool-result" &&
+                      wrapped.output !== undefined
+                    ) {
+                      actualResult = wrapped.output;
+                    }
                   }
-                }
 
-                // Parse the actual tool result
-                const toolResultData = parseToolResult<{
-                  message?: string;
-                  facts?: unknown;
-                  narration?: unknown;
-                }>(actualResult);
+                  // Parse the actual tool result
+                  const toolResultData = parseToolResult<{
+                    message?: string;
+                    facts?: unknown;
+                    narration?: unknown;
+                  }>(actualResult);
 
-                if (toolResultData.message) {
-                  saveConversationMessage(sessionId, {
-                    role: "assistant",
-                    content: toolResultData.message,
-                  }).catch(() => {
-                    // Silently fail - non-blocking operation
-                  });
+                  if (toolResultData.message) {
+                    saveConversationMessage(sessionId, {
+                      role: "assistant",
+                      content: toolResultData.message,
+                    }).catch(() => {
+                      // Silently fail - non-blocking operation
+                    });
+                  }
+                } catch {
+                  // Silently fail if tool result doesn't have message
                 }
-              } catch {
-                // Silently fail if tool result doesn't have message
               }
             }
           }
+        } finally {
+          // Signal that onFinish has completed
+          onFinishComplete?.();
         }
       },
     });
 
     // Consume the stream to trigger onFinish
     await result.text;
+
+    // Wait for onFinish to complete before proceeding
+    await onFinishPromise;
 
     // Return tool results or default response
     if (capturedToolResults?.length > 0) {
