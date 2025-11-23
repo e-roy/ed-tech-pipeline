@@ -182,16 +182,21 @@ async def agent_2_process(
         
         # TODO: Add initialization/preparation logic here
         
-        # Extract script from generation_script or generate it
+        # Extract script from generation_script - FAIL if missing or incomplete
         script = extract_script_from_generated_script(generation_script)
         script_was_generated = False
         
         if not script or not all(key in script for key in ["hook", "concept", "process", "conclusion"]):
-            # Generate script if missing or incomplete
-            script_was_generated = True
-            if video_session_data and "generation_script" not in generated_fields:
-                generated_fields.append("generation_script")
-            script = generate_script_structure()
+            # Script is missing or incomplete - this is an error, not a fallback scenario
+            error_msg = (
+                f"Agent2 cannot proceed without a valid script from video_session. "
+                f"Session {session_id} has missing or incomplete generated_script. "
+                f"generation_script is None: {generation_script is None}, "
+                f"extracted script is None: {script is None}, "
+                f"video_session_data exists: {video_session_data is not None}"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # Report processing status
         processing_kwargs = {}
