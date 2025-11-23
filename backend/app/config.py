@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Frontend URL for CORS
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Webhook Configuration
+    WEBHOOK_URL: str = "https://pipeline-q3b1.vercel.app/api/webhooks/video-complete"
+    WEBHOOK_SECRET: str = ""  # Retrieved from AWS Secrets Manager (pipeline/webhook-secret) when USE_AWS_SECRETS=True
+
     # Server Config
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
