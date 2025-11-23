@@ -3201,14 +3201,39 @@ class VideoGenerationOrchestrator:
                     logger.error(f"Orchestrator failed to query video_session table: {e}", exc_info=True)
                     
                     # Log error to webhook_log
+                    # Try to use existing db, but if it's broken, try to create a new session for logging
                     error_payload = {
                         "status": "video_failed",
                         "sessionId": sessionId,
                         "error": str(e),
                         "reason": f"Database query failed: {type(e).__name__}"
                     }
+                    
+                    log_db = db
+                    # If db connection is broken (e.g., password auth failed), try to create a new session
+                    if log_db is not None:
+                        try:
+                            # Test if db is still usable
+                            log_db.execute(sql_text("SELECT 1"))
+                        except Exception:
+                            # db is broken, try to create a new session for logging
+                            log_db = None
+                            try:
+                                from app.database import SessionLocal
+                                log_db = SessionLocal()
+                            except Exception:
+                                log_db = None
+                    
+                    if log_db is None:
+                        # Try one more time to create a session just for logging
+                        try:
+                            from app.database import SessionLocal
+                            log_db = SessionLocal()
+                        except Exception:
+                            log_db = None
+                    
                     self._log_webhook_entry(
-                        db=db,
+                        db=log_db,
                         sessionId=sessionId,
                         event_type="video_failed",
                         video_url=None,
@@ -3216,6 +3241,14 @@ class VideoGenerationOrchestrator:
                         payload=error_payload,
                         error_message=str(e)
                     )
+                    
+                    # Close temporary session if we created one
+                    if log_db is not None and log_db is not db:
+                        try:
+                            log_db.close()
+                        except Exception:
+                            pass
+                    
                     raise ValueError(f"Orchestrator failed to query video_session table: {e}")
             else:
                 error_msg = "Orchestrator: No database available - cannot query video_session table"
