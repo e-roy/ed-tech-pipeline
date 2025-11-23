@@ -58,8 +58,8 @@ async def agent_4_process(
     if storage_service is None:
         storage_service = StorageService()
     
-    # Query video_session table if db is provided and video_session_data not passed in
-    if db is not None and video_session_data is None:
+    # Query video_session table if db is provided (same as Agent2)
+    if db is not None:
         try:
             result = db.execute(
                 sql_text(
@@ -81,8 +81,11 @@ async def agent_4_process(
                     "topic": getattr(result, "topic", None),
                     "confirmed_facts": getattr(result, "confirmed_facts", None),
                     "generated_script": getattr(result, "generated_script", None),
+                    "learning_objective": getattr(result, "learning_objective", None),
+                    "child_age": getattr(result, "child_age", None),
+                    "child_interest": getattr(result, "child_interest", None),
                 }
-            logger.info(f"Agent4 loaded video_session data from database for session {session_id}")
+            logger.info(f"Agent4 loaded video_session data for session {session_id}")
         except Exception as e:
             logger.error(f"Agent4 failed to query video_session: {e}")
             raise
