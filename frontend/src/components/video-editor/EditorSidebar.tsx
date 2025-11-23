@@ -20,7 +20,6 @@ import {
   Add,
   FolderOpen,
   History,
-  Storage,
   ContentCut,
   Home,
 } from '@mui/icons-material';
@@ -49,11 +48,6 @@ const navItems = [
     title: 'History',
     url: '/dashboard/history',
     icon: History,
-  },
-  {
-    title: 'Hardcode Assets',
-    url: '/dashboard/hardcode-assets',
-    icon: Storage,
   },
 ];
 

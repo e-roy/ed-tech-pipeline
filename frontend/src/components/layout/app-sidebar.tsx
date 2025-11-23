@@ -5,7 +5,6 @@ import {
   FolderOpen,
   History,
   Plus,
-  HardDrive,
   Scissors,
 } from "lucide-react";
 import Link from "next/link";
@@ -38,7 +37,6 @@ import {
 } from "@/components/ui/collapsible";
 import { NavUser } from "./nav-user";
 import { api } from "@/trpc/react";
-import { Separator } from "@/components/ui/separator";
 
 const navItems = [
   {
@@ -61,19 +59,6 @@ const navItems = [
     title: "Edit",
     url: "/dashboard/editing/test",
     icon: Scissors,
-  },
-];
-
-const navItemsSub = [
-  {
-    title: "Old Create Page",
-    url: "/dashboard/old-create",
-    icon: Plus,
-  },
-  {
-    title: "Hardcode Assets",
-    url: "/dashboard/hardcode-assets",
-    icon: HardDrive,
   },
 ];
 
@@ -204,34 +189,6 @@ export function AppSidebar({
                   );
                 }
 
-                if (!item.url) {
-                  return null;
-                }
-
-                const isActive = item.url === pathname;
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      className="px-2.5 md:px-2"
-                    >
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <Separator />
-        <SidebarGroup>
-          <SidebarGroupContent className="px-1.5 md:px-0">
-            <SidebarMenu>
-              {navItemsSub.map((item) => {
                 if (!item.url) {
                   return null;
                 }
