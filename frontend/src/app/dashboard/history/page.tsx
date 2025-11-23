@@ -62,6 +62,7 @@ export default function HistoryPage() {
       // Delete each session with 200ms delay
       for (let i = 0; i < sessionIds.length; i++) {
         const sessionId = sessionIds[i];
+        if (!sessionId) continue; // Type guard for TypeScript
         try {
           await deleteMutation.mutateAsync({ sessionId });
           deletedCount++;
