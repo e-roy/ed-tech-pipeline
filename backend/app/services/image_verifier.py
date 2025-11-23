@@ -57,6 +57,14 @@ class ImageVerificationService:
         Returns:
             VerificationResult with all check results
         """
+        # VERIFICATION LAYER: Starting image verification
+        logger.info("=" * 80)
+        logger.info(f"🔍 VERIFICATION LAYER ACTIVE - Starting image verification")
+        logger.info(f"   Image Index: {image_index if image_index is not None else 'N/A'}")
+        logger.info(f"   Image URL: {image_url}")
+        logger.info(f"   Expected Aspect Ratio: {expected_aspect_ratio if expected_aspect_ratio else '16:9 (default)'}")
+        logger.info("=" * 80)
+
         # Send WebSocket update - starting verification
         if self.websocket_manager and self.session_id:
             await self.websocket_manager.send_progress(
@@ -91,19 +99,48 @@ class ImageVerificationService:
                 result.metadata = metadata.to_dict()
 
                 # Run all verification checks
+                logger.info(f"🔍 Running 7 verification checks...")
                 self._check_file_size(result, image_path)
-                self._check_resolution(result, metadata)
-                self._check_format(result, metadata)
-                self._check_aspect_ratio(result, metadata, expected_aspect_ratio)
-                self._check_blank_image(result, img)
-                self._check_corruption(result, img)
-                self._check_quality_score(result, img)
+                logger.info(f"   ✓ Check 1/7: File size - {result.checks[-1].status.value}")
 
+                self._check_resolution(result, metadata)
+                logger.info(f"   ✓ Check 2/7: Resolution - {result.checks[-1].status.value}")
+
+                self._check_format(result, metadata)
+                logger.info(f"   ✓ Check 3/7: Format - {result.checks[-1].status.value}")
+
+                self._check_aspect_ratio(result, metadata, expected_aspect_ratio)
+                logger.info(f"   ✓ Check 4/7: Aspect ratio - {result.checks[-1].status.value}")
+
+                self._check_blank_image(result, img)
+                logger.info(f"   ✓ Check 5/7: Blank detection - {result.checks[-1].status.value}")
+
+                self._check_corruption(result, img)
+                logger.info(f"   ✓ Check 6/7: Corruption - {result.checks[-1].status.value}")
+
+                self._check_quality_score(result, img)
+                logger.info(f"   ✓ Check 7/7: Quality score - {result.checks[-1].status.value}")
+
+            logger.info("=" * 80)
             logger.info(
-                f"Image verification {'passed' if result.passed else 'failed'} "
-                f"for image {image_index if image_index is not None else 'unknown'}: "
-                f"{len(result.failed_checks)} failures, {len(result.warning_checks)} warnings"
+                f"🔍 VERIFICATION COMPLETE - {'✅ PASSED' if result.passed else '❌ FAILED'} "
+                f"for image {image_index if image_index is not None else 'unknown'}"
             )
+            logger.info(f"   Total checks: {len(result.checks)}")
+            logger.info(f"   Failed checks: {len(result.failed_checks)}")
+            logger.info(f"   Warning checks: {len(result.warning_checks)}")
+
+            if result.failed_checks:
+                logger.warning(f"   Failed checks details:")
+                for check in result.failed_checks:
+                    logger.warning(f"      - {check.check_name}: {check.message}")
+
+            if result.warning_checks:
+                logger.warning(f"   Warning checks details:")
+                for check in result.warning_checks:
+                    logger.warning(f"      - {check.check_name}: {check.message}")
+
+            logger.info("=" * 80)
 
             # Send WebSocket update - verification complete
             if self.websocket_manager and self.session_id:

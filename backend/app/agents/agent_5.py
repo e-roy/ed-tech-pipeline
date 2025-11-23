@@ -31,6 +31,7 @@ from sqlalchemy import text as sql_text
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
 from app.services.replicate_video import ReplicateVideoService
+from app.services.video_verifier import VideoVerificationService
 from app.config import get_settings
 
 
@@ -521,6 +522,12 @@ async def agent_5_process(
     # Initialize storage service if not provided
     if storage_service is None:
         storage_service = StorageService()
+
+    # Initialize video verifier for quality checks
+    video_verifier = VideoVerificationService(
+        websocket_manager=websocket_manager,
+        session_id=session_id
+    )
 
     # Helper function to send status (via callback or websocket_manager)
     async def send_status(agentnumber: str, status: str, **kwargs):
@@ -1088,27 +1095,119 @@ async def agent_5_process(
                     cost_breakdown=cost_per_section
                 )
 
-            # Download all clips to temp files and upload to S3 for restart capability
-            # Reuse single HTTP client for all downloads
+            # Download and verify all clips with retry logic
+            MAX_CLIP_RETRIES = 2
+            COST_PER_CLIP = 0.09  # ~$0.035/6s for Minimax + padding
             clip_paths = []
+
             async with httpx.AsyncClient(timeout=120.0) as client:
                 for i, clip_url in enumerate(generated_clips):
-                    response = await client.get(clip_url)
-                    response.raise_for_status()
-                    clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
-                    with open(clip_path, 'wb') as f:
-                        f.write(response.content)
-                    clip_paths.append(clip_path)
-                    
-                    # Save clip to S3 for restart capability
-                    clip_s3_key = f"users/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
-                    try:
-                        with open(clip_path, 'rb') as f:
-                            clip_content = f.read()
-                        storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
-                        logger.debug(f"[{session_id}] Saved clip to S3: {clip_s3_key}")
-                    except Exception as e:
-                        logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
+                    clip_verified = False
+                    failed_check_names = []
+
+                    for retry_attempt in range(MAX_CLIP_RETRIES + 1):
+                        try:
+                            # Download clip
+                            response = await client.get(clip_url)
+                            response.raise_for_status()
+                            clip_path = os.path.join(temp_dir, f"{section}_clip_{i}.mp4")
+                            with open(clip_path, 'wb') as f:
+                                f.write(response.content)
+
+                            # VERIFY CLIP (includes all 8 checks: file, duration, resolution, frames, audio, integrity, visual, text)
+                            logger.info(f"[{session_id}] Verifying {section} clip {i + 1}/{len(generated_clips)}...")
+                            verification_result = await video_verifier.verify_clip(
+                                video_url=clip_path,
+                                expected_duration=6.0,  # Minimax generates 6-second clips
+                                clip_index=i
+                            )
+
+                            if verification_result.passed:
+                                # SUCCESS - Clip verified, save and continue
+                                clip_paths.append(clip_path)
+
+                                # Save verified clip to S3 for restart capability
+                                clip_s3_key = f"users/{user_id}/{session_id}/agent5/{section}_clip_{i}.mp4"
+                                try:
+                                    with open(clip_path, 'rb') as f:
+                                        clip_content = f.read()
+                                    storage_service.upload_file_direct(clip_content, clip_s3_key, "video/mp4")
+                                    logger.info(f"[{session_id}] ✓ Clip {i + 1} verified and saved for {section}")
+                                except Exception as e:
+                                    logger.warning(f"[{session_id}] Failed to save clip to S3 {clip_s3_key}: {e}")
+
+                                clip_verified = True
+                                break
+                            else:
+                                # VERIFICATION FAILED
+                                failed_check_names = [c.check_name for c in verification_result.failed_checks]
+                                logger.warning(
+                                    f"[{session_id}] Clip {i + 1} for {section} failed verification: {failed_check_names} "
+                                    f"(attempt {retry_attempt + 1}/{MAX_CLIP_RETRIES + 1})"
+                                )
+
+                                if retry_attempt < MAX_CLIP_RETRIES:
+                                    # REGENERATE CLIP
+                                    logger.info(f"[{session_id}] Regenerating {section} clip {i + 1}...")
+
+                                    # Get the clip prompt (need to reconstruct it)
+                                    clip_prompt = clip_prompts[i]
+
+                                    # Enhanced prompt if text was detected
+                                    if any('text' in check_name for check_name in failed_check_names):
+                                        clip_prompt = f"NO TEXT, NO CAPTIONS, NO OVERLAYS, PURE VISUAL ANIMATION: {clip_prompt}"
+                                        logger.info(f"[{session_id}] Using enhanced anti-text prompt for retry")
+
+                                    # Regenerate clip with same logic as original generation
+                                    async with replicate_semaphore:
+                                        if i == 0:
+                                            # First clip: text-to-video
+                                            clip_url = await generate_video_replicate(
+                                                clip_prompt,
+                                                replicate_api_key,
+                                                model="minimax",
+                                                seed=section_seed
+                                            )
+                                        else:
+                                            # Subsequent clips: extract last frame from previous clip, then image-to-video
+                                            previous_clip_url = clip_url if retry_attempt > 0 else generated_clips[i - 1]
+                                            frame_data_uri = await extract_last_frame_as_base64(previous_clip_url)
+
+                                            service = ReplicateVideoService(replicate_api_key)
+                                            clip_url = await service.generate_video_from_image(
+                                                prompt=clip_prompt,
+                                                image_url=frame_data_uri,
+                                                model="minimax",
+                                                seed=section_seed
+                                            )
+
+                                    # Track retry cost
+                                    cost_per_section[section] += COST_PER_CLIP
+                                    current_total_cost += COST_PER_CLIP
+
+                                    # Send status update about retry
+                                    await send_status(
+                                        "Agent5", "processing",
+                                        supersessionID=supersessionid,
+                                        message=f"Regenerating {section} clip {i + 1} (retry {retry_attempt + 1})",
+                                        cost=current_total_cost,
+                                        cost_breakdown=cost_per_section
+                                    )
+
+                                    await asyncio.sleep(2)  # Brief delay before retry
+                                    continue
+
+                        except Exception as e:
+                            logger.error(f"[{session_id}] Error processing clip {i + 1} for {section} (attempt {retry_attempt + 1}): {e}")
+                            if retry_attempt < MAX_CLIP_RETRIES:
+                                await asyncio.sleep(2)
+                                continue
+
+                    if not clip_verified:
+                        raise RuntimeError(
+                            f"Failed to generate valid clip {i + 1} for {section} after {MAX_CLIP_RETRIES + 1} attempts. "
+                            f"Failed checks: {failed_check_names}"
+                        )
 
             logger.info(f"[{session_id}] Downloaded and saved {len(generated_clips)} clips for {section}")
 
@@ -1461,6 +1560,28 @@ async def agent_5_process(
             output_path
         )
         logger.info(f"[{session_id}] Combined video and audio into final output")
+
+        # VERIFY FINAL VIDEO before upload
+        logger.info(f"[{session_id}] Verifying final composed video...")
+        final_verification_result = await video_verifier.verify_final_video(
+            video_url=output_path,
+            expected_duration=60.0  # Expected 60-second final video
+        )
+
+        if final_verification_result.failed:
+            failed_checks = [c.check_name for c in final_verification_result.failed_checks]
+            logger.error(
+                f"[{session_id}] Final video failed verification: {failed_checks}"
+            )
+            for check in final_verification_result.failed_checks:
+                logger.error(f"  - {check.check_name}: {check.message}")
+
+            raise RuntimeError(
+                f"Final video quality check failed: {failed_checks}. "
+                "Cannot upload video that does not meet quality standards."
+            )
+        else:
+            logger.info(f"[{session_id}] ✓ Final video passed all 8 verification checks")
 
         # Upload video to S3 - use users/{userId}/{sessionId}/final/ path
         import uuid

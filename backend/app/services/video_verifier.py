@@ -55,6 +55,14 @@ class VideoVerificationService:
         Returns:
             VerificationResult with all check results
         """
+        # VERIFICATION LAYER: Starting video clip verification
+        logger.info("=" * 80)
+        logger.info(f"🔍 VERIFICATION LAYER ACTIVE - Starting video clip verification")
+        logger.info(f"   Clip Index: {clip_index if clip_index is not None else 'N/A'}")
+        logger.info(f"   Video URL: {video_url}")
+        logger.info(f"   Expected Duration: {expected_duration}s" if expected_duration else "   Expected Duration: Not specified")
+        logger.info("=" * 80)
+
         # Send WebSocket update - starting verification
         if self.websocket_manager and self.session_id:
             await self.websocket_manager.send_progress(
@@ -88,19 +96,51 @@ class VideoVerificationService:
             result.metadata = metadata.to_dict()
 
             # Run all verification checks
+            logger.info(f"🔍 Running 8 verification checks...")
             self._check_file_exists(result, video_path)
-            self._check_duration(result, metadata, expected_duration)
-            self._check_resolution(result, metadata)
-            self._check_frame_count(result, metadata)
-            self._check_audio(result, metadata)
-            self._check_frame_integrity(result, video_path)
-            self._check_visual_consistency(result, video_path)
+            logger.info(f"   ✓ Check 1/8: File exists - {result.checks[-1].status.value}")
 
+            self._check_duration(result, metadata, expected_duration)
+            logger.info(f"   ✓ Check 2/8: Duration - {result.checks[-1].status.value}")
+
+            self._check_resolution(result, metadata)
+            logger.info(f"   ✓ Check 3/8: Resolution - {result.checks[-1].status.value}")
+
+            self._check_frame_count(result, metadata)
+            logger.info(f"   ✓ Check 4/8: Frame count - {result.checks[-1].status.value}")
+
+            self._check_audio(result, metadata)
+            logger.info(f"   ✓ Check 5/8: Audio - {result.checks[-1].status.value}")
+
+            self._check_frame_integrity(result, video_path)
+            logger.info(f"   ✓ Check 6/8: Frame integrity - {result.checks[-1].status.value}")
+
+            self._check_visual_consistency(result, video_path)
+            logger.info(f"   ✓ Check 7/8: Visual consistency - {result.checks[-1].status.value}")
+
+            self._check_text_presence(result, video_path)
+            logger.info(f"   ✓ Check 8/8: Text detection - {result.checks[-1].status.value}")
+
+            logger.info("=" * 80)
             logger.info(
-                f"Video verification {'passed' if result.passed else 'failed'} "
-                f"for clip {clip_index if clip_index is not None else 'unknown'}: "
-                f"{len(result.failed_checks)} failures, {len(result.warning_checks)} warnings"
+                f"🔍 VERIFICATION COMPLETE - {'✅ PASSED' if result.passed else '❌ FAILED'} "
+                f"for clip {clip_index if clip_index is not None else 'unknown'}"
             )
+            logger.info(f"   Total checks: {len(result.checks)}")
+            logger.info(f"   Failed checks: {len(result.failed_checks)}")
+            logger.info(f"   Warning checks: {len(result.warning_checks)}")
+
+            if result.failed_checks:
+                logger.warning(f"   Failed checks details:")
+                for check in result.failed_checks:
+                    logger.warning(f"      - {check.check_name}: {check.message}")
+
+            if result.warning_checks:
+                logger.warning(f"   Warning checks details:")
+                for check in result.warning_checks:
+                    logger.warning(f"      - {check.check_name}: {check.message}")
+
+            logger.info("=" * 80)
 
             # Send WebSocket update - verification complete
             if self.websocket_manager and self.session_id:
@@ -584,5 +624,78 @@ class VideoVerificationService:
                     check_name="visual_consistency",
                     status=VerificationStatus.SKIPPED,
                     message=f"Visual consistency check skipped: {str(e)}",
+                )
+            )
+
+    def _check_text_presence(self, result: VerificationResult, video_path: str) -> None:
+        """Check video frames for presence of text using OpenCV edge detection."""
+        try:
+            import numpy as np
+
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                result.add_check(
+                    VerificationCheck(
+                        check_name="text_detection",
+                        status=VerificationStatus.SKIPPED,
+                        message="Unable to open video for text detection",
+                    )
+                )
+                return
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # Sample frames (every 30th frame or 5 frames total, whichever results in fewer samples)
+            sample_interval = max(total_frames // 5, 30)
+            frames_with_possible_text = []
+
+            for frame_idx in range(0, total_frames, sample_interval):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+
+                # Convert to grayscale for edge detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                # Apply Canny edge detection
+                edges = cv2.Canny(gray, 50, 150)
+
+                # Calculate edge density (text typically has high edge density)
+                edge_density = np.sum(edges > 0) / edges.size
+
+                # Heuristic: If >15% of pixels are edges, likely contains text/captions/overlays
+                # This threshold can be adjusted based on testing
+                if edge_density > 0.15:
+                    frames_with_possible_text.append(frame_idx)
+
+            cap.release()
+
+            if frames_with_possible_text:
+                result.add_check(
+                    VerificationCheck(
+                        check_name="text_detection",
+                        status=VerificationStatus.FAILED,
+                        message=f"Possible text/overlays detected in {len(frames_with_possible_text)} frame(s)",
+                        actual_value=frames_with_possible_text[:5],  # List first 5 frame indices
+                        severity="error",
+                    )
+                )
+            else:
+                result.add_check(
+                    VerificationCheck(
+                        check_name="text_detection",
+                        status=VerificationStatus.PASSED,
+                        message="No text/overlays detected in sampled frames",
+                    )
+                )
+
+        except Exception as e:
+            logger.warning(f"Text detection check failed: {e}")
+            result.add_check(
+                VerificationCheck(
+                    check_name="text_detection",
+                    status=VerificationStatus.SKIPPED,
+                    message=f"Text detection skipped: {str(e)}",
                 )
             )
