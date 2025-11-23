@@ -54,6 +54,7 @@ async def agent_2_process(
     # Query video_session table if db is provided
     # Agent2 always queries the database when db is provided, using user_id and session_id from orchestrator
     # The database connection uses DATABASE_URL from AWS Secrets Manager (via database.py)
+    # If db query fails but video_session_data is provided, fall back to using provided data
     if db is not None:
         try:
             logger.info(f"Agent2 querying video_session table for session_id={session_id}, user_id={user_id}")
@@ -84,8 +85,13 @@ async def agent_2_process(
             logger.info(f"Agent2 successfully loaded video_session data for session {session_id} from database (using DATABASE_URL from Secrets Manager)")
         except Exception as e:
             logger.error(f"Agent2 failed to query video_session table: {e}")
-            raise
-    elif video_session_data is None:
+            # If video_session_data was provided as fallback, use it instead of raising
+            if video_session_data is None:
+                raise
+            else:
+                logger.warning(f"Agent2 falling back to provided video_session_data due to database query failure")
+    
+    if video_session_data is None:
         # If no db and no video_session_data provided, this is an error
         raise ValueError(f"Agent2 requires either db session or video_session_data. Neither provided for session {session_id}")
     

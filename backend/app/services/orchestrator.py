@@ -3026,7 +3026,8 @@ class VideoGenerationOrchestrator:
         self,
         userId: str,
         sessionId: str,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        video_session_data: Optional[dict] = None
     ) -> None:
         """
         Start the Full Test pipeline process.
@@ -3039,6 +3040,7 @@ class VideoGenerationOrchestrator:
             userId: User identifier
             sessionId: Session identifier
             db: Optional database session to pass to agents (agents will query database themselves)
+            video_session_data: Optional video session data to pass to agents if db is not available
         """
         from app.agents.agent_2 import agent_2_process
         from app.agents.agent_4 import agent_4_process
@@ -3132,7 +3134,7 @@ class VideoGenerationOrchestrator:
             )
             
             # Trigger Agent2 and Agent4 in parallel
-            # Agents will query the database themselves for video_session_data
+            # Agents will query the database themselves for video_session_data, or use provided data
             agent2_task = agent_2_process(
                 websocket_manager=None,  # Not used - using callback instead
                 user_id=userId,
@@ -3141,12 +3143,12 @@ class VideoGenerationOrchestrator:
                 chosen_diagram_id="",  # Not used in Full Test
                 script_id="",  # Not used in Full Test
                 storage_service=self.storage_service,
-                video_session_data=None,  # Agent2 will query database itself
+                video_session_data=video_session_data,  # Pass video_session_data if db is not available
                 db=db,  # Pass db so Agent2 can query if needed
                 status_callback=status_callback
             )
             
-            # Agent4 will query database itself for video_session_data
+            # Agent4 will query database itself for video_session_data, or use provided data
             agent4_task = agent_4_process(
                 websocket_manager=None,  # Not used - using callback instead
                 user_id=userId,
@@ -3156,7 +3158,7 @@ class VideoGenerationOrchestrator:
                 audio_option="tts",
                 storage_service=self.storage_service,
                 agent2_data=None,
-                video_session_data=None,  # Agent4 will query database itself
+                video_session_data=video_session_data,  # Pass video_session_data if db is not available
                 db=db,  # Pass db so Agent4 can query if needed
                 status_callback=status_callback
             )

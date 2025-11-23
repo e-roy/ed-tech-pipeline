@@ -603,7 +603,8 @@ async def start_processing(
                 await orchestrator.start_full_test_process(
                     userId=user_id,
                     sessionId=session_id,
-                    db=db  # Pass db to orchestrator, which will pass it to agents for their own queries
+                    db=db,  # Pass db to orchestrator, which will pass it to agents for their own queries
+                    video_session_data=video_session_data  # Pass video_session_data as fallback if db is not available
                 )
                 logger.info(f"Orchestrator completed for session {session_id}")
             except Exception as e:
