@@ -109,7 +109,7 @@ export interface Fact {
 
 export interface NarrationSegment {
   id: string;
-  type: string;
+  type?: string;
   start_time: number;
   duration: number;
   narration: string;

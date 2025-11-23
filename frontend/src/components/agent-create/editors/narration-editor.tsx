@@ -192,7 +192,7 @@ export function NarrationEditor() {
                       {index + 1}
                     </Badge>
                     <CardTitle className="text-sm font-medium">
-                      {segment.type
+                      {(segment.type ?? "segment")
                         .split("_")
                         .map(
                           (word) =>
