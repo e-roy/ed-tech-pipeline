@@ -66,7 +66,7 @@ export default function HistoryPage() {
         try {
           await deleteMutation.mutateAsync({ sessionId });
           deletedCount++;
-          
+
           // Wait 200ms before next deletion (except for the last one)
           if (i < sessionIds.length - 1) {
             await new Promise((resolve) => setTimeout(resolve, 200));
@@ -84,7 +84,7 @@ export default function HistoryPage() {
         toast.success(`Successfully deleted ${deletedCount} session(s)`);
       } else {
         toast.error(
-          `Deleted ${deletedCount} session(s). Failed to delete ${failedDeletions.length} session(s).`
+          `Deleted ${deletedCount} session(s). Failed to delete ${failedDeletions.length} session(s).`,
         );
       }
 
@@ -145,7 +145,7 @@ export default function HistoryPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 overflow-y-auto">
           {sessions.map((session) => (
             <SessionCard
               key={session.id}
@@ -172,18 +172,24 @@ export default function HistoryPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {isDeletingAll ? "Deleting All Sessions..." : "Delete All Sessions"}
+              {isDeletingAll
+                ? "Deleting All Sessions..."
+                : "Delete All Sessions"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {isDeletingAll ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="size-4 animate-spin" />
-                  <span>Please wait while all sessions are being deleted...</span>
+                  <span>
+                    Please wait while all sessions are being deleted...
+                  </span>
                 </div>
               ) : (
                 <>
-                  Are you sure you want to delete all {sessions?.length ?? 0} session
-                  {sessions && sessions.length !== 1 ? "s" : ""}? This action cannot be undone.
+                  Are you sure you want to delete all {sessions?.length ?? 0}{" "}
+                  session
+                  {sessions && sessions.length !== 1 ? "s" : ""}? This action
+                  cannot be undone.
                 </>
               )}
             </AlertDialogDescription>
