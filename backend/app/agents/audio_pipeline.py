@@ -11,6 +11,7 @@ import os
 import time
 import tempfile
 import logging
+import subprocess
 from typing import Optional, Dict, Any
 from pathlib import Path
 from openai import OpenAI
@@ -20,6 +21,30 @@ from .music_agent import MusicSelectionAgent, MusicProcessingService
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_audio_duration(filepath: str) -> float:
+    """
+    Get the duration of an audio file using ffprobe.
+
+    Args:
+        filepath: Path to the audio file
+
+    Returns:
+        Duration in seconds
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", filepath],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return float(result.stdout.strip())
+    except (subprocess.CalledProcessError, ValueError) as e:
+        logger.warning(f"Failed to get audio duration for {filepath}: {e}")
+        return 0.0
 
 
 class AudioPipelineAgent:
@@ -194,7 +219,16 @@ class AudioPipelineAgent:
                 f"({len(text)} chars, voice: {voice})"
             )
 
-            # Generate TTS audio using OpenAI
+            # Get target duration from part_data if available
+            target_duration = None
+            if "duration" in part_data:
+                try:
+                    target_duration = float(part_data["duration"])
+                    logger.info(f"[{session_id}] Target duration for '{part_name}': {target_duration}s")
+                except (ValueError, TypeError):
+                    logger.warning(f"[{session_id}] Invalid duration value for '{part_name}': {part_data.get('duration')}")
+
+            # Generate TTS audio using OpenAI (normal speed initially)
             response = self.client.audio.speech.create(
                 model="tts-1",  # Use tts-1 (faster, cheaper) or tts-1-hd (higher quality)
                 voice=voice,
@@ -215,16 +249,54 @@ class AudioPipelineAgent:
 
             logger.debug(f"[{session_id}] Saved audio file to: {filepath}")
 
-            # Get file size for verification
-            file_size = os.path.getsize(filepath)
+            # Get actual duration using ffprobe
+            actual_duration = get_audio_duration(filepath)
+            logger.info(f"[{session_id}] Actual audio duration for '{part_name}': {actual_duration:.2f}s")
 
             # Calculate cost (based on character count)
             char_count = len(text)
             cost = (char_count / 1_000_000) * self.COST_PER_1M_CHARS
 
-            # Estimate duration based on speaking rate (~150 words/min)
-            words = len(text.split())
-            estimated_duration = (words / 150) * 60  # seconds
+            # Check if we need to speed up the audio to fit target duration
+            if target_duration and actual_duration > target_duration:
+                # Calculate required speed to fit within target duration
+                required_speed = actual_duration / target_duration
+
+                # Cap speed at 1.25x (beyond this sounds unnatural)
+                if required_speed > 1.25:
+                    logger.warning(
+                        f"[{session_id}] Audio for '{part_name}' requires {required_speed:.2f}x speed "
+                        f"to fit {target_duration}s, but capping at 1.25x"
+                    )
+                    required_speed = 1.25
+
+                # Regenerate with speed adjustment
+                logger.info(f"[{session_id}] Regenerating '{part_name}' at {required_speed:.2f}x speed to fit {target_duration}s")
+
+                response = self.client.audio.speech.create(
+                    model="tts-1",
+                    voice=voice,
+                    input=text,
+                    response_format="mp3",
+                    speed=required_speed
+                )
+
+                # Overwrite the file with sped-up version
+                with open(filepath, "wb") as f:
+                    f.write(response.content)
+
+                # Get new duration
+                actual_duration = get_audio_duration(filepath)
+                logger.info(f"[{session_id}] Adjusted audio duration for '{part_name}': {actual_duration:.2f}s")
+
+                # Double the cost (regenerated)
+                cost *= 2
+
+            # Get file size for verification
+            file_size = os.path.getsize(filepath)
+
+            # Use actual duration instead of estimation
+            estimated_duration = actual_duration
 
             # Update cumulative status: mark audio as completed
             if cumulative_items:

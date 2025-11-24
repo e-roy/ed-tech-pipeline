@@ -167,10 +167,37 @@ The narration should be:
 - Suitable for voice-over
 - Timed appropriately for the duration
 
-The visual guidance should be:
-- Specific and actionable
-- Describe scenes, graphics, text overlays, or animations
-- Support the narration
+WORD COUNT CONSTRAINTS (based on natural speaking pace of ~2.5 words per second):
+- HOOK (10-15s): Maximum 35 words
+- CONCEPT (15-20s): Maximum 50 words
+- PROCESS (20-25s): Maximum 60 words
+- CONCLUSION (10s): Maximum 25 words
+
+CRITICAL: Stay well within these word limits to ensure smooth, natural narration. Shorter is better than longer.
+
+CRITICAL - Visual Guidance Rules:
+Visual guidance MUST describe PHYSICAL SCENES that a camera captures - NOT diagrams, charts, or illustrations.
+
+Think like a cinematographer filming a nature documentary or educational film:
+✓ GOOD: "Extreme close-up of vibrant green leaf, sunlight streaming through translucent cells, water droplets glistening on surface. Macro photography."
+✗ BAD: "Diagram showing photosynthesis process with arrows and labels"
+
+✓ GOOD: "Scientist in white lab coat examining beaker of blue liquid, holding it up to bright window light, laboratory equipment in soft focus background. Documentary style."
+✗ BAD: "Flowchart of the scientific method with labeled steps"
+
+✓ GOOD: "Aerial drone shot slowly descending over dense rainforest canopy, morning mist rising, golden hour lighting. Cinematic establishing shot."
+✗ BAD: "Map showing rainforest locations with text labels"
+
+Visual guidance must specify:
+- The physical subject (objects, people, environments)
+- Camera perspective (close-up, wide shot, aerial, macro)
+- Lighting and atmosphere (natural light, golden hour, dramatic)
+- Movement or action (if any)
+- Cinematographic style (documentary, cinematic, macro)
+
+Additional fields:
+- video_description: Describe camera movement, transitions, and overall visual style for the video clips
+- seed: A random integer (1-999999) for visual consistency across clips in this section
 
 You MUST respond with valid JSON in this exact structure:
 {
@@ -178,24 +205,32 @@ You MUST respond with valid JSON in this exact structure:
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "concept": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "process": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "conclusion": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   }
 }
@@ -301,7 +336,7 @@ Respond with ONLY the JSON object, no additional text."""
             ValueError: If script is missing required parts or fields
         """
         required_parts = ["hook", "concept", "process", "conclusion"]
-        required_fields = ["narration", "duration", "visual_guidance", "key_concepts"]
+        required_fields = ["narration", "duration", "visual_guidance", "video_description", "seed", "key_concepts"]
 
         # Check all parts exist
         for part in required_parts:
@@ -323,6 +358,12 @@ Respond with ONLY the JSON object, no additional text."""
             if not isinstance(script[part]["visual_guidance"], str):
                 raise ValueError(f"Visual guidance in '{part}' must be a string")
 
+            if not isinstance(script[part]["video_description"], str):
+                raise ValueError(f"Video description in '{part}' must be a string")
+
+            if not isinstance(script[part]["seed"], int):
+                raise ValueError(f"Seed in '{part}' must be an integer")
+
             if not isinstance(script[part]["key_concepts"], list):
                 raise ValueError(f"Key concepts in '{part}' must be an array")
 
@@ -335,3 +376,34 @@ Respond with ONLY the JSON object, no additional text."""
             logger.warning(
                 f"Total script duration {total_duration}s is outside recommended range (45-75s)"
             )
+
+        # Validate word counts against recommended limits (based on 2.5 words/second speaking pace)
+        # These are soft limits - we log warnings but don't fail validation
+        word_count_limits = {
+            "hook": 35,      # 10-15s max
+            "concept": 50,   # 15-20s max
+            "process": 60,   # 20-25s max
+            "conclusion": 25 # 10s max
+        }
+
+        for part in required_parts:
+            narration = script[part]["narration"]
+            word_count = len(narration.split())
+            limit = word_count_limits.get(part, 50)
+            duration = script[part]["duration"]
+
+            # Calculate words per second for this segment
+            words_per_second = word_count / duration if duration > 0 else 0
+
+            if word_count > limit:
+                logger.warning(
+                    f"Script part '{part}' has {word_count} words (limit: {limit}). "
+                    f"This requires {words_per_second:.1f} words/second (recommended: 2.5). "
+                    f"Audio may need speed adjustment."
+                )
+            elif words_per_second > 3.0:
+                # Flag if speaking pace exceeds 3 words/second (too fast even with 1.25x speed)
+                logger.warning(
+                    f"Script part '{part}' requires {words_per_second:.1f} words/second pace. "
+                    f"This may sound rushed even with speed adjustment."
+                )
