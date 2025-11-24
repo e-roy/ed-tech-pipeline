@@ -347,6 +347,58 @@ export const scriptRouter = createTRPCRouter({
         // Frontend will refresh via query invalidation in the component
 
         return result;
+    }),
+
+  testWebhook: protectedProcedure
+    .input(z.object({ sessionId: z.string().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      try {
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/test-webhook`;
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session_id: input.sessionId || `test-session-${ctx.session.user.id}`,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Test webhook API returned status ${response.status}: ${errorText}`,
+          );
+        }
+
+        const result = (await response.json()) as {
+          success: boolean;
+          message: string;
+          webhook_url: string;
+          status_sent: string;
+          response_status_code?: number;
+          response_body?: Record<string, unknown>;
+          error?: string;
+        };
+
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to test webhook",
+        });
+      }
+    }),
       } catch (error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

@@ -205,6 +205,145 @@ async def root():
     return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
 
 
+class TestWebhookRequest(BaseModel):
+    """Request model for testing webhook."""
+    session_id: Optional[str] = "test-session-123"
+
+
+class TestWebhookResponse(BaseModel):
+    """Response model for test webhook endpoint."""
+    success: bool
+    message: str
+    webhook_url: str
+    status_sent: str
+    response_status_code: Optional[int] = None
+    response_body: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/test-webhook", response_model=TestWebhookResponse)
+async def test_webhook(request: TestWebhookRequest):
+    """
+    Test endpoint to send a dummy webhook POST call to the webhook URL.
+    Uses webhook secret from config/AWS Secrets Manager.
+    """
+    from app.services.orchestrator import _get_webhook_secret
+    
+    webhook_url = settings.WEBHOOK_URL
+    webhook_secret = _get_webhook_secret()
+    
+    if not webhook_secret:
+        return TestWebhookResponse(
+            success=False,
+            message="WEBHOOK_SECRET not configured. Please set WEBHOOK_SECRET in .env file or AWS Secrets Manager.",
+            webhook_url=webhook_url or "not configured",
+            status_sent="none",
+            error="WEBHOOK_SECRET not found"
+        )
+    
+    if not webhook_url:
+        return TestWebhookResponse(
+            success=False,
+            message="WEBHOOK_URL not configured.",
+            webhook_url="not configured",
+            status_sent="none",
+            error="WEBHOOK_URL not found"
+        )
+    
+    # Create dummy webhook payload
+    # Use provided session_id or default test session ID
+    if request.session_id:
+        session_id = request.session_id.strip() or "test-session-123"
+    else:
+        session_id = "test-session-123"
+    dummy_payload = {
+        "sessionId": session_id,
+        "videoUrl": "https://example.com/test-video.mp4",
+        "status": "video_complete"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                webhook_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-webhook-secret": webhook_secret
+                },
+                json=dummy_payload
+            )
+            
+            response_body = None
+            try:
+                response_body = response.json()
+            except Exception:
+                try:
+                    response_body = {"raw_text": response.text[:500]}
+                except Exception:
+                    response_body = {"raw_text": "Unable to read response body"}
+            
+            if response.is_success:
+                return TestWebhookResponse(
+                    success=True,
+                    message=f"Webhook test successful! Sent {dummy_payload['status']} status.",
+                    webhook_url=webhook_url,
+                    status_sent=dummy_payload["status"],
+                    response_status_code=response.status_code,
+                    response_body=response_body
+                )
+            else:
+                # Safely extract error text
+                try:
+                    error_text = response.text[:200]
+                except Exception:
+                    error_text = "Unable to read response text"
+                
+                return TestWebhookResponse(
+                    success=False,
+                    message=f"Webhook test failed with status {response.status_code}",
+                    webhook_url=webhook_url,
+                    status_sent=dummy_payload["status"],
+                    response_status_code=response.status_code,
+                    response_body=response_body,
+                    error=f"HTTP {response.status_code}: {error_text}"
+                )
+                
+    except httpx.HTTPStatusError as e:
+        # Safely extract response text
+        try:
+            error_text = e.response.text[:200]
+            response_text = e.response.text[:500]
+        except Exception:
+            error_text = "Unable to read response text"
+            response_text = "Unable to read response text"
+        
+        return TestWebhookResponse(
+            success=False,
+            message=f"Webhook test failed: HTTP {e.response.status_code}",
+            webhook_url=webhook_url,
+            status_sent=dummy_payload["status"],
+            response_status_code=e.response.status_code,
+            response_body={"raw_text": response_text},
+            error=f"HTTP {e.response.status_code}: {error_text}"
+        )
+    except httpx.RequestError as e:
+        return TestWebhookResponse(
+            success=False,
+            message=f"Webhook test failed: Network error",
+            webhook_url=webhook_url,
+            status_sent=dummy_payload["status"],
+            error=f"Network error: {str(e)}"
+        )
+    except Exception as e:
+        return TestWebhookResponse(
+            success=False,
+            message=f"Webhook test failed: {str(e)}",
+            webhook_url=webhook_url,
+            status_sent=dummy_payload["status"],
+            error=f"Unexpected error: {str(e)}"
+        )
+
+
 class CheckProcessingRequest(BaseModel):
     """Request model for checking processing status."""
     userID: str

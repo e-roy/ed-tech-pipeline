@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Trash2, ArrowRight, Loader2, X } from "lucide-react";
+import { Trash2, ArrowRight, Loader2, X, Webhook } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -34,6 +34,7 @@ export default function HistoryPage() {
   const router = useRouter();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   
   // Check for active processing
   const { data: processingStatus, refetch: refetchProcessing } = api.script.checkProcessing.useQuery(
@@ -93,6 +94,29 @@ export default function HistoryPage() {
   
   const handleCancel = () => {
     cancelMutation.mutate({});
+  };
+  
+  const testWebhookMutation = api.script.testWebhook.useMutation({
+    onSuccess: (result) => {
+      if (result.success) {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message || "Webhook test failed");
+      }
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to test webhook",
+      );
+    },
+    onSettled: () => {
+      setIsTestingWebhook(false);
+    },
+  });
+  
+  const handleTestWebhook = () => {
+    setIsTestingWebhook(true);
+    testWebhookMutation.mutate({});
   };
 
   const deleteMutation = (
@@ -185,16 +209,26 @@ export default function HistoryPage() {
             {sessions?.length ?? 0} session{sessions?.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {sessions && sessions.length > 0 && (
+        <div className="flex items-center gap-2">
           <Button
-            variant="destructive"
-            onClick={() => setShowDeleteAllDialog(true)}
-            disabled={isDeletingAll}
+            variant="outline"
+            onClick={handleTestWebhook}
+            disabled={isTestingWebhook}
           >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete All
+            <Webhook className="mr-2 h-4 w-4" />
+            {isTestingWebhook ? "Testing..." : "Test Webhook"}
           </Button>
-        )}
+          {sessions && sessions.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteAllDialog(true)}
+              disabled={isDeletingAll}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete All
+            </Button>
+          )}
+        </div>
       </div>
       
       {/* Progress Bar - Only show when processing */}
