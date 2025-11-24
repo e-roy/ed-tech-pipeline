@@ -175,10 +175,29 @@ WORD COUNT CONSTRAINTS (based on natural speaking pace of ~2.5 words per second)
 
 CRITICAL: Stay well within these word limits to ensure smooth, natural narration. Shorter is better than longer.
 
-The visual guidance should be:
-- Specific and actionable
-- Describe scenes, graphics, text overlays, or animations
-- Support the narration
+CRITICAL - Visual Guidance Rules:
+Visual guidance MUST describe PHYSICAL SCENES that a camera captures - NOT diagrams, charts, or illustrations.
+
+Think like a cinematographer filming a nature documentary or educational film:
+✓ GOOD: "Extreme close-up of vibrant green leaf, sunlight streaming through translucent cells, water droplets glistening on surface. Macro photography."
+✗ BAD: "Diagram showing photosynthesis process with arrows and labels"
+
+✓ GOOD: "Scientist in white lab coat examining beaker of blue liquid, holding it up to bright window light, laboratory equipment in soft focus background. Documentary style."
+✗ BAD: "Flowchart of the scientific method with labeled steps"
+
+✓ GOOD: "Aerial drone shot slowly descending over dense rainforest canopy, morning mist rising, golden hour lighting. Cinematic establishing shot."
+✗ BAD: "Map showing rainforest locations with text labels"
+
+Visual guidance must specify:
+- The physical subject (objects, people, environments)
+- Camera perspective (close-up, wide shot, aerial, macro)
+- Lighting and atmosphere (natural light, golden hour, dramatic)
+- Movement or action (if any)
+- Cinematographic style (documentary, cinematic, macro)
+
+Additional fields:
+- video_description: Describe camera movement, transitions, and overall visual style for the video clips
+- seed: A random integer (1-999999) for visual consistency across clips in this section
 
 You MUST respond with valid JSON in this exact structure:
 {
@@ -186,24 +205,32 @@ You MUST respond with valid JSON in this exact structure:
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "concept": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "process": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   },
   "conclusion": {
     "narration": "string",
     "duration": number,
     "visual_guidance": "string",
+    "video_description": "string",
+    "seed": number,
     "key_concepts": ["string"]
   }
 }
@@ -309,7 +336,7 @@ Respond with ONLY the JSON object, no additional text."""
             ValueError: If script is missing required parts or fields
         """
         required_parts = ["hook", "concept", "process", "conclusion"]
-        required_fields = ["narration", "duration", "visual_guidance", "key_concepts"]
+        required_fields = ["narration", "duration", "visual_guidance", "video_description", "seed", "key_concepts"]
 
         # Check all parts exist
         for part in required_parts:
@@ -330,6 +357,12 @@ Respond with ONLY the JSON object, no additional text."""
 
             if not isinstance(script[part]["visual_guidance"], str):
                 raise ValueError(f"Visual guidance in '{part}' must be a string")
+
+            if not isinstance(script[part]["video_description"], str):
+                raise ValueError(f"Video description in '{part}' must be a string")
+
+            if not isinstance(script[part]["seed"], int):
+                raise ValueError(f"Seed in '{part}' must be an integer")
 
             if not isinstance(script[part]["key_concepts"], list):
                 raise ValueError(f"Key concepts in '{part}' must be an array")

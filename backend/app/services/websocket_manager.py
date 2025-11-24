@@ -13,6 +13,14 @@ from app.models.database import WebSocketConnection as WSConnectionModel
 logger = logging.getLogger(__name__)
 
 
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects."""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
 class WebSocketManager:
     """
     Manages WebSocket connections for real-time progress updates.
@@ -117,7 +125,7 @@ class WebSocketManager:
             message: Dictionary message to send (will be converted to JSON)
             websocket: The WebSocket connection to send to
         """
-        await websocket.send_text(json.dumps(message))
+        await websocket.send_text(json.dumps(message, cls=DateTimeEncoder))
 
     def has_connection(self, session_id: str) -> bool:
         """

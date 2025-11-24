@@ -899,6 +899,8 @@ async def agent_5_process(
         # Build visual prompts and segment durations for each section
         sections = ["hook", "concept", "process", "conclusion"]
         visual_prompts = {}  # Store prompts for parallel generation
+        video_descriptions = {}  # Store video descriptions for clip generation
+        section_seeds = {}  # Store seeds for consistency
         segment_durations = {}  # Store segment durations (in seconds)
 
         for part in sections:
@@ -906,6 +908,8 @@ async def agent_5_process(
             section_data = script.get(part, {})
             # Check for both visual_prompt and visual_guidance (Agent 2 uses visual_guidance)
             visual_prompt = section_data.get("visual_prompt", "") or section_data.get("visual_guidance", "")
+            video_description = section_data.get("video_description", "")
+            seed = section_data.get("seed")
 
             # Debug logging for prompt verification
             logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - section_data keys: {list(section_data.keys())}")
@@ -956,6 +960,8 @@ async def agent_5_process(
                 visual_prompt = f"Cinematic scene representing: {text[:200]}"
 
             visual_prompts[part] = visual_prompt
+            video_descriptions[part] = video_description
+            section_seeds[part] = seed
 
             # Store segment duration (from storyboard or script, with defaults)
             duration_str = section_data.get("duration")
@@ -1060,6 +1066,10 @@ async def agent_5_process(
                     consistency_parts.append(f"Students: {' '.join(students_words)}")
                 consistency_anchor = " | ".join(consistency_parts) + " | "
 
+            # Get video description from script (camera movement, style, lighting)
+            video_desc = video_descriptions.get(section, "")
+            video_desc_clean = sanitize_video_prompt(video_desc) if video_desc else ""
+
             # Generate progressive prompts for each clip position
             # Keep prompts concise - Veo 3 works best with shorter, focused prompts
             clip_prompts = []
@@ -1067,26 +1077,33 @@ async def agent_5_process(
                 # Create clip-specific temporal and action cues based on position
                 if clips_needed == 1:
                     # Single clip: use sanitized prompt with visual-only modifiers
-                    clip_prompt = f"{consistency_anchor}{prompt_sanitized}, smooth cinematic movement, clean animation"
+                    base_prompt = f"{consistency_anchor}{prompt_sanitized}"
+                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, smooth cinematic movement, clean animation"
                 elif i == 0:
                     # First clip: Opening/beginning of action (keep concise)
-                    clip_prompt = f"{consistency_anchor}OPENING SHOT: {prompt_sanitized}, camera slowly pushes in, characters beginning action, clean visual composition"
+                    base_prompt = f"{consistency_anchor}OPENING SHOT: {prompt_sanitized}"
+                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera slowly pushes in, characters beginning action, clean visual composition"
                 elif i == clips_needed - 1:
                     # Final clip: Conclusion of action (keep concise)
-                    clip_prompt = f"{consistency_anchor}FINAL SHOT: {prompt_sanitized}, camera holds steady, characters completing action, same composition as previous clip"
+                    base_prompt = f"{consistency_anchor}FINAL SHOT: {prompt_sanitized}"
+                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera holds steady, characters completing action, same composition as previous clip"
                 else:
                     # Middle clips: Progression of action (keep concise)
-                    clip_prompt = f"{consistency_anchor}SHOT {i+1}: {prompt_sanitized}, camera maintains angle, characters mid-action, continuous motion"
+                    base_prompt = f"{consistency_anchor}SHOT {i+1}: {prompt_sanitized}"
+                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera maintains angle, characters mid-action, continuous motion"
 
                 clip_prompts.append(clip_prompt)
 
-            # Generate deterministic seed for this section
-            # Use hash of section name to get consistent seed per section
-            import hashlib
-            section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
-            section_seed = section_hash % 100000  # Keep seed in reasonable range
-
-            logger.info(f"[{session_id}] Using seed {section_seed} for all clips in {section}")
+            # Get seed from script (Agent 2) or generate deterministic fallback
+            section_seed = section_seeds.get(section)
+            if section_seed is None:
+                # Fallback: use hash of section name to get consistent seed per section
+                import hashlib
+                section_hash = int(hashlib.md5(section.encode()).hexdigest()[:8], 16)
+                section_seed = section_hash % 100000  # Keep seed in reasonable range
+                logger.info(f"[{session_id}] No seed from Agent 2, using generated seed {section_seed} for {section}")
+            else:
+                logger.info(f"[{session_id}] Using Agent 2 seed {section_seed} for all clips in {section}")
 
             # Generate clips sequentially with continuity (image-to-video for clips 2+)
             generated_clips = []
