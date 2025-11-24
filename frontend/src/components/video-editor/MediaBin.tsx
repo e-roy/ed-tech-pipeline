@@ -72,6 +72,7 @@ export function MediaBin({ sessionId }: MediaBinProps) {
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
+      if (!file) continue;
       // Only accept video, audio, and image files
       if (!file.type.startsWith('video/') && !file.type.startsWith('audio/') && !file.type.startsWith('image/')) {
         continue;
