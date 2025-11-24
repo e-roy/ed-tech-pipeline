@@ -14,9 +14,9 @@ const webhookPayloadSchema = z.object({
   sessionId: z.string(),
   videoUrl: z.union([
     z.string().url(), // Valid URL for successful cases
-    z.literal(""), // Empty string for failed cases
+    z.literal(""), // Empty string for failed cases or processing_started
   ]),
-  status: z.enum(["video_complete", "video_failed"]),
+  status: z.enum(["video_complete", "video_failed", "processing_started"]),
 });
 
 /**
@@ -31,8 +31,8 @@ const webhookPayloadSchema = z.object({
  * Body:
  * {
  *   "sessionId": "string",
- *   "videoUrl": "string (URL or empty string for failed cases)",
- *   "status": "video_complete" | "video_failed"
+ *   "videoUrl": "string (URL or empty string for failed/started cases)",
+ *   "status": "video_complete" | "video_failed" | "processing_started"
  * }
  */
 export async function POST(req: NextRequest) {
@@ -94,9 +94,10 @@ export async function POST(req: NextRequest) {
     }
 
     const { sessionId, videoUrl, status } = validationResult.data;
-    const eventType = status; // video_complete or video_failed
+    const eventType = status; // video_complete, video_failed, or processing_started
 
     // Additional validation: video_complete must have a non-empty URL
+    // processing_started and video_failed don't require a URL
     if (status === "video_complete" && !videoUrl) {
       const logId = nanoid();
       await db.insert(webhookLogs).values({

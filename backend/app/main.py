@@ -38,6 +38,11 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
+# Track active processing sessions: {user_id: {session_id: task}}
+# This allows us to cancel by user_id and check active sessions
+if not hasattr(app.state, 'active_sessions'):
+    app.state.active_sessions: Dict[str, Dict[str, asyncio.Task]] = {}
+
 
 @app.get("/health")
 @app.get("/api/health")
@@ -198,6 +203,196 @@ async def process(request: ProcessRequest):
 async def root():
     """Health check endpoint."""
     return {"status": "healthy", "service": "Gauntlet Pipeline Orchestrator"}
+
+
+class CheckProcessingRequest(BaseModel):
+    """Request model for checking processing status."""
+    userID: str
+
+
+class CheckProcessingResponse(BaseModel):
+    """Response model for check processing endpoint."""
+    in_progress: bool
+    session_id: Optional[str] = None
+    websocket_url: Optional[str] = None
+    progress: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/checkprocessing", response_model=CheckProcessingResponse)
+async def check_processing(request: CheckProcessingRequest, db: Session = Depends(get_db)):
+    """
+    Check if there's a video generation in progress for a user.
+    
+    Returns the most recent active session and websocket URL if processing.
+    """
+    user_id = request.userID.strip()
+    
+    # Check in-memory active sessions first (fastest)
+    active_session_id = None
+    if hasattr(app.state, 'active_sessions') and user_id in app.state.active_sessions:
+        # Get the most recent session (last one added)
+        if app.state.active_sessions[user_id]:
+            active_session_id = list(app.state.active_sessions[user_id].keys())[-1]
+    
+    # Also check database for sessions with video_generating status
+    try:
+        from sqlalchemy import text as sql_text
+        result = db.execute(
+            sql_text("""
+                SELECT id, status, created_at 
+                FROM video_session 
+                WHERE user_id = :user_id 
+                AND status = 'video_generating'
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """),
+            {"user_id": user_id}
+        ).fetchone()
+        
+        if result:
+            db_session_id = result[0]
+            # Use database session if in-memory doesn't have it, or if database is more recent
+            if not active_session_id or db_session_id == active_session_id:
+                active_session_id = db_session_id
+    except Exception as e:
+        logger.warning(f"Could not query database for active sessions: {e}")
+    
+    if active_session_id:
+        # Determine websocket URL based on environment
+        # Check if we're in production (classclipscohort3.com domain)
+        ws_url = None
+        # For production, use the known API domain
+        if settings.FRONTEND_URL and "classclipscohort3.com" in settings.FRONTEND_URL:
+            ws_url = f"wss://api.classclipscohort3.com/ws/{active_session_id}"
+        else:
+            # Development: use localhost with API_PORT
+            ws_url = f"ws://localhost:{settings.API_PORT}/ws/{active_session_id}"
+        
+        return CheckProcessingResponse(
+            in_progress=True,
+            session_id=active_session_id,
+            websocket_url=ws_url,
+            progress={"status": "processing"}
+        )
+    
+    return CheckProcessingResponse(
+        in_progress=False,
+        session_id=None,
+        websocket_url=None,
+        progress=None
+    )
+
+
+class CancelProcessingRequest(BaseModel):
+    """Request model for cancelling processing."""
+    userID: str
+
+
+class CancelProcessingResponse(BaseModel):
+    """Response model for cancel processing endpoint."""
+    success: bool
+    message: str
+    cancelled_sessions: List[str]
+
+
+@app.post("/api/cancelprocessing", response_model=CancelProcessingResponse)
+async def cancel_processing(request: CancelProcessingRequest, db: Session = Depends(get_db)):
+    """
+    Cancel all active video generation sessions for a user.
+    
+    Cancels background tasks and sends failure messages via websocket.
+    """
+    user_id = request.userID.strip()
+    cancelled_sessions = []
+    
+    # Cancel in-memory tasks
+    if hasattr(app.state, 'active_sessions') and user_id in app.state.active_sessions:
+        sessions_to_cancel = list(app.state.active_sessions[user_id].keys())
+        
+        for session_id in sessions_to_cancel:
+            task = app.state.active_sessions[user_id][session_id]
+            task_was_done = task.done()
+            
+            if not task_was_done:
+                task.cancel()
+                logger.info(f"Cancelled processing task for user {user_id}, session {session_id}")
+            
+            cancelled_sessions.append(session_id)
+            
+            # Send cancellation message via websocket (only if task was running)
+            if not task_was_done:
+                try:
+                    await websocket_manager.send_progress(
+                        session_id,
+                        {
+                            "type": "agent_status",
+                            "agentnumber": "Orchestrator",
+                            "userID": user_id,
+                            "sessionID": session_id,
+                            "status": "error",
+                            "error": "Video generation cancelled by user",
+                            "reason": "User requested cancellation"
+                        }
+                    )
+                    logger.info(f"Sent cancellation message via websocket for session {session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to send cancellation message via websocket for session {session_id}: {e}")
+            
+            # Update database status (for both running and completed tasks)
+            try:
+                from sqlalchemy import text as sql_text
+                db.execute(
+                    sql_text("""
+                        UPDATE video_session 
+                        SET status = 'video_failed', updated_at = NOW()
+                        WHERE id = :session_id AND user_id = :user_id
+                    """),
+                    {"session_id": session_id, "user_id": user_id}
+                )
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to update database status for cancelled session {session_id}: {e}")
+                db.rollback()
+        
+        # Clean up
+        del app.state.active_sessions[user_id]
+    
+    # Also update any database sessions that might be stuck in video_generating
+    try:
+        from sqlalchemy import text as sql_text
+        result = db.execute(
+            sql_text("""
+                UPDATE video_session 
+                SET status = 'video_failed', updated_at = NOW()
+                WHERE user_id = :user_id 
+                AND status = 'video_generating'
+                RETURNING id
+            """),
+            {"user_id": user_id}
+        ).fetchall()
+        
+        for row in result:
+            session_id = row[0]
+            if session_id not in cancelled_sessions:
+                cancelled_sessions.append(session_id)
+        
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to update database sessions: {e}")
+        db.rollback()
+    
+    if cancelled_sessions:
+        return CancelProcessingResponse(
+            success=True,
+            message=f"Cancelled {len(cancelled_sessions)} active session(s)",
+            cancelled_sessions=cancelled_sessions
+        )
+    else:
+        return CancelProcessingResponse(
+            success=True,
+            message="No active sessions found to cancel",
+            cancelled_sessions=[]
+        )
 
 
 @app.get("/scaffoldtest", response_class=HTMLResponse)
@@ -555,12 +750,63 @@ async def start_processing(
                 logger.exception(f"Error in orchestrator for session {session_id}: {e}")
                 # Error status will be sent by orchestrator
         
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(run_orchestrator())
+        # Verify webhook secret access before starting
+        try:
+            from app.services.orchestrator import _get_webhook_secret
+            webhook_secret = _get_webhook_secret()
+            if webhook_secret:
+                logger.info(f"Webhook secret verified successfully for session {session_id}")
+            else:
+                logger.warning(f"Webhook secret not available for session {session_id} - webhook notifications may fail")
+        except Exception as e:
+            logger.warning(f"Could not verify webhook secret for session {session_id}: {e} - continuing anyway")
+        
+        # Send webhook notification for processing_started
+        try:
+            from app.services.orchestrator import VideoGenerationOrchestrator
+            temp_orchestrator = VideoGenerationOrchestrator(websocket_manager)
+            await temp_orchestrator._send_webhook_notification(
+                sessionId=session_id,
+                video_url="",
+                status="processing_started",
+                payload={"userId": user_id, "agent_selection": agent_selection}
+            )
+            logger.info(f"Sent processing_started webhook for session {session_id}")
+        except Exception as e:
+            # Log but don't fail - webhook is non-critical
+            logger.warning(f"Failed to send processing_started webhook for session {session_id}: {e}")
+        
+        # Create task in the current event loop (we're already in an async context)
+        task = asyncio.create_task(run_orchestrator())
         if not hasattr(app.state, 'background_tasks'):
             app.state.background_tasks = set()
         app.state.background_tasks.add(task)
-        task.add_done_callback(app.state.background_tasks.discard)
+        
+        # Track active session by user_id and session_id
+        if not hasattr(app.state, 'active_sessions'):
+            app.state.active_sessions = {}
+        if user_id not in app.state.active_sessions:
+            app.state.active_sessions[user_id] = {}
+        app.state.active_sessions[user_id][session_id] = task
+        
+        # Clean up when task completes
+        def cleanup_task(task_ref):
+            try:
+                if hasattr(app.state, 'active_sessions') and user_id in app.state.active_sessions:
+                    if session_id in app.state.active_sessions[user_id]:
+                        # Only delete if it's still the same task (might have been replaced)
+                        if app.state.active_sessions[user_id][session_id] is task_ref:
+                            del app.state.active_sessions[user_id][session_id]
+                    # Clean up empty user dict
+                    if user_id in app.state.active_sessions and not app.state.active_sessions[user_id]:
+                        del app.state.active_sessions[user_id]
+            except (KeyError, AttributeError):
+                # Session or user dict might have been deleted by cancel_processing
+                pass
+            if hasattr(app.state, 'background_tasks'):
+                app.state.background_tasks.discard(task_ref)
+        
+        task.add_done_callback(cleanup_task)
         
         return StartProcessingResponse(
             success=True,

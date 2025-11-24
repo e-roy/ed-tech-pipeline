@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { videoSessions, videoAssets } from "@/server/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import {
   createSessionWithScript,
   updateSessionWithScript,
@@ -257,6 +257,105 @@ export const scriptRouter = createTRPCRouter({
       }
 
       return { sessionId };
+    }),
+
+  checkProcessing: protectedProcedure
+    .input(z.object({}))
+    .query(async ({ ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      try {
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/checkprocessing`;
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userID: ctx.session.user.id,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Check processing API returned status ${response.status}: ${errorText}`,
+          );
+        }
+
+        const result = (await response.json()) as {
+          in_progress: boolean;
+          session_id: string | null;
+          websocket_url: string | null;
+          progress: Record<string, unknown> | null;
+        };
+
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to check processing status",
+        });
+      }
+    }),
+
+  cancelProcessing: protectedProcedure
+    .input(z.object({}))
+    .mutation(async ({ ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      try {
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/cancelprocessing`;
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userID: ctx.session.user.id,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Cancel processing API returned status ${response.status}: ${errorText}`,
+          );
+        }
+
+        const result = (await response.json()) as {
+          success: boolean;
+          message: string;
+          cancelled_sessions: string[];
+        };
+
+        // Update cancelled sessions in database
+        // Note: Database updates are handled by the backend API
+        // Frontend will refresh via query invalidation in the component
+
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to cancel processing",
+        });
+      }
     }),
 
   delete: protectedProcedure

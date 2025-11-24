@@ -3,9 +3,11 @@
 import { api } from "@/trpc/react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Trash2, ArrowRight, Loader2 } from "lucide-react";
+import { Trash2, ArrowRight, Loader2, X } from "lucide-react";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { Progress } from "@/components/ui/progress";
 import {
   Empty,
   EmptyHeader,
@@ -32,6 +34,66 @@ export default function HistoryPage() {
   const router = useRouter();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  
+  // Check for active processing
+  const { data: processingStatus, refetch: refetchProcessing } = api.script.checkProcessing.useQuery(
+    {},
+    {
+      refetchInterval: 5000, // Poll every 5 seconds
+    }
+  );
+  
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [progressMessage, setProgressMessage] = useState<string>("");
+  
+  // Connect to WebSocket if there's an active session
+  const { lastMessage, isConnected } = useWebSocket(activeSessionId);
+  
+  // Update active session when processing status changes
+  useEffect(() => {
+    if (processingStatus?.in_progress && processingStatus.session_id) {
+      setActiveSessionId(processingStatus.session_id);
+    } else {
+      setActiveSessionId(null);
+      setProgress(0);
+      setProgressMessage("");
+    }
+  }, [processingStatus]);
+  
+  // Update progress from WebSocket messages
+  useEffect(() => {
+    if (lastMessage) {
+      if (lastMessage.progress) {
+        const completed = lastMessage.progress.completed || 0;
+        const total = lastMessage.progress.total || 1;
+        setProgress(Math.round((completed / total) * 100));
+        setProgressMessage(lastMessage.message || "");
+      } else if (lastMessage.status) {
+        setProgressMessage(lastMessage.message || lastMessage.status);
+      }
+    }
+  }, [lastMessage]);
+  
+  const cancelMutation = api.script.cancelProcessing.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.message);
+      setActiveSessionId(null);
+      setProgress(0);
+      setProgressMessage("");
+      void refetchProcessing();
+      void utils.script.list.invalidate();
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to cancel processing",
+      );
+    },
+  });
+  
+  const handleCancel = () => {
+    cancelMutation.mutate({});
+  };
 
   const deleteMutation = (
     api.script as typeof api.script & {
@@ -134,6 +196,36 @@ export default function HistoryPage() {
           </Button>
         )}
       </div>
+      
+      {/* Progress Bar - Only show when processing */}
+      {processingStatus?.in_progress && activeSessionId && (
+        <Card className="mb-4 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm font-medium">Processing video...</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCancel}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="mr-2 h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
+          <Progress value={progress} className="mb-2" />
+          {progressMessage && (
+            <p className="text-muted-foreground text-xs">{progressMessage}</p>
+          )}
+          {!isConnected && (
+            <p className="text-muted-foreground text-xs mt-1">
+              Connecting to progress updates...
+            </p>
+          )}
+        </Card>
+      )}
 
       {!sessions || sessions.length === 0 ? (
         <Empty>

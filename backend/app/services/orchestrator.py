@@ -3153,6 +3153,9 @@ class VideoGenerationOrchestrator:
             elif status == "video_failed":
                 # video_failed can have empty string if no video was generated
                 final_video_url = video_url if video_url else ""
+            elif status == "processing_started":
+                # processing_started doesn't require a video URL
+                final_video_url = video_url if video_url else ""
             else:
                 logger.warning(f"Orchestrator: Unknown status '{status}' for session {sessionId}, using empty video_url")
                 final_video_url = video_url if video_url else ""
