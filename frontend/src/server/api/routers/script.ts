@@ -10,6 +10,7 @@ import {
   generateScript,
 } from "@/server/utils/generate-script";
 import { env } from "@/env";
+import { deleteUserFile } from "@/server/services/storage";
 
 export const scriptRouter = createTRPCRouter({
   getSession: protectedProcedure
@@ -282,12 +283,48 @@ export const scriptRouter = createTRPCRouter({
         });
       }
 
-      // Delete associated assets first (to respect foreign key constraints)
+      // Get all assets for this session to delete from S3
+      const assets = await db
+        .select()
+        .from(videoAssets)
+        .where(eq(videoAssets.sessionId, input.sessionId));
+
+      // Delete all S3 files associated with this session
+      const s3DeletionPromises = assets
+        .filter((asset) => asset.url)
+        .map(async (asset) => {
+          try {
+            // Extract S3 key from URL or use directly if already a key
+            const urlOrKey = asset.url!;
+            let s3Key: string;
+
+            if (urlOrKey.startsWith("http")) {
+              const url = new URL(urlOrKey);
+              s3Key = url.pathname.substring(1); // Remove leading /
+            } else {
+              s3Key = urlOrKey;
+            }
+
+            // Delete from S3
+            await deleteUserFile(ctx.session.user.id, s3Key);
+          } catch (error) {
+            // Log error but don't fail the entire deletion
+            console.error(
+              `Failed to delete S3 file for asset ${asset.id}:`,
+              error,
+            );
+          }
+        });
+
+      // Wait for all S3 deletions to complete (or fail gracefully)
+      await Promise.allSettled(s3DeletionPromises);
+
+      // Delete associated assets from database (to respect foreign key constraints)
       await db
         .delete(videoAssets)
         .where(eq(videoAssets.sessionId, input.sessionId));
 
-      // Delete the session
+      // Delete the session from database
       await db
         .delete(videoSessions)
         .where(eq(videoSessions.id, input.sessionId));

@@ -36,8 +36,8 @@ export class FactExtractionAgent {
         );
       }
 
-      console.log("content   ===>", content);
-      console.log("pdfUrl    ===>", pdfUrl);
+      // console.log("content   ===>", content);
+      // console.log("pdfUrl    ===>", pdfUrl);
 
       const systemPrompt = this.buildSystemPrompt();
       const userPrompt = this.buildUserPrompt(content ?? "");

@@ -1,7 +1,35 @@
 import { openai } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { generateObject } from "ai";
+import { z } from "zod";
 import { env } from "@/env";
 import type { AgentInput, AgentOutput } from "@/types/agent";
+
+const narrativeSegmentSchema = z.object({
+  id: z.string(),
+  type: z.enum([
+    "hook",
+    "concept_introduction",
+    "process_explanation",
+    "conclusion",
+  ]),
+  start_time: z.number(),
+  duration: z.number(),
+  narration: z
+    .string()
+    .describe(
+      "Script text - must fit within segment duration at ~2.2 words/second pace",
+    ),
+  visual_guidance: z.string(),
+  key_concepts: z.array(z.string()),
+  educational_purpose: z.string(),
+});
+
+const narrativeScriptSchema = z.object({
+  total_duration: z.number(),
+  reading_level: z.string(),
+  key_terms_count: z.number(),
+  segments: z.array(narrativeSegmentSchema),
+});
 
 export class NarrativeBuilderAgent {
   async process(input: AgentInput): Promise<AgentOutput> {
@@ -38,29 +66,32 @@ export class NarrativeBuilderAgent {
         childInterest,
       );
 
-      const result = await generateText({
-        model: openai("gpt-4o-mini"),
+      const result = await generateObject({
+        // model: openai("gpt-4o-mini"),
+        model: openai("gpt-5-mini-2025-08-07"),
+        schema: narrativeScriptSchema,
         system: systemPrompt,
         prompt: userPrompt,
-        temperature: 0.7,
+        // temperature: 0.7,
       });
 
-      const content = result.text;
-      if (!content) {
+      const scriptData = result.object;
+      if (!scriptData) {
         throw new Error("No content in LLM response");
       }
 
-      // Extract JSON from response (may be wrapped in markdown code blocks)
-      const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
-      const jsonObjectRegex = /\{[\s\S]*\}/;
-      const jsonBlockMatch = jsonBlockRegex.exec(content);
-      const jsonObjectMatch = jsonObjectRegex.exec(content);
-      const jsonStr = jsonBlockMatch
-        ? (jsonBlockMatch[1] ?? jsonBlockMatch[0])
-        : jsonObjectMatch
-          ? jsonObjectMatch[0]
-          : content;
-      const scriptData = JSON.parse(jsonStr) as unknown;
+      // Validate narration length for each segment
+      const wordsPerSecond = 2.2;
+      for (const segment of scriptData.segments) {
+        const wordCount = segment.narration.split(/\s+/).length;
+        const maxWords = Math.ceil(segment.duration * wordsPerSecond);
+
+        if (wordCount > maxWords) {
+          console.warn(
+            `Segment ${segment.id} (${segment.type}) narration too long: ${wordCount} words (max ${maxWords} for ${segment.duration}s)`,
+          );
+        }
+      }
 
       // Calculate cost (GPT-4o-mini: ~$0.15 per 1M input tokens, ~$0.60 per 1M output tokens)
       const inputTokens = result.usage?.inputTokens ?? 0;
@@ -137,10 +168,10 @@ Your task:
 
 Structure:
 
-- Hook (0-10s): Engage with question or surprising fact
-- Concept Introduction (10-25s): Introduce key vocabulary and ideas
-- Process Explanation (25-45s): Explain how/why it works with details
-- Conclusion (45-60s): Real-world connection and summary
+- Hook (0-10s): Engage with question or surprising fact (MAX 22 WORDS)
+- Concept Introduction (10-25s): Introduce key vocabulary and ideas (MAX 33 WORDS)
+- Process Explanation (25-45s): Explain how/why it works with details (MAX 44 WORDS)
+- Conclusion (45-60s): Real-world connection and summary (MAX 33 WORDS)
 
 Rules:
 
@@ -149,9 +180,14 @@ Rules:
 - Define technical terms when first introduced
 - Include concrete examples
 - End with memorable takeaway
-- Output ONLY valid JSON, no additional text
+- CRITICAL: Narration must fit within segment duration at ~2.2 words per second
+  * Hook (10s): Maximum 22 words
+  * Concept Introduction (15s): Maximum 33 words
+  * Process Explanation (20s): Maximum 44 words
+  * Conclusion (15s): Maximum 33 words
+- Keep narration concise and punchy - every word must earn its place
 
-Required JSON structure:
+Required structure:
 {
 "total_duration": ${targetDuration},
 "reading_level": "${readingLevel}",
@@ -162,7 +198,7 @@ Required JSON structure:
 "type": "hook",
 "start_time": 0,
 "duration": 10,
-"narration": "<script text>",
+"narration": "<script text - MAX 22 WORDS>",
 "visual_guidance": "<description of what should be shown>",
 "key_concepts": ["<concept1>", "<concept2>"],
 "educational_purpose": "<why this segment matters>"
@@ -172,7 +208,7 @@ Required JSON structure:
 "type": "concept_introduction",
 "start_time": 10,
 "duration": 15,
-"narration": "<script text>",
+"narration": "<script text - MAX 33 WORDS>",
 "visual_guidance": "<description>",
 "key_concepts": [],
 "educational_purpose": "<purpose>"
@@ -182,7 +218,7 @@ Required JSON structure:
 "type": "process_explanation",
 "start_time": 25,
 "duration": 20,
-"narration": "<script text>",
+"narration": "<script text - MAX 44 WORDS>",
 "visual_guidance": "<description>",
 "key_concepts": [],
 "educational_purpose": "<purpose>"
@@ -192,7 +228,7 @@ Required JSON structure:
 "type": "conclusion",
 "start_time": 45,
 "duration": 15,
-"narration": "<script text>",
+"narration": "<script text - MAX 33 WORDS>",
 "visual_guidance": "<description>",
 "key_concepts": [],
 "educational_purpose": "<purpose>"

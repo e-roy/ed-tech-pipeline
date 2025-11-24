@@ -93,6 +93,34 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
           })[0]
       : undefined;
 
+  // Fetch selected diagrams from diagrams folder
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+  const { data: diagramFiles, isLoading: isLoadingDiagrams } = (
+    api.storage as any
+  ).listSessionFiles.useQuery(
+    {
+      sessionId: sessionId ?? "",
+      subfolder: "diagrams",
+    },
+    {
+      enabled: !!sessionId && !!narration, // Only fetch after narration is created
+      refetchInterval: narration && !factsLocked ? 30000 : false, // Poll every 30s until facts are locked
+      refetchOnWindowFocus: true,
+    },
+  ) as {
+    data:
+      | Array<{
+          key: string;
+          name: string;
+          size: number;
+          last_modified: string | null;
+          content_type: string;
+          presigned_url: string;
+        }>
+      | undefined;
+    isLoading: boolean;
+  };
+
   const mode =
     workflowStep === "selection"
       ? "select-facts"
@@ -269,7 +297,11 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
             </div>
           ) : !isExtractingFacts && showToggleButtons ? (
             viewMode === "facts" ? (
-              <FactsView facts={selectedFacts} />
+              <FactsView
+                facts={selectedFacts}
+                diagrams={diagramFiles ?? []}
+                isLoadingDiagrams={isLoadingDiagrams}
+              />
             ) : viewMode === "script" ? (
               narration && <NarrationEditor />
             ) : viewMode === "debug" ? (

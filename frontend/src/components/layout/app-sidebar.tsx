@@ -55,11 +55,11 @@ const navItems = [
     isCollapsible: true,
   },
 
-  {
-    title: "Edit",
-    url: "/dashboard/editing/test",
-    icon: Scissors,
-  },
+  // {
+  //   title: "Edit",
+  //   url: "/dashboard/editing/test",
+  //   icon: Scissors,
+  // },
 ];
 
 type User = {

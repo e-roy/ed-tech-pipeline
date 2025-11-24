@@ -63,7 +63,7 @@ export async function loginAction(formData: FormData) {
   });
 
   // Redirect to dashboard
-  redirect("/dashboard");
+  redirect("/dashboard/create");
 }
 
 export async function signupAction(formData: FormData) {
@@ -156,5 +156,5 @@ export async function signupAction(formData: FormData) {
   });
 
   // Redirect to dashboard
-  redirect("/dashboard");
+  redirect("/dashboard/create");
 }

@@ -768,6 +768,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           const hasExtractedFacts = extractedFacts.length > 0;
           const hasConfirmedFacts = confirmedFacts.length > 0;
           const hasGeneratedScript = !!data.session.generatedScript;
+          const isNarrationVerified = data.session.status === "narration_verified";
 
           set({
             sessionId: data.session.id,
@@ -799,7 +800,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             facts: extractedFacts,
             selectedFacts: confirmedFacts,
             narration: data.session.generatedScript ?? null,
-            narrationLocked: hasGeneratedScript,
+            narrationLocked: isNarrationVerified,
             childAge: data.session.childAge ?? null,
             childInterest: data.session.childInterest ?? null,
             workflowStep: hasConfirmedFacts
@@ -811,7 +812,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 : "input",
             // Set UI prompt flags based on session state
             showFactSelectionPrompt: hasExtractedFacts && !hasConfirmedFacts,
-            showNarrationReviewPrompt: hasGeneratedScript,
+            showNarrationReviewPrompt: hasGeneratedScript && !isNarrationVerified,
           });
         } catch (error) {
           console.error("Failed to load session:", error);

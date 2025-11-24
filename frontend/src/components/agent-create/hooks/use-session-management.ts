@@ -34,10 +34,8 @@ export function useSessionManagement({
       reset();
       setSessionId(null);
 
-      // Navigate away if we're on the session detail page
-      if (pathname?.includes("/history/")) {
-        router.push("/dashboard/create");
-      }
+      // Always redirect to clean create page after deletion
+      router.push("/dashboard/create");
     },
     onError: (error) => {
       toast.error(`Failed to delete session: ${error.message}`);
