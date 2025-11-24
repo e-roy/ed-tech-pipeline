@@ -347,6 +347,15 @@ export const scriptRouter = createTRPCRouter({
         // Frontend will refresh via query invalidation in the component
 
         return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to cancel processing",
+        });
+      }
     }),
 
   testWebhook: protectedProcedure
@@ -396,16 +405,6 @@ export const scriptRouter = createTRPCRouter({
             error instanceof Error
               ? error.message
               : "Failed to test webhook",
-        });
-      }
-    }),
-      } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Failed to cancel processing",
         });
       }
     }),

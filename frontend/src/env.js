@@ -22,10 +22,7 @@ export const env = createEnv({
     S3_BUCKET_NAME: z.string().optional(),
     AWS_REGION: z.string().default("us-east-2"),
     OPENAI_API_KEY: z.string().optional(),
-    WEBHOOK_SECRET:
-      process.env.NODE_ENV === "production"
-        ? z.string()
-        : z.string().optional(), // Required in production, optional in development
+    WEBHOOK_SECRET: z.string().optional(), // Optional - webhook route handles missing secret gracefully
     VIDEO_PROCESSING_API_URL: z
       .string()
       .url()
