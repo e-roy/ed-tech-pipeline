@@ -75,6 +75,10 @@ app.include_router(video_editor_router)
 from app.routes.diagnostics import router as diagnostics_router
 app.include_router(diagnostics_router)
 
+# Include generation router
+from app.routes.generation import router as generation_router
+app.include_router(generation_router)
+
 
 # Request/Response models
 class ProcessRequest(BaseModel):

@@ -20,7 +20,7 @@ from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 
 @router.get("/test/ping")
@@ -2218,3 +2218,134 @@ async def compose_hardcode_video(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+class TestWebhookRequest(BaseModel):
+    """Request model for webhook testing."""
+    session_id: str
+
+
+class WebhookTestResult(BaseModel):
+    """Result of a single webhook test."""
+    status: str  # "video_complete" or "video_failed"
+    success: bool
+    request_payload: Dict[str, Any]
+    response_status_code: Optional[int]
+    response_body: Optional[Dict[str, Any]]
+    error: Optional[str]
+
+
+class TestWebhookResponse(BaseModel):
+    """Response model for webhook testing."""
+    success: bool
+    webhook_url: str
+    results: List[WebhookTestResult]
+    message: str
+
+
+@router.post("/test/webhook", response_model=TestWebhookResponse)
+async def test_webhook(request: TestWebhookRequest):
+    """
+    Test endpoint to send test webhook calls for both video_complete and video_failed statuses.
+    Uses webhook URL and secret from config/AWS Secrets Manager.
+    """
+    import httpx
+    from app.config import get_settings
+    from app.services.orchestrator import _get_webhook_secret
+    
+    settings = get_settings()
+    webhook_url = settings.WEBHOOK_URL
+    webhook_secret = _get_webhook_secret()
+    
+    if not webhook_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="WEBHOOK_SECRET not configured. Cannot test webhook."
+        )
+    
+    if not webhook_url:
+        raise HTTPException(
+            status_code=500,
+            detail="WEBHOOK_URL not configured. Cannot test webhook."
+        )
+    
+    results = []
+    dummy_video_url = "https://example.com/test-video.mp4"
+    
+    # Test both statuses
+    test_cases = [
+        {
+            "status": "video_complete",
+            "video_url": dummy_video_url
+        },
+        {
+            "status": "video_failed",
+            "video_url": ""
+        }
+    ]
+    
+    for test_case in test_cases:
+        status = test_case["status"]
+        video_url = test_case["video_url"]
+        
+        request_payload = {
+            "sessionId": request.session_id,
+            "videoUrl": video_url,
+            "status": status
+        }
+        
+        result = WebhookTestResult(
+            status=status,
+            success=False,
+            request_payload=request_payload,
+            response_status_code=None,
+            response_body=None,
+            error=None
+        )
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    webhook_url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-webhook-secret": webhook_secret
+                    },
+                    json=request_payload
+                )
+                
+                result.response_status_code = response.status_code
+                
+                try:
+                    result.response_body = response.json()
+                except Exception:
+                    result.response_body = {"raw_text": response.text}
+                
+                result.success = response.is_success
+                
+                if not result.success:
+                    result.error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    
+        except httpx.HTTPStatusError as e:
+            result.response_status_code = e.response.status_code
+            result.error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+            try:
+                result.response_body = e.response.json()
+            except Exception:
+                result.response_body = {"raw_text": e.response.text}
+        except httpx.RequestError as e:
+            result.error = f"Network error: {str(e)}"
+        except Exception as e:
+            result.error = f"Unexpected error: {str(e)}"
+        
+        results.append(result)
+    
+    # Determine overall success
+    all_success = all(r.success for r in results)
+    
+    return TestWebhookResponse(
+        success=all_success,
+        webhook_url=webhook_url,
+        results=results,
+        message=f"Tested {len(results)} webhook calls. {'All succeeded' if all_success else 'Some failed'}."
+    )

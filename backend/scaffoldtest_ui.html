@@ -416,6 +416,17 @@
                 <input type="text" id="fullTestSessionID" name="fullTestSessionID" value="3oyCVhHND75RwUKhdLpy0">
                 <label for="fullTestUserID">User ID:</label>
                 <input type="text" id="fullTestUserID" name="fullTestUserID" value="f6643f6a-8d48-46ff-978f-77df393ac752">
+                
+                <div style="margin-top: 15px;">
+                    <button type="button" id="test-webhook-btn" class="submit-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                        Test Webhook API
+                    </button>
+                </div>
+                
+                <div class="result-section" id="webhook-test-results" style="display: none; margin-top: 15px;">
+                    <h3>Webhook Test Results</h3>
+                    <div id="webhook-test-content" class="result-content"></div>
+                </div>
             </div>
 
             <!-- Agent2 fields -->
@@ -1836,6 +1847,77 @@ ${JSON.stringify(result, null, 2)}`;
 
         // Attach event listener to restart Agent5 button
         document.getElementById('restart-agent5-btn').addEventListener('click', restartAgent5FromConcat);
+
+        // Webhook test functionality
+        const testWebhookBtn = document.getElementById('test-webhook-btn');
+        const webhookTestResults = document.getElementById('webhook-test-results');
+        const webhookTestContent = document.getElementById('webhook-test-content');
+
+        testWebhookBtn.addEventListener('click', async function() {
+            const sessionId = document.getElementById('fullTestSessionID').value.trim();
+            
+            if (!sessionId) {
+                alert('Please enter a Session ID');
+                return;
+            }
+            
+            try {
+                testWebhookBtn.disabled = true;
+                testWebhookBtn.textContent = 'Testing Webhook...';
+                webhookTestResults.style.display = 'block';
+                webhookTestContent.textContent = 'Sending test webhook calls...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/test/webhook`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success !== undefined) {
+                    // Format the results for display
+                    let displayContent = `<strong>Webhook URL:</strong> ${result.webhook_url}\n`;
+                    displayContent += `<strong>Overall Status:</strong> ${result.success ? '✅ All tests passed' : '❌ Some tests failed'}\n`;
+                    displayContent += `<strong>Message:</strong> ${result.message}\n\n`;
+                    displayContent += `<strong>Test Results:</strong>\n\n`;
+                    
+                    result.results.forEach((testResult, index) => {
+                        displayContent += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                        displayContent += `<strong>Test ${index + 1}: ${testResult.status}</strong>\n`;
+                        displayContent += `Status: ${testResult.success ? '✅ Success' : '❌ Failed'}\n`;
+                        displayContent += `\n<strong>Request Payload:</strong>\n`;
+                        displayContent += JSON.stringify(testResult.request_payload, null, 2);
+                        displayContent += `\n\n<strong>Response Status Code:</strong> ${testResult.response_status_code || 'N/A'}\n`;
+                        
+                        if (testResult.response_body) {
+                            displayContent += `\n<strong>Response Body:</strong>\n`;
+                            displayContent += JSON.stringify(testResult.response_body, null, 2);
+                        }
+                        
+                        if (testResult.error) {
+                            displayContent += `\n\n<strong style="color: red;">Error:</strong> ${testResult.error}\n`;
+                        }
+                        
+                        displayContent += `\n\n`;
+                    });
+                    
+                    webhookTestContent.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' + displayContent + '</pre>';
+                } else {
+                    throw new Error(result.detail || result.message || 'Webhook test failed');
+                }
+            } catch (error) {
+                console.error('Webhook test error:', error);
+                webhookTestContent.innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+            } finally {
+                testWebhookBtn.disabled = false;
+                testWebhookBtn.textContent = 'Test Webhook API';
+            }
+        });
 
         // Function to restart Agent5 from concatenation
         async function restartAgent5FromConcat() {
