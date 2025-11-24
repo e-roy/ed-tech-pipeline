@@ -5,7 +5,7 @@ This document describes the actual API endpoints exposed by the Pipeline backend
 ## Base URL
 
 - **Local Development**: `http://localhost:8000`
-- **Production (EC2)**: `http://13.58.115.166:8000`
+- **Production (ALB)**: `https://api.classclipscohort3.com`
 
 ## Interactive Documentation
 

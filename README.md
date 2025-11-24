@@ -117,13 +117,15 @@ This script will:
 4. Restart the backend service
 5. Verify deployment health
 
-**Production Backend**: http://13.58.115.166:8000
+**Production Backend**: https://api.classclipscohort3.com
 
 **Manual deployment steps:**
 
 ```bash
-# SSH into EC2
-ssh -i ~/Downloads/pipeline_orchestrator.pem ec2-user@13.58.115.166
+# Get current EC2 IP (IP changes on restart - use ALB URL for API access)
+# For SSH, get current IP from AWS Console or use: aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text
+# SSH into EC2 (replace IP_ADDRESS with current IP)
+ssh -i ~/Downloads/pipeline_orchestrator.pem ec2-user@IP_ADDRESS
 
 # Pull latest code
 cd /opt/pipeline

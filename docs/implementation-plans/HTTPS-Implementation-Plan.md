@@ -112,13 +112,14 @@ Our current implementation is already optimized for this:
 
 ### EC2 Instance Details
 - **Instance ID**: `i-051a27d0f69e98ca2`
-- **Current IP**: `13.58.115.166` (⚠️ **NOT an Elastic IP** - will change on restart)
-- **Region**: `us-east-2` (not us-east-2)
-- **Instance Type**: `t3.micro`
+- **Current IP**: Dynamic (⚠️ **NOT an Elastic IP** - changes on restart, use ALB URL instead)
+- **Region**: `us-east-2`
+- **Instance Type**: `t3.medium` (upgraded from t3.micro)
 - **Private IP**: `172.31.40.134`
+- **Public API**: `https://api.classclipscohort3.com` (via AWS ALB) ✅ **USE THIS FOR API ACCESS**
 - **Security Group**: `launch-wizard-9` (sg-008d6dd819c207292)
   - Port 22: `0.0.0.0/0` ✅ Already configured
-  - Port 8000: `0.0.0.0/0` ✅ Already configured for API Gateway
+  - Port 8000: `0.0.0.0/0` ✅ Already configured for ALB
 
 ### S3 Bucket Details
 - **Bucket Name**: `pipeline-backend-assets`
@@ -142,8 +143,20 @@ Our current implementation is already optimized for this:
 
 ### Phase 0: Pre-Implementation Checklist
 
-#### 0.1 Allocate Elastic IP (CRITICAL - Do First)
-**Why**: Current IP `13.58.115.166` is not an Elastic IP and will change on instance restart, breaking API Gateway integration.
+#### 0.1 Use ALB URL Instead of Direct IP (RECOMMENDED)
+**Status**: ✅ **ALREADY IMPLEMENTED** - Using AWS Application Load Balancer (ALB)
+**Why**: ALB provides stable HTTPS endpoint (`https://api.classclipscohort3.com`) that doesn't change when instance IP changes.
+
+**Current Setup**:
+- **ALB URL**: `https://api.classclipscohort3.com`
+- **ALB Name**: `classclips-backend-alb`
+- **Target**: EC2 instance on port 8000
+- **HTTPS**: ✅ Enabled with SSL/TLS termination
+
+**Note**: EC2 instance IP changes on restart (not using Elastic IP), but this doesn't matter because:
+1. ALB automatically handles IP changes via target group
+2. All API access should use ALB URL, not direct IP
+3. SSH scripts dynamically retrieve current IP from AWS
 
 **Steps**:
 1. AWS Console → EC2 → Network & Security → Elastic IPs
@@ -162,10 +175,13 @@ Our current implementation is already optimized for this:
 aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --profile default1 --region us-east-2
 ```
 
-**Update**: Replace all references to `13.58.115.166` with the new Elastic IP in:
-- API Gateway integration URLs
-- Documentation
-- Scripts
+**Update**: Use ALB URL (`https://api.classclipscohort3.com`) for all API access instead of direct IP:
+- ✅ Frontend configuration
+- ✅ API documentation
+- ✅ Test scripts
+- ✅ Health checks
+
+For SSH access, scripts now dynamically retrieve current IP from AWS.
 
 #### 0.2 S3 Bucket Migration (Optional - Can Do Later)
 **Status**: 3.39 GB of data needs migration from us-east-2 to us-east-2
@@ -273,10 +289,9 @@ aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --profile default1
 - CORS may need adjustment if API Gateway domain differs
 
 **Frontend Environment Variables** (Vercel Dashboard):
-- Update `NEXT_PUBLIC_API_URL` from `http://13.58.115.166:8000` to REST API Gateway URL
-  - Example: `https://abc123.execute-api.us-east-2.amazonaws.com/prod`
-- Update `NEXT_PUBLIC_WS_URL` from `ws://13.58.115.166:8000` to WebSocket API Gateway URL
-  - Example: `wss://def456.execute-api.us-east-2.amazonaws.com/prod?session_id={session_id}`
+- ✅ **COMPLETED**: Using ALB URL `https://api.classclipscohort3.com` for API access
+- ✅ **COMPLETED**: Frontend configured to use ALB endpoint
+- Note: WebSocket connections may need separate configuration if using WSS through ALB
   - **Note**: Include `?session_id=` in the base URL template
 
 **CORS Configuration** (`backend/app/main.py`):

@@ -12,9 +12,39 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-EC2_HOST="13.58.115.166"
+# EC2 Configuration - IP retrieved dynamically from AWS
+INSTANCE_ID="i-051a27d0f69e98ca2"
+REGION="us-east-2"
 EC2_USER="ec2-user"
 EC2_KEY="${HOME}/Downloads/pipeline_orchestrator.pem"
+
+# Try to get current IP from AWS (requires AWS CLI configured)
+EC2_HOST=""
+if command -v aws &> /dev/null; then
+    # Try different profiles
+    for profile in default1 default2 default; do
+        EC2_HOST=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --profile "$profile" \
+            --region "$REGION" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text 2>/dev/null)
+        # Trim whitespace and check if valid IP
+        EC2_HOST=$(echo "$EC2_HOST" | tr -d '[:space:]')
+        if [ -n "$EC2_HOST" ] && [ "$EC2_HOST" != "None" ] && [ "$EC2_HOST" != "null" ]; then
+            echo -e "${GREEN}Retrieved EC2 IP from AWS (profile: $profile): $EC2_HOST${NC}"
+            break
+        fi
+    done
+fi
+
+# Fallback: prompt for IP if AWS CLI failed
+if [ -z "$EC2_HOST" ] || [ "$EC2_HOST" = "None" ] || [ "$EC2_HOST" = "null" ]; then
+    echo -e "${YELLOW}Could not retrieve IP from AWS. Please enter the current EC2 IP address:${NC}"
+    read -p "EC2 IP: " EC2_HOST
+    # Trim user input
+    EC2_HOST=$(echo "$EC2_HOST" | tr -d '[:space:]')
+fi
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Installing Bun on EC2${NC}"

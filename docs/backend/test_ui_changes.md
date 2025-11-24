@@ -83,7 +83,7 @@ Response:
 
 ## Backend Server
 
-Currently configured to use: **http://13.58.115.166:8000**
+Currently configured to use: **https://api.classclipscohort3.com**
 
 To test locally, change line 379 in test_ui.html:
 ```javascript

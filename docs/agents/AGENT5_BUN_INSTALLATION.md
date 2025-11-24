@@ -31,8 +31,13 @@ This script will:
 If you prefer to install manually, SSH into your EC2 server and run:
 
 ```bash
-# SSH into EC2
-ssh -i ~/Downloads/pipeline_orchestrator.pem ec2-user@13.58.115.166
+# Get current EC2 IP (IP changes on restart)
+# Option 1: Use AWS CLI
+EC2_IP=$(aws ec2 describe-instances --instance-ids i-051a27d0f69e98ca2 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+# Option 2: Get from AWS Console → EC2 → Instances → Select instance → Public IPv4 address
+
+# SSH into EC2 (replace IP_ADDRESS with current IP)
+ssh -i ~/Downloads/pipeline_orchestrator.pem ec2-user@IP_ADDRESS
 
 # Install Bun
 curl -fsSL https://bun.sh/install | bash

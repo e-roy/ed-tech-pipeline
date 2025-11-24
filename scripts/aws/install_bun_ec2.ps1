@@ -3,10 +3,41 @@
 
 $ErrorActionPreference = "Stop"
 
-# EC2 Configuration
-$EC2_HOST = "13.58.115.166"
+# EC2 Configuration - IP retrieved dynamically from AWS
+$INSTANCE_ID = "i-051a27d0f69e98ca2"
+$REGION = "us-east-2"
 $EC2_USER = "ec2-user"
 $EC2_KEY = "$env:USERPROFILE\Downloads\pipeline_orchestrator.pem"
+
+# Try to get current IP from AWS (requires AWS CLI configured)
+$EC2_HOST = $null
+if (Get-Command aws -ErrorAction SilentlyContinue) {
+    $profiles = @("default1", "default2", "default")
+    foreach ($profile in $profiles) {
+        $ip = aws ec2 describe-instances `
+            --instance-ids $INSTANCE_ID `
+            --profile $profile `
+            --region $REGION `
+            --query 'Reservations[0].Instances[0].PublicIpAddress' `
+            --output text 2>$null
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0 -and $ip -and $ip -ne "None" -and $ip.Trim() -ne "") {
+            $EC2_HOST = $ip.Trim()
+            Write-Host "Retrieved EC2 IP from AWS (profile: $profile): $EC2_HOST" -ForegroundColor Green
+            break
+        }
+    }
+}
+
+# Fallback: prompt for IP if AWS CLI failed
+if (-not $EC2_HOST -or $EC2_HOST -eq "None" -or $EC2_HOST -eq "null" -or ($EC2_HOST -and $EC2_HOST.Trim() -eq "")) {
+    Write-Host "Could not retrieve IP from AWS. Please enter the current EC2 IP address:" -ForegroundColor Yellow
+    $EC2_HOST = Read-Host "EC2 IP"
+    # Trim user input as well
+    if ($EC2_HOST) {
+        $EC2_HOST = $EC2_HOST.Trim()
+    }
+}
 
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "Installing Bun on EC2 (api.classclipscohort3.com)" -ForegroundColor Green
