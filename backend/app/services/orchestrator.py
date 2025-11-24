@@ -3142,13 +3142,20 @@ class VideoGenerationOrchestrator:
                 logger.warning(f"Orchestrator: WEBHOOK_SECRET not configured, skipping webhook notification for session {sessionId}")
                 return
             
-            # For video_failed, use empty string if video_url is None
-            # The API schema requires a valid URL, so we'll use a placeholder if needed
-            final_video_url = video_url if video_url else ""
-            if status == "video_failed" and not final_video_url:
-                # Use a placeholder URL for failed cases (API requires valid URL format)
-                # This indicates no video was generated due to failure
-                final_video_url = "https://video-generation-failed.placeholder"
+            # Validate and set video URL based on status
+            if status == "video_complete":
+                # video_complete must have a valid video URL
+                if not video_url:
+                    logger.error(f"Orchestrator: video_complete status requires a video_url, but none provided for session {sessionId}")
+                    # Don't send webhook if invalid - this is a programming error
+                    return
+                final_video_url = video_url
+            elif status == "video_failed":
+                # video_failed can have empty string if no video was generated
+                final_video_url = video_url if video_url else ""
+            else:
+                logger.warning(f"Orchestrator: Unknown status '{status}' for session {sessionId}, using empty video_url")
+                final_video_url = video_url if video_url else ""
             
             # Build request body matching API schema
             request_body = {
@@ -3535,21 +3542,34 @@ class VideoGenerationOrchestrator:
                     websocket_payload
                 )
                 
-                # Send webhook notification if video URL is available
+                # Send webhook notification
                 # Capture the full WebSocket payload structure that was sent
+                payload_data = {
+                    "message": websocket_payload.get("message"),
+                    "agent2Result": websocket_payload.get("agent2Result"),
+                    "agent4Result": websocket_payload.get("agent4Result"),
+                    "agent5Result": websocket_payload.get("agent5Result")
+                }
                 if video_url:
-                    # Build payload matching WebSocket structure
-                    payload_data = {
-                        "message": websocket_payload.get("message"),
-                        "agent2Result": websocket_payload.get("agent2Result"),
-                        "agent4Result": websocket_payload.get("agent4Result"),
-                        "agent5Result": websocket_payload.get("agent5Result")
-                    }
+                    # Video URL is available - send success webhook
                     await self._send_webhook_notification(
                         sessionId=sessionId,
                         video_url=video_url,
                         status="video_complete",
                         payload=payload_data
+                    )
+                else:
+                    # No video URL - send failure webhook
+                    error_payload = {
+                        **payload_data,
+                        "error": "Agent5 did not return a valid video URL",
+                        "reason": "agent5_result was not a string"
+                    }
+                    await self._send_webhook_notification(
+                        sessionId=sessionId,
+                        video_url=None,
+                        status="video_failed",
+                        payload=error_payload
                     )
                 
                 logger.info(f"Full Test process completed successfully for session {sessionId}")

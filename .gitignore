@@ -128,3 +128,4 @@ backend/install_bun_ec2.ps1
 check_ec2_status.ps1
 deploy-ec2.sh
 backend/stop-local.ps1
+DEPLOYMENT_SUMMARY.md

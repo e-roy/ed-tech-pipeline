@@ -12,7 +12,10 @@ export const runtime = "nodejs";
  */
 const webhookPayloadSchema = z.object({
   sessionId: z.string(),
-  videoUrl: z.string().url(),
+  videoUrl: z.union([
+    z.string().url(), // Valid URL for successful cases
+    z.literal(""), // Empty string for failed cases
+  ]),
   status: z.enum(["video_complete", "video_failed"]),
 });
 
@@ -28,7 +31,7 @@ const webhookPayloadSchema = z.object({
  * Body:
  * {
  *   "sessionId": "string",
- *   "videoUrl": "string (URL)",
+ *   "videoUrl": "string (URL or empty string for failed cases)",
  *   "status": "video_complete" | "video_failed"
  * }
  */
@@ -93,13 +96,38 @@ export async function POST(req: NextRequest) {
     const { sessionId, videoUrl, status } = validationResult.data;
     const eventType = status; // video_complete or video_failed
 
+    // Additional validation: video_complete must have a non-empty URL
+    if (status === "video_complete" && !videoUrl) {
+      const logId = nanoid();
+      await db.insert(webhookLogs).values({
+        id: logId,
+        eventType: "unknown",
+        sessionId,
+        videoUrl: null,
+        status: "failed",
+        payload: payload as Record<string, unknown>,
+        errorMessage: "video_complete status requires a non-empty videoUrl",
+        createdAt: new Date(),
+      });
+      return NextResponse.json(
+        {
+          error: "Invalid payload",
+          details: "video_complete status requires a non-empty videoUrl",
+        },
+        { status: 400 },
+      );
+    }
+
+    // Normalize empty string to null for database consistency
+    const normalizedVideoUrl = videoUrl === "" ? null : videoUrl;
+
     // Log the webhook to database
     const logId = nanoid();
     await db.insert(webhookLogs).values({
       id: logId,
       eventType,
       sessionId,
-      videoUrl,
+      videoUrl: normalizedVideoUrl,
       status: "received",
       payload: payload as Record<string, unknown>,
       createdAt: new Date(),
