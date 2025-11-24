@@ -10,6 +10,7 @@ import {
 } from "@/components/ai-elements/message";
 import { ScriptGenerationChainOfThought } from "@/components/generation/ScriptGenerationChainOfThought";
 import { Badge } from "@/components/ui/badge";
+import { Loader2 } from "lucide-react";
 
 type ThinkingStatus = {
   operation: "extracting" | "narrating";
@@ -97,6 +98,7 @@ export function ChatMessageList({
                   <Badge variant="secondary" className="text-xs">
                     Personalizing for {childAge}-year-old interested in{" "}
                     {childInterest}
+                    <Loader2 className="ml-1.5 inline-block h-3 w-3 animate-spin" />
                   </Badge>
                 </div>
               )}
@@ -110,4 +112,3 @@ export function ChatMessageList({
     </>
   );
 }
-

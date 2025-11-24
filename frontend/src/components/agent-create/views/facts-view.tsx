@@ -3,8 +3,6 @@
 import { CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 import type { Fact } from "@/types";
 import Image from "next/image";
-import { useState } from "react";
-import { cn } from "@/lib/utils";
 
 interface DiagramFile {
   key: string;
@@ -26,8 +24,6 @@ export function FactsView({
   diagrams = [],
   isLoadingDiagrams = false,
 }: FactsViewProps) {
-  const [expandedDiagram, setExpandedDiagram] = useState<number | null>(null);
-
   return (
     <div className="space-y-6">
       {/* Diagrams Section */}
@@ -51,42 +47,21 @@ export function FactsView({
               {diagrams.map((diagram, index) => (
                 <div
                   key={diagram.key}
-                  className="bg-card group relative overflow-hidden rounded-lg border"
+                  className="bg-card overflow-hidden rounded-lg border"
                 >
-                  <div
-                    className={cn(
-                      "relative cursor-pointer transition-all",
-                      expandedDiagram === index
-                        ? "aspect-auto"
-                        : "aspect-video",
-                    )}
-                    onClick={() =>
-                      setExpandedDiagram(
-                        expandedDiagram === index ? null : index,
-                      )
-                    }
-                  >
+                  <div className="relative aspect-video">
                     <Image
                       src={diagram.presigned_url}
                       alt={`Diagram ${index + 1}`}
                       fill
-                      className={cn(
-                        "object-contain transition-all",
-                        expandedDiagram === index ? "p-2" : "",
-                      )}
+                      className="object-contain"
                       unoptimized // S3 presigned URLs
                     />
-                    <div className="absolute inset-0 bg-black/0 transition-all group-hover:bg-black/5" />
                   </div>
                   <div className="border-t p-3">
                     <p className="text-muted-foreground text-xs">
                       {diagram.name.replace(/^diagram_\d+_/, "")}
                     </p>
-                    {expandedDiagram === index && (
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        Click to collapse
-                      </p>
-                    )}
                   </div>
                 </div>
               ))}

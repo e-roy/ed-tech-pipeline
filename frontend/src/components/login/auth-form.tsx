@@ -23,7 +23,7 @@ export function AuthForm({
   defaultTab = "login",
 }: AuthFormProps) {
   return (
-    <Card className="mt-4 sm:mx-auto sm:w-full sm:max-w-md">
+    <Card className="bg-card/90 mt-4 sm:mx-auto sm:w-full sm:max-w-md">
       <CardContent>
         <div className="sm:mx-auto sm:w-full sm:max-w-sm">
           <Link

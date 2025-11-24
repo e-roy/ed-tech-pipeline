@@ -75,7 +75,7 @@ export function AgentCreateInterface({
   // This prevents showing stale data when navigating between routes
   const sessionMatches = externalSessionId
     ? externalSessionId === storeSessionId
-    : !storeSessionId;
+    : true; // Always match when no external session (we're on /create)
 
   const messages = sessionMatches ? storeMessages : [];
   const facts = sessionMatches ? storeFacts : [];
