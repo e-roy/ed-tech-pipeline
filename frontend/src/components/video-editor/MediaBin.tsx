@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Box, Tabs, Tab, Typography, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Tooltip } from '@mui/material';
-import { Upload, VideoFile, AudioFile, Image, TextFields, Add, CloudUpload } from '@mui/icons-material';
+import { useState, useCallback, useRef } from 'react';
+import { Box, Tabs, Tab, Typography, List, ListItemButton, ListItemIcon, ListItemText, CircularProgress } from '@mui/material';
+import { VideoFile, AudioFile, Image, TextFields, Add, CloudUpload } from '@mui/icons-material';
 import { useEditorStore } from '@/stores/editorStore';
 import { colors } from './theme';
 
@@ -10,37 +10,130 @@ interface MediaBinProps {
   sessionId: string;
 }
 
-interface MediaFile {
-  key: string;
+interface LocalMediaFile {
+  id: string;
   name: string;
-  presigned_url: string;
+  url: string;
   content_type: string;
+  duration?: number;
 }
 
 export function MediaBin({ sessionId }: MediaBinProps) {
   const [tab, setTab] = useState(0);
-  const [files, setFiles] = useState<MediaFile[]>([]);
+  const [files, setFiles] = useState<LocalMediaFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addMedia = useEditorStore((state) => state.addMedia);
   const addText = useEditorStore((state) => state.addText);
   const currentTime = useEditorStore((state) => state.currentTime);
 
-  const handleAddMedia = useCallback((file: MediaFile) => {
+  // Get media duration for video/audio files
+  const getMediaDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      if (file.type.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(url);
+          resolve(video.duration || 5);
+        };
+        video.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(5);
+        };
+        video.src = url;
+      } else if (file.type.startsWith('audio/')) {
+        const audio = document.createElement('audio');
+        audio.preload = 'metadata';
+        audio.onloadedmetadata = () => {
+          URL.revokeObjectURL(url);
+          resolve(audio.duration || 5);
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(5);
+        };
+        audio.src = url;
+      } else {
+        resolve(5); // Default duration for images
+      }
+    });
+  };
+
+  // Process files (from drop or file input)
+  const processFiles = useCallback(async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+
+    setIsLoading(true);
+    const newFiles: LocalMediaFile[] = [];
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      // Only accept video, audio, and image files
+      if (!file.type.startsWith('video/') && !file.type.startsWith('audio/') && !file.type.startsWith('image/')) {
+        continue;
+      }
+
+      const duration = await getMediaDuration(file);
+      const url = URL.createObjectURL(file);
+
+      newFiles.push({
+        id: `${Date.now()}-${i}`,
+        name: file.name,
+        url,
+        content_type: file.type,
+        duration,
+      });
+    }
+
+    setFiles((prev) => [...prev, ...newFiles]);
+    setIsLoading(false);
+  }, []);
+
+  // Handle file drop
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    processFiles(e.dataTransfer.files);
+  }, [processFiles]);
+
+  // Handle drag over
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  // Handle file input change
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    processFiles(e.target.files);
+    // Reset input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [processFiles]);
+
+  // Open file picker
+  const handleUploadClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleAddMedia = useCallback((file: LocalMediaFile) => {
     const type = file.content_type.startsWith('video/') ? 'video' : file.content_type.startsWith('audio/') ? 'audio' : 'image';
-    const defaultDuration = 5;
+    const duration = file.duration || 5;
 
     addMedia({
       type,
       fileName: file.name,
-      src: file.presigned_url,
-      s3Key: file.key,
+      src: file.url,
       startTime: 0,
-      endTime: defaultDuration,
-      duration: defaultDuration,
+      endTime: duration,
+      duration: duration,
       positionStart: currentTime,
-      positionEnd: currentTime + defaultDuration,
+      positionEnd: currentTime + duration,
       playbackSpeed: 1,
       volume: 100,
       opacity: 100,
@@ -137,12 +230,23 @@ export function MediaBin({ sessionId }: MediaBinProps) {
       {/* Content */}
       {tab === 0 && (
         <Box sx={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="video/*,audio/*,image/*"
+            onChange={handleFileInputChange}
+            style={{ display: 'none' }}
+          />
+
           {/* Upload zone */}
           <Box
+            onClick={handleUploadClick}
             onDragEnter={() => setIsDragging(true)}
             onDragLeave={() => setIsDragging(false)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => setIsDragging(false)}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
             sx={{
               m: 1.5,
               p: 2,
@@ -161,12 +265,16 @@ export function MediaBin({ sessionId }: MediaBinProps) {
               },
             }}
           >
-            <CloudUpload sx={{ fontSize: 32, color: isDragging ? colors.primary.main : colors.text.muted }} />
+            {isLoading ? (
+              <CircularProgress size={32} sx={{ color: colors.primary.main }} />
+            ) : (
+              <CloudUpload sx={{ fontSize: 32, color: isDragging ? colors.primary.main : colors.text.muted }} />
+            )}
             <Typography variant="body2" sx={{ color: colors.text.secondary, fontSize: '0.75rem', textAlign: 'center' }}>
-              Drag & drop files here
+              {isLoading ? 'Processing...' : 'Drag & drop files here'}
             </Typography>
             <Typography variant="caption" sx={{ color: colors.text.muted, fontSize: '0.65rem' }}>
-              or click to browse
+              {isLoading ? '' : 'or click to browse'}
             </Typography>
           </Box>
 
@@ -179,7 +287,7 @@ export function MediaBin({ sessionId }: MediaBinProps) {
             ) : files && files.length > 0 ? (
               files.map((file) => (
                 <ListItemButton
-                  key={file.key}
+                  key={file.id}
                   onClick={() => handleAddMedia(file)}
                   sx={{
                     borderRadius: 1.5,

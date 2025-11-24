@@ -10,17 +10,14 @@ interface AudioSequenceProps {
 
 export function AudioSequence({ media, fps }: AudioSequenceProps) {
   const from = Math.round(media.positionStart * fps);
-  const durationInFrames = Math.round((media.positionEnd - media.positionStart) * fps);
-  const startFrom = Math.round(media.startTime * fps);
-  const endAt = Math.round(media.endTime * fps);
+  const durationInFrames = Math.max(1, Math.round((media.positionEnd - media.positionStart) * fps));
 
   return (
     <Sequence from={from} durationInFrames={durationInFrames}>
       <AbsoluteFill>
         <Audio
           src={media.src}
-          startFrom={startFrom}
-          endAt={endAt}
+          trimBefore={media.startTime}
           playbackRate={media.playbackSpeed}
           volume={media.volume / 100}
         />

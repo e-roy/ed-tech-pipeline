@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { eq, desc } from "drizzle-orm";
 
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import type { FileListResponse, PresignedUrlResponse } from "@/types/storage";
@@ -16,6 +17,8 @@ import {
   listSessionFiles,
   listDirectoryStructure,
 } from "@/server/services/storage";
+import { db } from "@/server/db";
+import { webhookLogs } from "@/server/db/schema";
 
 export const storageRouter = createTRPCRouter({
   /**
@@ -198,6 +201,45 @@ export const storageRouter = createTRPCRouter({
             error instanceof Error
               ? error.message
               : "Failed to list session directory",
+        });
+      }
+    }),
+
+  /**
+   * Check webhook table for video completion status.
+   * Returns the most recent webhook event for the given session.
+   */
+  checkVideoWebhook: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!ctx.session?.user?.id) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        });
+      }
+
+      try {
+        // Get the most recent webhook for this session
+        const [webhookLog] = await db
+          .select()
+          .from(webhookLogs)
+          .where(eq(webhookLogs.sessionId, input.sessionId))
+          .orderBy(desc(webhookLogs.createdAt))
+          .limit(1);
+
+        return webhookLog ?? null;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to check webhook status",
         });
       }
     }),

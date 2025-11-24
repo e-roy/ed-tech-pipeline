@@ -12,7 +12,7 @@ export function ImageSequence({ media, fps }: ImageSequenceProps) {
   const { width: compWidth, height: compHeight } = useVideoConfig();
 
   const from = Math.round(media.positionStart * fps);
-  const durationInFrames = Math.round((media.positionEnd - media.positionStart) * fps);
+  const durationInFrames = Math.max(1, Math.round((media.positionEnd - media.positionStart) * fps));
 
   const imageWidth = media.width || compWidth;
   const imageHeight = media.height || compHeight;

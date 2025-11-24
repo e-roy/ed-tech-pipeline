@@ -12,7 +12,7 @@ import {
   Video,
   Settings,
 } from "lucide-react";
-import { useState, type HTMLAttributes } from "react";
+import { useState, useEffect, type HTMLAttributes } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,6 +44,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
     handleSubmitFacts,
     sessionId,
     isVideoGenerating,
+    setIsVideoGenerating,
   } = useAgentCreateStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>("script");
@@ -52,8 +53,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
 
   // Poll S3 for final video in users/{userId}/{sessionId}/final/
   // Poll every 60 seconds while video is generating, otherwise check once
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-  const { data: sessionFiles } = (api.storage as any).listSessionFiles.useQuery(
+  const { data: sessionFiles } = api.storage.listSessionFiles.useQuery(
     {
       sessionId: sessionId ?? "",
       subfolder: "final",
@@ -63,18 +63,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
       refetchInterval: isVideoGenerating ? 60000 : false, // Poll every 60s while generating
       refetchOnWindowFocus: true,
     },
-  ) as {
-    data:
-      | Array<{
-          key: string;
-          name: string;
-          size: number;
-          last_modified: string | null;
-          content_type: string;
-          presigned_url: string;
-        }>
-      | undefined;
-  };
+  );
 
   // Get the most recent video file from the final folder
   const finalVideo =
@@ -94,32 +83,40 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
       : undefined;
 
   // Fetch selected diagrams from diagrams folder
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-  const { data: diagramFiles, isLoading: isLoadingDiagrams } = (
-    api.storage as any
-  ).listSessionFiles.useQuery(
+  const { data: diagramFiles, isLoading: isLoadingDiagrams } =
+    api.storage.listSessionFiles.useQuery(
+      {
+        sessionId: sessionId ?? "",
+        subfolder: "diagrams",
+      },
+      {
+        enabled: !!sessionId && !!narration, // Only fetch after narration is created
+        refetchInterval: narration && !factsLocked ? 30000 : false, // Poll every 30s until facts are locked
+        refetchOnWindowFocus: true,
+      },
+    );
+
+  // Poll webhook table for video completion (backup check)
+  const { data: webhookLog } = api.storage.checkVideoWebhook.useQuery(
     {
       sessionId: sessionId ?? "",
-      subfolder: "diagrams",
     },
     {
-      enabled: !!sessionId && !!narration, // Only fetch after narration is created
-      refetchInterval: narration && !factsLocked ? 30000 : false, // Poll every 30s until facts are locked
+      enabled: !!sessionId && isVideoGenerating,
+      refetchInterval: 10000, // Check every 10s while generating
       refetchOnWindowFocus: true,
     },
-  ) as {
-    data:
-      | Array<{
-          key: string;
-          name: string;
-          size: number;
-          last_modified: string | null;
-          content_type: string;
-          presigned_url: string;
-        }>
-      | undefined;
-    isLoading: boolean;
-  };
+  );
+
+  // Update video generation state based on webhook status
+  useEffect(() => {
+    if (
+      webhookLog?.eventType === "video_complete" ||
+      webhookLog?.eventType === "video_failed"
+    ) {
+      setIsVideoGenerating(false);
+    }
+  }, [webhookLog, setIsVideoGenerating]);
 
   const mode =
     workflowStep === "selection"
@@ -289,7 +286,13 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
                       {fact.details}
                     </p>
                     <div className="text-muted-foreground mt-2 text-xs">
-                      Confidence: {Math.round(fact.confidence * 100)}%
+                      Confidence:{" "}
+                      {typeof fact.confidence === "number" &&
+                      !isNaN(fact.confidence) &&
+                      fact.confidence >= 0 &&
+                      fact.confidence <= 1
+                        ? `${Math.round(fact.confidence * 100)}%`
+                        : "N/A"}
                     </div>
                   </div>
                 );

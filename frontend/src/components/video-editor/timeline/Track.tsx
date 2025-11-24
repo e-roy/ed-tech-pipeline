@@ -9,9 +9,11 @@ interface TrackProps {
   track: TrackType;
   top: number;
   zoom: number;
+  trackHeight: number;
+  isResizing?: boolean;
 }
 
-export function Track({ track, top, zoom }: TrackProps) {
+export function Track({ track, top, zoom, trackHeight, isResizing }: TrackProps) {
   // Use useShallow to compare array contents instead of reference
   const mediaFiles = useEditorStore(
     useShallow((state) => state.mediaFiles.filter((m) => m.trackId === track.id))
@@ -28,17 +30,19 @@ export function Track({ track, top, zoom }: TrackProps) {
         top,
         left: 0,
         right: 0,
-        height: track.height,
+        height: trackHeight,
         bgcolor: track.type === 'video' ? 'rgba(33, 150, 243, 0.05)' :
                  track.type === 'audio' ? 'rgba(76, 175, 80, 0.05)' : 'rgba(255, 152, 0, 0.05)',
         borderBottom: 1,
         borderColor: 'divider',
         opacity: track.visible ? 1 : 0.5,
         pointerEvents: track.locked ? 'none' : 'auto',
+        transition: isResizing ? 'none' : 'height 0.15s ease',
+        overflow: 'hidden',
       }}
     >
       {items.map((item) => (
-        <TimelineClip key={item.id} item={item} trackType={track.type} zoom={zoom} trackHeight={track.height} />
+        <TimelineClip key={item.id} item={item} trackType={track.type} zoom={zoom} trackHeight={trackHeight} />
       ))}
     </Box>
   );

@@ -12,9 +12,7 @@ export function VideoSequence({ media, fps }: VideoSequenceProps) {
   const { width: compWidth, height: compHeight } = useVideoConfig();
 
   const from = Math.round(media.positionStart * fps);
-  const durationInFrames = Math.round((media.positionEnd - media.positionStart) * fps);
-  const startFrom = Math.round(media.startTime * fps);
-  const endAt = Math.round(media.endTime * fps);
+  const durationInFrames = Math.max(1, Math.round((media.positionEnd - media.positionStart) * fps));
 
   const videoWidth = media.width || compWidth;
   const videoHeight = media.height || compHeight;
@@ -23,12 +21,15 @@ export function VideoSequence({ media, fps }: VideoSequenceProps) {
   const opacity = (media.opacity ?? 100) / 100;
   const rotation = media.rotation || 0;
 
+  // Use trimBefore to skip to startTime in the source video
+  const trimBefore = media.startTime;
+
   return (
     <Sequence from={from} durationInFrames={durationInFrames}>
       <OffthreadVideo
         src={media.src}
-        startFrom={startFrom}
-        endAt={endAt}
+        transparent={false}
+        trimBefore={trimBefore}
         playbackRate={media.playbackSpeed}
         volume={media.volume / 100}
         style={{

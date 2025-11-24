@@ -304,12 +304,12 @@ export default function HistoryPage() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {isDeletingAll ? (
-                <div className="flex items-center gap-2">
+                <span className="flex items-center gap-2">
                   <Loader2 className="size-4 animate-spin" />
                   <span>
                     Please wait while all sessions are being deleted...
                   </span>
-                </div>
+                </span>
               ) : (
                 <>
                   Are you sure you want to delete all {sessions?.length ?? 0}{" "}

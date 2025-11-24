@@ -24,7 +24,9 @@ export function PreviewPlayer() {
   const mediaFiles = useEditorStore((state) => state.mediaFiles);
 
   const fps = 30;
-  const durationInFrames = Math.max(1, Math.floor(duration * fps) + 1);
+  // Ensure minimum 1 second duration for player to work properly
+  const effectiveDuration = Math.max(duration, 1);
+  const durationInFrames = Math.max(fps, Math.floor(effectiveDuration * fps));
 
   // Check if there's any media to show
   const hasMedia = mediaFiles.length > 0;
@@ -56,15 +58,26 @@ export function PreviewPlayer() {
   // Control playback
   useEffect(() => {
     if (!playerRef.current) return;
+
+    const player = playerRef.current;
+
     if (isPlaying) {
       if (inPoint !== null && currentTime < inPoint) {
-        playerRef.current.seekTo(Math.round(inPoint * fps));
+        player.seekTo(Math.round(inPoint * fps));
       }
-      playerRef.current.play();
+      // Use requestAnimationFrame to ensure player is ready
+      requestAnimationFrame(() => {
+        try {
+          player.play();
+        } catch (error) {
+          console.error('[PreviewPlayer] Play error:', error);
+          setIsPlaying(false);
+        }
+      });
     } else {
-      playerRef.current.pause();
+      player.pause();
     }
-  }, [isPlaying, inPoint, currentTime, fps]);
+  }, [isPlaying, inPoint, currentTime, fps, setIsPlaying]);
 
   // Monitor out-point
   useEffect(() => {
@@ -217,6 +230,7 @@ export function PreviewPlayer() {
           compositionWidth={1920}
           compositionHeight={1080}
           fps={fps}
+          initialFrame={Math.round(currentTime * fps)}
           style={{
             width: '100%',
             height: '100%',
@@ -225,6 +239,7 @@ export function PreviewPlayer() {
           }}
           controls={false}
           clickToPlay={false}
+          loop={false}
           acknowledgeRemotionLicense
           playbackRate={playbackRate}
         />

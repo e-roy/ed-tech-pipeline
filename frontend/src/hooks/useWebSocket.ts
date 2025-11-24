@@ -98,15 +98,14 @@ export function useWebSocket(sessionId: string | null) {
       };
 
       ws.onerror = (error) => {
-        console.error("[WebSocket] Connection error:", error);
-        console.error(
-          "[WebSocket] Check that:",
-          "\n1. Backend WebSocket server is running",
-          "\n2. WebSocket URL is correct:",
-          wsUrl,
-          "\n3. Backend allows CORS from your origin",
+        console.warn(
+          "[WebSocket] Connection failed - video processing may already be complete",
         );
+        console.debug("[WebSocket] Error details:", error);
+        console.debug("[WebSocket] URL attempted:", wsUrl);
         setIsConnected(false);
+        // Don't show scary error messages - WebSocket failure is expected
+        // when processing is complete or when reloading after completion
       };
 
       ws.onclose = (event) => {
@@ -133,8 +132,8 @@ export function useWebSocket(sessionId: string | null) {
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error(
-            "[WebSocket] Max reconnection attempts reached. Giving up.",
+          console.log(
+            "[WebSocket] Max reconnection attempts reached. Video processing may be complete - check webhook status.",
           );
         }
       };

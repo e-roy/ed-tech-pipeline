@@ -11,13 +11,13 @@ export function ChatWelcome() {
           <div className="space-y-3 @md:space-y-4">
             <div>
               <h3 className="mb-2 text-sm font-semibold @sm:text-base @lg:text-lg">
-                Create a Personalized Educational Video
+                Create a Personalized History Video
               </h3>
               <p className="text-muted-foreground text-xs leading-relaxed @sm:text-sm">
-                I&apos;ll help you create an engaging biology video for your
-                student. You can share lesson materials to get started, or tell
-                me about your student&apos;s age and interests for
-                personalization.
+                I&apos;ll help you create an engaging history video tailored to
+                your student. Share your lesson plan materials and tell me about
+                your student&apos;s age and interests to create a personalized
+                learning experience.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -28,7 +28,8 @@ export function ChatWelcome() {
                     'textarea[placeholder*="Tell me about"]',
                   );
                   if (textarea instanceof HTMLTextAreaElement) {
-                    textarea.value = "My student is __ years old and loves ___";
+                    textarea.value =
+                      "My student is __ years old and is interested in ___";
                     textarea.focus();
                     // Move cursor to first blank
                     textarea.setSelectionRange(14, 16);
@@ -38,7 +39,7 @@ export function ChatWelcome() {
                 type="button"
                 variant="outline"
               >
-                Tell me about the student
+                Describe your student
               </Button>
               <Button
                 className="cursor-pointer rounded-full px-3 py-1 text-xs @sm:px-4 @sm:text-sm"
@@ -54,7 +55,7 @@ export function ChatWelcome() {
                 type="button"
                 variant="outline"
               >
-                Upload lesson PDF
+                Upload lesson plan PDF
               </Button>
               <Button
                 className="cursor-pointer rounded-full px-3 py-1 text-xs @sm:px-4 @sm:text-sm"
@@ -70,7 +71,7 @@ export function ChatWelcome() {
                 type="button"
                 variant="outline"
               >
-                Paste lesson text
+                Paste lesson plan
               </Button>
             </div>
           </div>

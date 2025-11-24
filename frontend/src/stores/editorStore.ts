@@ -71,6 +71,7 @@ export interface Track {
   muted: boolean;
   locked: boolean;
   visible: boolean;
+  expanded: boolean;
 }
 
 export interface EditorState {
@@ -141,6 +142,7 @@ interface EditorActions {
   addText: (text: Omit<TextElement, 'id' | 'zIndex' | 'trackId'>) => string;
   updateText: (id: string, updates: Partial<TextElement>) => void;
   deleteText: (id: string) => void;
+  splitText: (id: string, time: number) => void;
   addTrack: (type: Track['type'], name?: string) => string;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   deleteTrack: (id: string) => void;
@@ -167,9 +169,9 @@ interface EditorActions {
 
 // Initial tracks
 const initialTracks: Track[] = [
-  { id: 'video-1', name: 'Video 1', type: 'video', height: 60, muted: false, locked: false, visible: true },
-  { id: 'audio-1', name: 'Audio 1', type: 'audio', height: 40, muted: false, locked: false, visible: true },
-  { id: 'text-1', name: 'Text 1', type: 'text', height: 40, muted: false, locked: false, visible: true },
+  { id: 'video-1', name: 'Video 1', type: 'video', height: 60, muted: false, locked: false, visible: true, expanded: true },
+  { id: 'audio-1', name: 'Audio 1', type: 'audio', height: 40, muted: false, locked: false, visible: true, expanded: true },
+  { id: 'text-1', name: 'Text 1', type: 'text', height: 40, muted: false, locked: false, visible: true, expanded: true },
 ];
 
 const initialState: EditorState = {
@@ -335,6 +337,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           get().saveSnapshot();
         },
 
+        splitText: (id, time) => {
+          const { textElements } = get();
+          const text = textElements.find((t) => t.id === id);
+          if (!text || time <= text.positionStart || time >= text.positionEnd) return;
+
+          const firstPart: TextElement = { ...text, positionEnd: time };
+          const secondPart: TextElement = {
+            ...text,
+            id: nanoid(),
+            positionStart: time,
+            zIndex: 1000 + textElements.length,
+          };
+
+          set((state) => ({
+            textElements: [...state.textElements.filter((t) => t.id !== id), firstPart, secondPart],
+          }));
+          get().saveSnapshot();
+        },
+
         // Tracks
         addTrack: (type, name) => {
           const id = nanoid();
@@ -350,6 +371,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             muted: false,
             locked: false,
             visible: true,
+            expanded: true,
           };
 
           set((state) => ({ tracks: [...state.tracks, newTrack] }));
@@ -400,7 +422,24 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           }
           set({ clipboard });
         },
-        cut: () => { get().copy(); get().deleteSelected(); },
+        cut: () => {
+          const { selectedIds, currentTime, mediaFiles, textElements } = get();
+          if (selectedIds.length === 0) return;
+
+          // Split selected clips at current playhead position
+          for (const id of selectedIds) {
+            const media = mediaFiles.find(m => m.id === id);
+            if (media && currentTime > media.positionStart && currentTime < media.positionEnd) {
+              get().splitMedia(id, currentTime);
+              continue;
+            }
+            // Also handle text elements - split if playhead is within their duration
+            const text = textElements.find(t => t.id === id);
+            if (text && currentTime > text.positionStart && currentTime < text.positionEnd) {
+              get().splitText(id, currentTime);
+            }
+          }
+        },
         paste: (time) => {
           const { clipboard, currentTime, mediaFiles, textElements } = get();
           const pasteTime = time ?? currentTime;

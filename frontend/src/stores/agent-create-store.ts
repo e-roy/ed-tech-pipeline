@@ -768,7 +768,52 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           const hasExtractedFacts = extractedFacts.length > 0;
           const hasConfirmedFacts = confirmedFacts.length > 0;
           const hasGeneratedScript = !!data.session.generatedScript;
-          const isNarrationVerified = data.session.status === "narration_verified";
+          const isNarrationVerified =
+            data.session.status === "narration_verified";
+          const isVideoGenerating = data.session.status === "video_generating";
+          const isVideoComplete = data.session.status === "video_complete";
+          // isVideoFailed could be used for error handling in the future
+          // const isVideoFailed = data.session.status === "video_failed";
+
+          // Ensure all facts have confidence values (normalize for backward compatibility)
+          const normalizeFact = (fact: unknown): Fact => {
+            if (
+              typeof fact === "object" &&
+              fact !== null &&
+              "concept" in fact &&
+              "details" in fact
+            ) {
+              const f = fact as {
+                concept: unknown;
+                details: unknown;
+                confidence?: unknown;
+              };
+              return {
+                concept: String(f.concept),
+                details: String(f.details),
+                confidence:
+                  typeof f.confidence === "number" &&
+                  !isNaN(f.confidence) &&
+                  f.confidence >= 0 &&
+                  f.confidence <= 1
+                    ? f.confidence
+                    : 0.8, // Default confidence if missing or invalid
+              };
+            }
+            // Fallback for malformed facts
+            return {
+              concept: "",
+              details: "",
+              confidence: 0.8,
+            };
+          };
+
+          const normalizedExtractedFacts = extractedFacts
+            .map(normalizeFact)
+            .filter((f) => f.concept !== "" && f.details !== "");
+          const normalizedConfirmedFacts = confirmedFacts
+            .map(normalizeFact)
+            .filter((f) => f.concept !== "" && f.details !== "");
 
           set({
             sessionId: data.session.id,
@@ -797,10 +842,12 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
               return message;
             }),
-            facts: extractedFacts,
-            selectedFacts: confirmedFacts,
+            facts: normalizedExtractedFacts,
+            selectedFacts: normalizedConfirmedFacts,
             narration: data.session.generatedScript ?? null,
-            narrationLocked: isNarrationVerified,
+            narrationLocked:
+              isNarrationVerified || isVideoGenerating || isVideoComplete,
+            isVideoGenerating: isVideoGenerating,
             childAge: data.session.childAge ?? null,
             childInterest: data.session.childInterest ?? null,
             workflowStep: hasConfirmedFacts
@@ -812,7 +859,8 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 : "input",
             // Set UI prompt flags based on session state
             showFactSelectionPrompt: hasExtractedFacts && !hasConfirmedFacts,
-            showNarrationReviewPrompt: hasGeneratedScript && !isNarrationVerified,
+            showNarrationReviewPrompt:
+              hasGeneratedScript && !isNarrationVerified,
           });
         } catch (error) {
           console.error("Failed to load session:", error);

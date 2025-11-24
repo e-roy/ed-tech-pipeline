@@ -114,9 +114,9 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild className="md:h-8 md:p-0">
               <Link href="/dashboard">
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="flex items-center gap-2 text-left text-sm leading-tight">
                   <Video className="text-primary h-6 w-6" />
-                  <span className="text-xl font-bold">ClassClips</span>
+                  <span className="text-lg font-bold">ClassClips</span>
                 </div>
               </Link>
             </SidebarMenuButton>

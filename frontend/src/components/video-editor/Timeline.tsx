@@ -1,8 +1,8 @@
 'use client';
 
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { Box, IconButton, Tooltip, Typography } from '@mui/material';
-import { Add, Lock, LockOpen, Visibility, VisibilityOff, VolumeUp, VolumeOff, Videocam, MusicNote, TextFields } from '@mui/icons-material';
+import { Add, Lock, LockOpen, Visibility, VisibilityOff, VolumeUp, VolumeOff, Videocam, MusicNote, TextFields, ExpandMore, ExpandLess } from '@mui/icons-material';
 import { useEditorStore } from '@/stores/editorStore';
 import { colors } from './theme';
 import { TimeRuler } from './timeline/TimeRuler';
@@ -22,6 +22,48 @@ function TrackIcon({ type }: { type: 'video' | 'audio' | 'text' }) {
   }
 }
 
+// Track resize handle component
+function TrackResizeHandle({
+  onResizeStart
+}: {
+  onResizeStart: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <Box
+      onMouseDown={onResizeStart}
+      sx={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 6,
+        cursor: 'ns-resize',
+        zIndex: 10,
+        '&:hover': {
+          bgcolor: colors.primary.main,
+          opacity: 0.5,
+        },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          bottom: 2,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 30,
+          height: 2,
+          borderRadius: 1,
+          bgcolor: colors.border.strong,
+          opacity: 0,
+          transition: 'opacity 0.15s ease',
+        },
+        '&:hover::after': {
+          opacity: 1,
+        },
+      }}
+    />
+  );
+}
+
 export function Timeline() {
   const containerRef = useRef<HTMLDivElement>(null);
   const duration = useEditorStore((state) => state.duration);
@@ -37,6 +79,45 @@ export function Timeline() {
 
   const timelineWidth = Math.max(duration * timelineZoom, 1000);
   const trackHeaderWidth = 180;
+  const collapsedTrackHeight = 24;
+  const minTrackHeight = 30;
+  const maxTrackHeight = 200;
+
+  // Track resize state
+  const [resizingTrack, setResizingTrack] = useState<{ id: string; startY: number; startHeight: number } | null>(null);
+
+  // Helper to get effective track height
+  const getTrackHeight = (track: typeof tracks[0]) => track.expanded ? track.height : collapsedTrackHeight;
+
+  // Handle track resize
+  const handleResizeStart = useCallback((trackId: string, currentHeight: number) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingTrack({ id: trackId, startY: e.clientY, startHeight: currentHeight });
+  }, []);
+
+  // Mouse move and mouse up handlers for resize
+  useEffect(() => {
+    if (!resizingTrack) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientY - resizingTrack.startY;
+      const newHeight = Math.max(minTrackHeight, Math.min(maxTrackHeight, resizingTrack.startHeight + delta));
+      updateTrack(resizingTrack.id, { height: newHeight, expanded: true });
+    };
+
+    const handleMouseUp = () => {
+      setResizingTrack(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingTrack, updateTrack]);
 
   // Mouse wheel zoom handler (Ctrl/Cmd + scroll)
   useEffect(() => {
@@ -174,22 +255,43 @@ export function Timeline() {
         >
           {tracks.map((track) => {
             const trackColor = getTrackColor(track.type);
+            const effectiveHeight = getTrackHeight(track);
+            const isResizing = resizingTrack?.id === track.id;
             return (
               <Box
                 key={track.id}
                 sx={{
-                  height: track.height,
+                  position: 'relative',
+                  height: effectiveHeight,
                   display: 'flex',
                   alignItems: 'center',
                   px: 1,
                   borderBottom: `1px solid ${colors.border.subtle}`,
-                  gap: 1,
-                  transition: 'all 0.15s ease',
+                  gap: 0.5,
+                  transition: isResizing ? 'none' : 'height 0.15s ease',
                   '&:hover': {
                     bgcolor: colors.bg.hover,
                   },
                 }}
               >
+                {/* Resize handle */}
+                <TrackResizeHandle onResizeStart={handleResizeStart(track.id, track.height)} />
+
+                {/* Expand/Collapse button */}
+                <Tooltip title={track.expanded ? 'Collapse' : 'Expand'} arrow>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { expanded: !track.expanded }); }}
+                    sx={{
+                      p: 0.25,
+                      color: colors.text.muted,
+                      '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
+                    }}
+                  >
+                    {track.expanded ? <ExpandLess sx={{ fontSize: 16 }} /> : <ExpandMore sx={{ fontSize: 16 }} />}
+                  </IconButton>
+                </Tooltip>
+
                 {/* Track type indicator */}
                 <Box
                   sx={{
@@ -219,49 +321,51 @@ export function Timeline() {
                   </Typography>
                 </Box>
 
-                {/* Track controls */}
-                <Box sx={{ display: 'flex', gap: 0.25 }}>
-                  <Tooltip title={track.muted ? 'Unmute' : 'Mute'} arrow>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { muted: !track.muted }); }}
-                      sx={{
-                        p: 0.5,
-                        color: track.muted ? colors.warning : colors.text.muted,
-                        '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
-                      }}
-                    >
-                      {track.muted ? <VolumeOff sx={{ fontSize: 14 }} /> : <VolumeUp sx={{ fontSize: 14 }} />}
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title={track.locked ? 'Unlock' : 'Lock'} arrow>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { locked: !track.locked }); }}
-                      sx={{
-                        p: 0.5,
-                        color: track.locked ? colors.error : colors.text.muted,
-                        '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
-                      }}
-                    >
-                      {track.locked ? <Lock sx={{ fontSize: 14 }} /> : <LockOpen sx={{ fontSize: 14 }} />}
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title={track.visible ? 'Hide' : 'Show'} arrow>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { visible: !track.visible }); }}
-                      sx={{
-                        p: 0.5,
-                        color: !track.visible ? colors.text.muted : colors.text.secondary,
-                        opacity: track.visible ? 1 : 0.5,
-                        '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
-                      }}
-                    >
-                      {track.visible ? <Visibility sx={{ fontSize: 14 }} /> : <VisibilityOff sx={{ fontSize: 14 }} />}
-                    </IconButton>
-                  </Tooltip>
-                </Box>
+                {/* Track controls - only show when expanded */}
+                {track.expanded && (
+                  <Box sx={{ display: 'flex', gap: 0.25 }}>
+                    <Tooltip title={track.muted ? 'Unmute' : 'Mute'} arrow>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { muted: !track.muted }); }}
+                        sx={{
+                          p: 0.5,
+                          color: track.muted ? colors.warning : colors.text.muted,
+                          '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
+                        }}
+                      >
+                        {track.muted ? <VolumeOff sx={{ fontSize: 14 }} /> : <VolumeUp sx={{ fontSize: 14 }} />}
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title={track.locked ? 'Unlock' : 'Lock'} arrow>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { locked: !track.locked }); }}
+                        sx={{
+                          p: 0.5,
+                          color: track.locked ? colors.error : colors.text.muted,
+                          '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
+                        }}
+                      >
+                        {track.locked ? <Lock sx={{ fontSize: 14 }} /> : <LockOpen sx={{ fontSize: 14 }} />}
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title={track.visible ? 'Hide' : 'Show'} arrow>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { visible: !track.visible }); }}
+                        sx={{
+                          p: 0.5,
+                          color: !track.visible ? colors.text.muted : colors.text.secondary,
+                          opacity: track.visible ? 1 : 0.5,
+                          '&:hover': { color: colors.text.primary, bgcolor: colors.bg.hover },
+                        }}
+                      >
+                        {track.visible ? <Visibility sx={{ fontSize: 14 }} /> : <VisibilityOff sx={{ fontSize: 14 }} />}
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                )}
               </Box>
             );
           })}
@@ -333,8 +437,9 @@ export function Timeline() {
         >
           <Playhead currentTime={currentTime} zoom={timelineZoom} />
           {tracks.map((track, index) => {
-            const top = tracks.slice(0, index).reduce((sum, t) => sum + t.height, 0);
-            return <Track key={track.id} track={track} top={top} zoom={timelineZoom} />;
+            const top = tracks.slice(0, index).reduce((sum, t) => sum + getTrackHeight(t), 0);
+            const isResizing = resizingTrack !== null;
+            return <Track key={track.id} track={track} top={top} zoom={timelineZoom} trackHeight={getTrackHeight(track)} isResizing={isResizing} />;
           })}
         </Box>
       </Box>

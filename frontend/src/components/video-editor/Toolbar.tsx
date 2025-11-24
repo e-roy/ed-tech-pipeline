@@ -139,7 +139,7 @@ export function Toolbar() {
 
         {/* Clipboard */}
         <ButtonGroup>
-          <ToolbarIconButton tooltip="Cut (Ctrl+X)" onClick={cut} disabled={selectedIds.length === 0}>
+          <ToolbarIconButton tooltip="Split at Playhead (Ctrl+X)" onClick={cut} disabled={selectedIds.length === 0}>
             <ContentCut sx={{ fontSize: 18 }} />
           </ToolbarIconButton>
           <ToolbarIconButton tooltip="Copy (Ctrl+C)" onClick={copy} disabled={selectedIds.length === 0}>

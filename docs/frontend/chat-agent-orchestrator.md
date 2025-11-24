@@ -104,6 +104,7 @@ Stores session state and structured data:
   extractedFacts: Fact[] | null;   // All extracted facts (pending review)
   confirmedFacts: Fact[] | null;   // User-selected facts
   generatedScript: Narration | null; // Generated script with segments
+  sourceMaterials: JSON | null;    // PDF URLs and extracted text ({text?: string, pdfUrl?: string})
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,6 +115,7 @@ Stores session state and structured data:
 - `extractedFacts`: Facts from AI extraction (user can review/select)
 - `confirmedFacts`: User-approved subset used for narration
 - `generatedScript`: Final narration with segments, timing, visuals
+- `sourceMaterials`: Stores PDF URLs and extracted text separately from conversation
 - `childAge` + `childInterest`: Used for personalization
 
 ### Conversation Messages Table
@@ -297,11 +299,15 @@ WHERE id = $sessionId
 
 **Process**:
 
-1. Calls `FactExtractionAgent`
-2. Agent uses GPT-4o-mini with specialized prompt
-3. Extracts 5-15 facts with concept, details, confidence
-4. Detects topic and learning objective
-5. Returns structured JSON
+1. Loads `sourceMaterials` from session if `sessionId` provided
+   - Extracts `pdfUrl` if available for direct PDF processing
+   - Uses extracted text as fallback if no PDF URL
+2. Calls `FactExtractionAgent` with content and optional PDF URL
+3. Agent can process PDFs directly by converting to data URL
+4. Agent uses GPT-5-mini with structured output (`generateObject()`)
+5. Extracts 5-15 facts with concept, details, confidence
+6. Detects topic and learning objective
+7. Returns structured JSON via Zod schema validation
 
 **Output**:
 
@@ -409,9 +415,9 @@ WHERE id = $sessionId
 
 **Location**: `frontend/src/server/agents/fact-extraction.ts`
 
-**Technology**: Uses `generateText()` from Vercel AI SDK
+**Technology**: Uses `generateObject()` from Vercel AI SDK with Zod schema validation
 
-**Model**: GPT-4o-mini
+**Model**: GPT-5-mini (gpt-5-mini-2025-08-07)
 
 **System Prompt Highlights**:
 
@@ -421,6 +427,13 @@ WHERE id = $sessionId
 - Provide concept + details + confidence score
 - Identify topic and learning objective
 
+**PDF Processing**:
+
+- If `pdfUrl` is provided, fetches PDF and converts to base64 data URL
+- Sends PDF directly to AI model as file attachment
+- Falls back to text-only if PDF fetch fails
+- Supports both direct PDF analysis and text extraction
+
 **Input**:
 
 ```typescript
@@ -428,6 +441,7 @@ WHERE id = $sessionId
   sessionId: string;
   data: {
     content: string;
+    pdfUrl?: string;  // Optional: Direct PDF URL for AI processing
   }
 }
 ```
@@ -453,9 +467,9 @@ WHERE id = $sessionId
 
 **Location**: `frontend/src/server/agents/narrative-builder.ts`
 
-**Technology**: Uses `generateText()` from Vercel AI SDK
+**Technology**: Uses `generateObject()` from Vercel AI SDK with Zod schema validation
 
-**Model**: GPT-4o-mini
+**Model**: GPT-5-mini (gpt-5-mini-2025-08-07)
 
 **System Prompt Features**:
 
@@ -781,10 +795,12 @@ Agents return structured error responses:
 
 Both agents track OpenAI API costs:
 
-**GPT-4o-mini Pricing** (as of implementation):
+**Current Model Pricing** (GPT-5-mini reference pricing):
 
 - Input: ~$0.15 per 1M tokens
 - Output: ~$0.60 per 1M tokens
+
+**Note**: Actual pricing may vary by model version. Check OpenAI pricing for current rates.
 
 ```typescript
 const cost =
@@ -849,16 +865,20 @@ frontend/src/
 - Better separation of concerns
 - More flexible routing
 
-### 2. Why JSON Response Instead of Streaming Objects?
+### 2. Why Consume Stream for JSON Response?
 
-**Current**: Consume full stream, return JSON
+**Current**: Use `streamText()` but consume full stream, return JSON
 
 - Simpler client handling
 - Complete results at once
 - Works well with Zustand store
+- Tools use `generateObject()` for structured output
+
+**Note**: The main orchestrator uses `streamText()` for tool calling, but individual agent tools use `generateObject()` for structured JSON with Zod validation.
 
 **Streaming** (future enhancement):
 
+- Stream tool results progressively to client
 - Better UX with progressive updates
 - Lower perceived latency
 - More complex state management

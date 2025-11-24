@@ -1,9 +1,10 @@
 import { db } from "@/server/db";
-import { webhookLogs } from "@/server/db/schema";
+import { webhookLogs, videoSessions } from "@/server/db/schema";
 import { env } from "@/env";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -133,6 +134,30 @@ export async function POST(req: NextRequest) {
       payload: payload as Record<string, unknown>,
       createdAt: new Date(),
     });
+
+    // Update session status based on webhook event
+    try {
+      if (eventType === "video_complete") {
+        await db
+          .update(videoSessions)
+          .set({
+            status: "video_complete",
+            updatedAt: new Date(),
+          })
+          .where(eq(videoSessions.id, sessionId));
+      } else if (eventType === "video_failed") {
+        await db
+          .update(videoSessions)
+          .set({
+            status: "video_failed",
+            updatedAt: new Date(),
+          })
+          .where(eq(videoSessions.id, sessionId));
+      }
+    } catch (updateError) {
+      console.error("Failed to update session status:", updateError);
+      // Don't fail the webhook - we've logged it, session update is secondary
+    }
 
     return NextResponse.json(
       {

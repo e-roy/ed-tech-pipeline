@@ -92,7 +92,13 @@ export function FactsView({
               </div>
               <p className="text-muted-foreground text-sm">{fact.details}</p>
               <div className="text-muted-foreground mt-2 text-xs">
-                Confidence: {Math.round(fact.confidence * 100)}%
+                Confidence:{" "}
+                {typeof fact.confidence === "number" &&
+                !isNaN(fact.confidence) &&
+                fact.confidence >= 0 &&
+                fact.confidence <= 1
+                  ? `${Math.round(fact.confidence * 100)}%`
+                  : "N/A"}
               </div>
             </div>
           ))}
