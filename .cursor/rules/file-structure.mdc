@@ -28,8 +28,6 @@ frontend/
 │   │   │   ├── auth/
 │   │   │   │   └── [...nextauth]/
 │   │   │   │       └── route.ts
-│   │   │   ├── chat/
-│   │   │   │   └── route.ts
 │   │   │   ├── trpc/
 │   │   │   │   └── [trpc]/
 │   │   │   │       └── route.ts
@@ -88,13 +86,6 @@ frontend/
 │   │   │       ├── facts-view.tsx
 │   │   │       └── video-view.tsx
 │   │   ├── ai-elements/          # AI SDK components
-│   │   ├── chat/
-│   │   │   ├── chat-context.tsx
-│   │   │   ├── chat-message-context.tsx
-│   │   │   ├── chat-preview.tsx
-│   │   │   ├── chatConstants.ts
-│   │   │   ├── ChatMessage.tsx
-│   │   │   └── useFactExtractionSubmit.ts
 │   │   ├── content/
 │   │   │   ├── ContentActions.tsx
 │   │   │   ├── ContentCard.tsx

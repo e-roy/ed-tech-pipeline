@@ -1,5 +1,4 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { ChatProvider } from "@/components/chat/chat-context";
 import { FactExtractionProvider } from "@/components/fact-extraction/FactExtractionContext";
 import { UserSidebar } from "@/components/layout/user-sidebar";
 import { ThemeProvider } from "@/components/layout/theme-provider";
@@ -16,14 +15,12 @@ export default async function DashboardLayout({
   return (
     <ThemeProvider>
       <SidebarProvider>
-        <ChatProvider>
-          <FactExtractionProvider>
-            <div className="flex h-screen w-full">
-              <UserSidebar />
-              <DashboardLayoutClient>{children}</DashboardLayoutClient>
-            </div>
-          </FactExtractionProvider>
-        </ChatProvider>
+        <FactExtractionProvider>
+          <div className="flex h-screen w-full">
+            <UserSidebar />
+            <DashboardLayoutClient>{children}</DashboardLayoutClient>
+          </div>
+        </FactExtractionProvider>
       </SidebarProvider>
     </ThemeProvider>
   );
