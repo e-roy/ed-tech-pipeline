@@ -5,6 +5,9 @@ import { env } from "@/env";
 import { S3Client, CopyObjectCommand } from "@aws-sdk/client-s3";
 import { listSessionFiles } from "./storage";
 import type { Narration } from "@/types";
+import { db } from "@/server/db";
+import { videoSessions } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
 
 const imageAnalysisSchema = z.object({
   relevanceScore: z.number().min(0).max(10),
@@ -31,6 +34,7 @@ function getS3Client(): S3Client {
 async function analyzeImageRelevance(
   imageUrl: string,
   narration: Narration,
+  facts: Array<{ concept: string; details: string }>,
   imageIndex: number,
 ): Promise<{
   score: number;
@@ -38,11 +42,8 @@ async function analyzeImageRelevance(
   hasRelevantDiagrams: boolean;
   matchedConcepts: string[];
 }> {
-  // Extract all key concepts from narration
-  const allConcepts = narration.segments.flatMap((seg) => seg.key_concepts);
-  const visualGuidance = narration.segments
-    .map((seg) => seg.visual_guidance)
-    .join(" ");
+  // Extract just the narration text from the 4 segments
+  const narrationText = narration.segments.map((s) => s.narration).join("\n\n");
 
   const systemPrompt = `You are an expert at analyzing educational diagrams and images for their relevance to lesson content.
 
@@ -87,14 +88,13 @@ Provide:
 - hasRelevantDiagrams: true ONLY if it's a substantive educational diagram
 - matchedConcepts: Array of concepts this image actually illustrates`;
 
-  const userPrompt = `Key Concepts: ${allConcepts.join(", ")}
+  const userPrompt = `Selected Facts (Teacher-chosen concepts):
+${facts.map((f) => `- ${f.concept}: ${f.details}`).join("\n")}
 
-Visual Guidance Needed: ${visualGuidance}
+Narration Script:
+${narrationText}
 
-Full Narration:
-${narration.segments.map((s) => s.narration).join("\n\n")}
-
-Analyze how well this image supports the educational content.`;
+Analyze how well this image supports these educational concepts and narration.`;
 
   try {
     const result = await generateObject({
@@ -167,6 +167,7 @@ export async function selectAndCopyDiagrams(
   userId: string,
   sessionId: string,
   narration: Narration,
+  facts?: Array<{ concept: string; details: string }>,
 ): Promise<{
   success: boolean;
   selectedCount: number;
@@ -181,7 +182,31 @@ export async function selectAndCopyDiagrams(
 
     console.log(`[selectAndCopyDiagrams] Starting for session ${sessionId}`);
 
-    // 1. List all images from pdf-images folder
+    // 1. Load confirmed facts from database if not provided
+    let factsToUse: Array<{ concept: string; details: string }> = facts ?? [];
+
+    if (factsToUse.length === 0) {
+      const [session] = await db
+        .select({
+          confirmedFacts: videoSessions.confirmedFacts,
+        })
+        .from(videoSessions)
+        .where(eq(videoSessions.id, sessionId))
+        .limit(1);
+
+      if (session?.confirmedFacts && Array.isArray(session.confirmedFacts)) {
+        factsToUse = session.confirmedFacts as Array<{
+          concept: string;
+          details: string;
+        }>;
+      }
+    }
+
+    console.log(
+      `[selectAndCopyDiagrams] Using ${factsToUse.length} facts for analysis`,
+    );
+
+    // 2. List all images from pdf-images folder
     const images = await listSessionFiles(userId, sessionId, "pdf-images");
 
     if (images.length === 0) {
@@ -200,14 +225,14 @@ export async function selectAndCopyDiagrams(
       `[selectAndCopyDiagrams] Found ${images.length} images to analyze`,
     );
 
-    // 2. Analyze each image with vision model
+    // 3. Analyze each image with vision model
     const analyses = await Promise.all(
       images.map((img, idx) =>
-        analyzeImageRelevance(img.presigned_url, narration, idx),
+        analyzeImageRelevance(img.presigned_url, narration, factsToUse, idx),
       ),
     );
 
-    // 3. Select top 1-2 images based on score
+    // 4. Select top 1-2 images based on score
     const rankedImages = images
       .map((img, idx) => ({
         ...img,
@@ -228,7 +253,7 @@ export async function selectAndCopyDiagrams(
       })),
     );
 
-    // 4. Copy selected images to diagrams folder
+    // 5. Copy selected images to diagrams folder
     for (const [idx, image] of rankedImages.entries()) {
       const sourceKey = image.key;
       const fileName = `diagram_${idx + 1}_${image.name}`;

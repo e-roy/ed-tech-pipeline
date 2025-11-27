@@ -149,40 +149,12 @@ const parseToolResponse = (
       ) {
         state.handleFactExtractionResponse(parsedOutput);
         return true;
-      } else if (
-        directJson.toolName === "generateNarrationTool" &&
-        parsedOutput.narration
-      ) {
-        state.setNarration(parsedOutput.narration);
-        state.setWorkflowStep("review");
-        state.setShowNarrationReviewPrompt(true);
-        state.addMessage({
-          role: "assistant",
-          content:
-            parsedOutput.message ??
-            "I've created the narration. Please review it.",
-          id: Date.now().toString(),
-        });
-        return true;
       }
     }
 
     // Handle direct formats
     if (directJson.facts) {
       state.handleFactExtractionResponse(directJson);
-      return true;
-    }
-
-    if (directJson.narration) {
-      state.setNarration(directJson.narration);
-      state.setWorkflowStep("review");
-      state.setShowNarrationReviewPrompt(true);
-      state.addMessage({
-        role: "assistant",
-        content:
-          directJson.message ?? "I've created the narration. Please review it.",
-        id: Date.now().toString(),
-      });
       return true;
     }
 
@@ -428,37 +400,19 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           content: `I've selected these facts. Please create a narration based on them.`,
         };
 
-        const messagesWithConfirmation = [
-          ...state.messages,
-          confirmationMessage,
-        ];
-
         state.addMessage(confirmationMessage);
 
         try {
-          // Convert messages to include files as parts for proper storage
-          const apiMessages = messagesWithConfirmation.map((msg) => {
-            if (!msg.files || msg.files.length === 0) {
-              return { role: msg.role, content: msg.content };
-            }
-
-            // Include parts for messages with file attachments
-            return {
-              role: msg.role,
-              content: msg.content,
-              parts: msg.files,
-            };
-          });
-
-          const response = await fetch("/api/agent-create", {
+          // Call dedicated narration endpoint (bypasses orchestrator)
+          // This eliminates sending conversation history, saving 1-3 seconds
+          const response = await fetch("/api/agent-create/session/narration", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              messages: apiMessages,
-              selectedFacts: state.selectedFacts,
               sessionId: state.sessionId,
+              selectedFacts: state.selectedFacts,
             }),
           });
 

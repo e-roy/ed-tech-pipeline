@@ -68,11 +68,13 @@ export class NarrativeBuilderAgent {
 
       const result = await generateObject({
         // model: openai("gpt-4o-mini"),
-        model: openai("gpt-5-mini-2025-08-07"),
+        // model: openai("gpt-5-mini-2025-08-07"),
+        // model: openai("gpt-4.1-nano-2025-04-14"),
+        model: openai("gpt-4.1-mini-2025-04-14"),
         schema: narrativeScriptSchema,
         system: systemPrompt,
         prompt: userPrompt,
-        // temperature: 0.7,
+        temperature: 0.4,
       });
 
       const scriptData = result.object;
