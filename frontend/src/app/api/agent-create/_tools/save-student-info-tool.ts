@@ -1,4 +1,5 @@
 import { type Tool } from "ai";
+import type { ToolCallOptions } from "@ai-sdk/provider-utils";
 import z from "zod";
 import { db } from "@/server/db";
 import { videoSessions } from "@/server/db/schema";
@@ -23,15 +24,18 @@ export const saveStudentInfoTool: Tool = {
       .optional()
       .describe("Session ID to save the information to"),
   }),
-  execute: async ({
-    child_age,
-    child_interest,
-    sessionId,
-  }: {
-    child_age: string;
-    child_interest: string;
-    sessionId?: string;
-  }) => {
+  execute: async (
+    {
+      child_age,
+      child_interest,
+      sessionId,
+    }: {
+      child_age: string;
+      child_interest: string;
+      sessionId?: string;
+    },
+    _options: ToolCallOptions,
+  ) => {
     try {
       if (!sessionId) {
         return JSON.stringify({

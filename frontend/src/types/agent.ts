@@ -1,5 +1,4 @@
 export interface AgentInput {
-  sessionId: string;
   data: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }

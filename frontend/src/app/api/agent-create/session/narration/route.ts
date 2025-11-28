@@ -42,7 +42,6 @@ export async function POST(req: Request) {
   // Call NarrativeBuilderAgent directly (no tool wrapper overhead)
   const agent = new NarrativeBuilderAgent();
   const result = await agent.process({
-    sessionId: body.sessionId,
     data: {
       topic:
         sessionData?.topic ??
@@ -53,6 +52,7 @@ export async function POST(req: Request) {
       child_age: sessionData?.childAge ?? null,
       child_interest: sessionData?.childInterest ?? null,
     },
+    metadata: { sessionId: body.sessionId },
   });
 
   if (!result.success) {

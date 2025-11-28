@@ -1,6 +1,6 @@
 "use client";
 
-import type { FileUIPart } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 import {
   Message,
   MessageContent,
@@ -17,15 +17,8 @@ type ThinkingStatus = {
   steps: string[];
 } | null;
 
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-  id?: string;
-  files?: FileUIPart[];
-};
-
 interface ChatMessageListProps {
-  messages: ChatMessage[];
+  messages: UIMessage[];
   thinkingStatus: ThinkingStatus;
   childAge: string | null;
   childInterest: string | null;
@@ -42,8 +35,13 @@ export function ChatMessageList({
   return (
     <>
       {messages.map((message, i) => {
-        // Extract display content (hide extracted PDF text)
-        let displayContent = message.content;
+        // Get text content from parts (with fallback for safety)
+        const textParts = (message.parts ?? []).filter(
+          (p): p is { type: "text"; text: string } => p.type === "text",
+        );
+        let displayContent = textParts.map((p) => p.text).join("\n");
+
+        // Hide extracted PDF text (same logic)
         if (
           message.role === "user" &&
           displayContent.includes("--- Extracted Learning Materials")
@@ -58,7 +56,9 @@ export function ChatMessageList({
           }
         }
 
-        const files = (message.files ?? []) as unknown as FileUIPart[];
+        const files = (message.parts ?? []).filter(
+          (p): p is FileUIPart => p.type === "file",
+        );
         const hasFiles = files.length > 0;
 
         return (

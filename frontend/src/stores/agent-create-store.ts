@@ -2,16 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Fact, Narration, AgentSessionResponse } from "@/types";
 import { parseToolResult } from "@/lib/ai-utils";
-import type { FileUIPart } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 
 type WorkflowStep = "input" | "selection" | "review";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-  id?: string;
-  files?: FileUIPart[];
-};
 
 type ThinkingStatus = {
   operation: "extracting" | "narrating";
@@ -20,7 +13,7 @@ type ThinkingStatus = {
 
 interface AgentCreateState {
   // State
-  messages: Message[];
+  messages: UIMessage[];
   isLoading: boolean;
   isSessionLoading: boolean;
   error: Error | null;
@@ -40,8 +33,8 @@ interface AgentCreateState {
   isVideoGenerating: boolean;
 
   // Actions
-  addMessage: (message: Message) => void;
-  setMessages: (messages: Message[]) => void;
+  addMessage: (message: UIMessage) => void;
+  setMessages: (messages: UIMessage[]) => void;
   setIsLoading: (loading: boolean) => void;
   setIsSessionLoading: (loading: boolean) => void;
   setError: (error: Error | null) => void;
@@ -58,9 +51,6 @@ interface AgentCreateState {
   setShowFactSelectionPrompt: (show: boolean) => void;
   setShowNarrationReviewPrompt: (show: boolean) => void;
   setIsVideoGenerating: (generating: boolean) => void;
-  selectAllFacts: () => void;
-  selectHighConfidenceFacts: (threshold: number) => void;
-  clearSelectedFacts: () => void;
   reset: () => void;
 
   // Complex actions
@@ -69,7 +59,7 @@ interface AgentCreateState {
     facts?: Fact[];
     message?: string;
   }) => void;
-  extractFacts: (messagesToSend: Message[]) => Promise<void>;
+  extractFacts: (messagesToSend: UIMessage[]) => Promise<void>;
   handleSubmitFacts: () => Promise<void>;
   handleVerifyNarration: () => Promise<void>;
   handleSubmit: (message: {
@@ -79,10 +69,21 @@ interface AgentCreateState {
   loadSession: (sessionId: string) => Promise<void>;
 }
 
-// Helper: Parse JSON response directly (optimized)
-const parseJsonResponse = async (response: Response): Promise<unknown> => {
-  return response.json();
-};
+// Helper: Create message with auto-generated ID
+const createMessage = (
+  role: "user" | "assistant",
+  content: string,
+): UIMessage => ({
+  id: `msg-${Date.now()}`,
+  role,
+  parts: [{ type: "text", text: content }],
+});
+
+// Helper: Extract session ID from response headers
+const extractSessionId = (response: Response): string | null =>
+  response.headers.get("x-session-id") ??
+  response.headers.get("X-Session-Id") ??
+  null;
 
 /**
  * Helper to parse tool response from API
@@ -97,7 +98,7 @@ const parseToolResponse = (
     }) => void;
     setNarration: (narration: Narration | null) => void;
     setWorkflowStep: (step: WorkflowStep) => void;
-    addMessage: (message: Message) => void;
+    addMessage: (message: UIMessage) => void;
     setChildInfo: (age: string, interest: string) => void;
     setShowNarrationReviewPrompt: (show: boolean) => void;
   },
@@ -136,12 +137,12 @@ const parseToolResponse = (
             parsedOutput.child_interest,
           );
         }
-        state.addMessage({
-          role: "assistant",
-          content:
+        state.addMessage(
+          createMessage(
+            "assistant",
             parsedOutput.message ?? "Student information saved successfully.",
-          id: Date.now().toString(),
-        });
+          ),
+        );
         return true;
       } else if (
         directJson.toolName === "extractFactsTool" &&
@@ -163,11 +164,7 @@ const parseToolResponse = (
       state.setWorkflowStep("review");
       state.setShowNarrationReviewPrompt(true);
       if (directJson.message) {
-        state.addMessage({
-          role: "assistant",
-          content: directJson.message,
-          id: Date.now().toString(),
-        });
+        state.addMessage(createMessage("assistant", directJson.message));
       }
       return true;
     }
@@ -178,12 +175,12 @@ const parseToolResponse = (
       directJson.child_interest
     ) {
       state.setChildInfo(directJson.child_age, directJson.child_interest);
-      state.addMessage({
-        role: "assistant",
-        content:
+      state.addMessage(
+        createMessage(
+          "assistant",
           directJson.message ?? "Student information saved successfully.",
-        id: Date.now().toString(),
-      });
+        ),
+      );
       return true;
     }
   } catch {
@@ -252,15 +249,6 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         set({ showNarrationReviewPrompt: show }),
       setIsVideoGenerating: (generating) =>
         set({ isVideoGenerating: generating }),
-      selectAllFacts: () =>
-        set((state) => ({
-          selectedFacts: [...state.facts],
-        })),
-      selectHighConfidenceFacts: (threshold) =>
-        set((state) => ({
-          selectedFacts: state.facts.filter((f) => f.confidence >= threshold),
-        })),
-      clearSelectedFacts: () => set({ selectedFacts: [] }),
       reset: () =>
         set({
           messages: [],
@@ -285,10 +273,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       // Complex actions
       updateSessionIdFromResponse: (response) => {
-        const responseSessionId =
-          response.headers.get("x-session-id") ??
-          response.headers.get("X-Session-Id");
-
+        const responseSessionId = extractSessionId(response);
         const currentSessionId = get().sessionId;
         if (responseSessionId && responseSessionId !== currentSessionId) {
           get().setSessionId(responseSessionId);
@@ -302,22 +287,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             workflowStep: "selection",
             showFactSelectionPrompt: true,
           });
-          get().addMessage({
-            role: "assistant",
-            content:
+          get().addMessage(
+            createMessage(
+              "assistant",
               json.message ??
-              "I've extracted these facts. Please select the ones you want to keep.",
-            id: Date.now().toString(),
-          });
+                "I've extracted these facts. Please select the ones you want to keep.",
+            ),
+          );
         } else if (json.facts?.length === 0) {
           // No facts found, stay in input mode
-          get().addMessage({
-            role: "assistant",
-            content:
+          get().addMessage(
+            createMessage(
+              "assistant",
               json.message ??
-              "I couldn't find any facts in the provided content. Please try providing more detailed educational content or a different source.",
-            id: Date.now().toString(),
-          });
+                "I couldn't find any facts in the provided content. Please try providing more detailed educational content or a different source.",
+            ),
+          );
         }
       },
 
@@ -335,27 +320,14 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             ],
           });
 
-          // Convert messages to include files as parts for proper storage
-          const apiMessages = messagesToSend.map((msg) => {
-            if (!msg.files || msg.files.length === 0) {
-              return { role: msg.role, content: msg.content };
-            }
-
-            // Include parts for messages with file attachments
-            return {
-              role: msg.role,
-              content: msg.content,
-              parts: msg.files,
-            };
-          });
-
+          // UIMessage already has the right structure with parts
           const response = await fetch("/api/agent-create", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              messages: apiMessages,
+              messages: messagesToSend,
               sessionId: state.sessionId,
             }),
           });
@@ -366,7 +338,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             throw new Error("Failed to fetch response");
           }
 
-          const jsonData = await parseJsonResponse(response);
+          const jsonData = (await response.json()) as unknown;
 
           // Development-only logging
           if (process.env.NODE_ENV === "development") {
@@ -409,12 +381,12 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           ],
         });
 
-        const confirmationMessage: Message = {
-          role: "user",
-          content: `I've selected these facts. Please create a narration based on them.`,
-        };
-
-        state.addMessage(confirmationMessage);
+        state.addMessage(
+          createMessage(
+            "user",
+            `I've selected these facts. Please create a narration based on them.`,
+          ),
+        );
 
         try {
           // Call dedicated narration endpoint (bypasses orchestrator)
@@ -436,7 +408,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             throw new Error("Failed to generate narration");
           }
 
-          const jsonData = await parseJsonResponse(response);
+          const jsonData = (await response.json()) as unknown;
 
           // Development-only logging
           if (process.env.NODE_ENV === "development") {
@@ -486,12 +458,12 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           state.setNarrationLocked(true);
 
           // Add confirmation message
-          state.addMessage({
-            role: "assistant",
-            content:
+          state.addMessage(
+            createMessage(
+              "assistant",
               "Narration verified and saved! You can now proceed to create the video.",
-            id: Date.now().toString(),
-          });
+            ),
+          );
         } catch (error) {
           console.error("Failed to verify narration:", error);
           state.setError(error as Error);
@@ -504,36 +476,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         if (!message.text.trim() && message.files.length === 0) return;
 
         const state = get();
+        state.setIsLoading(true);
+        state.setError(null);
 
         // Check if PDF is present
         const hasPdf = message.files.some(
           (f) => f.mediaType === "application/pdf",
         );
 
-        // Create clean message WITHOUT embedded PDF text
-        const fileAttachments = message.files.filter(
-          (file) => file.mediaType === "application/pdf",
-        );
+        const textContent =
+          message.text.trim() ||
+          (hasPdf ? "PDF materials uploaded for analysis" : "");
 
-        const newMessage: Message = {
-          role: "user",
-          content:
-            message.text.trim() ||
-            (hasPdf ? "PDF materials uploaded for analysis" : ""),
-          id: Date.now().toString(),
-          files: fileAttachments.length > 0 ? fileAttachments : undefined,
-        };
+        // Upload PDF FIRST and get S3 URL before creating message
+        const s3FileParts: FileUIPart[] = [];
 
-        const newMessages = [...state.messages, newMessage];
-        state.setMessages(newMessages);
-        state.setIsLoading(true);
-        state.setError(null);
-
-        // Process PDF BEFORE sending to AI (upload must complete first)
         if (hasPdf) {
-          // Let React update UI first by yielding control
-          await new Promise((resolve) => setTimeout(resolve, 0));
-
           for (const filePart of message.files) {
             if (filePart.mediaType === "application/pdf") {
               try {
@@ -545,11 +503,11 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                   { type: "application/pdf" },
                 );
 
-                // Extract text immediately (fast - doesn't block UI)
+                // Extract text immediately
                 const { extractTextFromPDF } = await import("@/lib/extractPDF");
                 const pdfText = await extractTextFromPDF(file);
 
-                // Upload PDF with text first (fast path - don't wait for images)
+                // Upload PDF to S3
                 const formData = new FormData();
                 formData.append("pdf", file);
                 const currentSessionId = get().sessionId;
@@ -557,7 +515,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                   formData.append("sessionId", currentSessionId);
                 }
                 formData.append("extractedText", pdfText);
-                formData.append("imageCount", "0"); // Will upload images separately
+                formData.append("imageCount", "0");
 
                 const uploadResponse = await fetch(
                   "/api/agent-create/session/upload-pdf",
@@ -568,9 +526,10 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 );
 
                 if (!uploadResponse.ok) {
-                  const errorText = await uploadResponse.text();
-                  console.error("Failed to upload PDF:", errorText);
-                  // Don't stop - continue to extractFacts even if upload fails
+                  console.error(
+                    "Failed to upload PDF:",
+                    await uploadResponse.text(),
+                  );
                 } else {
                   const uploadData = (await uploadResponse.json()) as {
                     sessionId: string;
@@ -583,36 +542,27 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                     get().setSessionId(uploadData.sessionId);
                   }
 
+                  // Create FileUIPart with S3 URL (not blob URL)
+                  s3FileParts.push({
+                    type: "file",
+                    mediaType: "application/pdf",
+                    filename: filePart.filename,
+                    url: uploadData.pdfUrl, // S3 URL, accessible by server
+                  });
+
                   if (process.env.NODE_ENV === "development") {
-                    console.log(`PDF uploaded: ${uploadData.pdfUrl}`);
+                    console.log(`PDF uploaded to S3: ${uploadData.pdfUrl}`);
                   }
 
                   // Extract and upload images in background (non-blocking)
                   void (async () => {
                     try {
-                      if (process.env.NODE_ENV === "development") {
-                        console.log("Background: Starting image extraction...");
-                      }
-
                       const { extractImagesFromPdf } = await import(
                         "@/lib/pdf-image-extractor"
                       );
                       const extractedImages = await extractImagesFromPdf(file);
 
-                      if (process.env.NODE_ENV === "development") {
-                        console.log(
-                          `Background: Extracted ${extractedImages.length} images`,
-                        );
-                      }
-
                       if (extractedImages.length > 0 && uploadData.sessionId) {
-                        if (process.env.NODE_ENV === "development") {
-                          console.log(
-                            "Background: Uploading images to server...",
-                          );
-                        }
-
-                        // Upload images separately
                         const imageFormData = new FormData();
                         imageFormData.append("sessionId", uploadData.sessionId);
                         imageFormData.append(
@@ -628,49 +578,35 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                           imageFormData.append(`image_${index}`, imageFile);
                         });
 
-                        const imageUploadResponse = await fetch(
-                          "/api/agent-create/session/upload-images",
-                          {
-                            method: "POST",
-                            body: imageFormData,
-                          },
-                        );
-
-                        if (imageUploadResponse.ok) {
-                          if (process.env.NODE_ENV === "development") {
-                            console.log(
-                              `Background: Uploaded ${extractedImages.length} images from PDF`,
-                            );
-                          }
-                        } else {
-                          console.error(
-                            "Background image upload failed:",
-                            await imageUploadResponse.text(),
-                          );
-                        }
-                      } else {
-                        if (process.env.NODE_ENV === "development") {
-                          console.log(
-                            `Background: Skipping image upload - images: ${extractedImages.length}, sessionId: ${uploadData.sessionId ? "present" : "missing"}`,
-                          );
-                        }
+                        await fetch("/api/agent-create/session/upload-images", {
+                          method: "POST",
+                          body: imageFormData,
+                        });
                       }
                     } catch (error) {
                       console.error(
                         "Background image extraction failed:",
                         error,
                       );
-                      // Silent fail - images are optional
                     }
                   })();
                 }
               } catch (error) {
                 console.error("Error processing PDF:", error);
-                // Don't stop - continue to extractFacts even if PDF processing fails
               }
             }
           }
         }
+
+        // Create message with S3 URLs (or no files if upload failed)
+        const newMessage: UIMessage = {
+          id: `msg-${Date.now()}`,
+          role: "user",
+          parts: [{ type: "text", text: textContent }, ...s3FileParts],
+        };
+
+        const newMessages = [...state.messages, newMessage];
+        state.setMessages(newMessages);
 
         try {
           if (state.workflowStep === "input") {
@@ -711,9 +647,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             throw new Error(`Failed to load session: ${response.status}`);
           }
 
-          const data = (await parseJsonResponse(
-            response,
-          )) as AgentSessionResponse;
+          const data = (await response.json()) as AgentSessionResponse;
 
           // Development-only client-side logging
           if (process.env.NODE_ENV === "development") {
@@ -783,33 +717,36 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             .map(normalizeFact)
             .filter((f) => f.concept !== "" && f.details !== "");
 
+          // Normalize messages to UIMessage format (handles both old and new formats)
+          const normalizeMessage = (m: unknown): UIMessage => {
+            const msg = m as {
+              id?: string;
+              role?: string;
+              content?: string;
+              parts?: unknown[];
+            };
+
+            // If message already has parts, use it as-is (new format)
+            if (msg.parts && Array.isArray(msg.parts)) {
+              return {
+                id: msg.id ?? `msg-${Date.now()}-${Math.random()}`,
+                role: (msg.role as "user" | "assistant") ?? "assistant",
+                parts: msg.parts as UIMessage["parts"],
+              };
+            }
+
+            // Convert old format (content-based) to new format (parts-based)
+            return {
+              id: msg.id ?? `msg-${Date.now()}-${Math.random()}`,
+              role: (msg.role as "user" | "assistant") ?? "assistant",
+              parts: [{ type: "text", text: msg.content ?? "" }],
+            };
+          };
+
           set({
             sessionId: data.session.id,
             sessionStatus: data.session.status,
-            messages: data.messages.map((m) => {
-              const message: Message = {
-                role: m.role as "user" | "assistant",
-                content: m.content,
-                id: m.id,
-              };
-
-              // Extract files from parts if present
-              if (m.parts && Array.isArray(m.parts)) {
-                const files = m.parts.filter(
-                  (part: unknown) =>
-                    typeof part === "object" &&
-                    part !== null &&
-                    "type" in part &&
-                    part.type === "file",
-                ) as FileUIPart[];
-
-                if (files.length > 0) {
-                  message.files = files;
-                }
-              }
-
-              return message;
-            }),
+            messages: data.messages.map(normalizeMessage),
             facts: normalizedExtractedFacts,
             selectedFacts: normalizedConfirmedFacts,
             narration: data.session.generatedScript ?? null,

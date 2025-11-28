@@ -1,74 +1,32 @@
 import { type Tool } from "ai";
+import type { ToolCallOptions } from "@ai-sdk/provider-utils";
 import z from "zod";
 import { FactExtractionAgent } from "@/server/agents/fact-extraction";
-import { db } from "@/server/db";
-import { videoSessions } from "@/server/db/schema";
-import { eq } from "drizzle-orm";
 
 export const extractFactsTool: Tool = {
   description:
-    "Extract educational facts from learning materials (PDF, URL, or text). Returns facts pending user review.",
+    "Extract educational facts from learning materials (PDF or text). Returns facts pending user review.",
   inputSchema: z.object({
-    content: z
-      .string()
-      .describe(
-        "The content to extract facts from (text, PDF content, or URL)",
-      ),
-    sessionId: z
-      .string()
-      .optional()
-      .describe("Session ID to access existing session data from database"),
+    content: z.string().describe("The user's message text"),
+    pdfUrl: z.string().optional().describe("PDF URL from file attachment"),
   }),
-  execute: async ({
-    content,
-    sessionId,
-  }: {
-    content: string;
-    sessionId?: string;
-  }) => {
+  execute: async (
+    {
+      content,
+      pdfUrl,
+    }: {
+      content: string;
+      pdfUrl?: string;
+    },
+    _options: ToolCallOptions,
+  ) => {
     try {
-      let materialText = content; // Keep user's original message content
-      let pdfUrl: string | undefined;
-
-      // If sessionId provided, try to load PDF URL and fallback text
-      if (sessionId) {
-        try {
-          const [session] = await db
-            .select({
-              sourceMaterials: videoSessions.sourceMaterials,
-            })
-            .from(videoSessions)
-            .where(eq(videoSessions.id, sessionId))
-            .limit(1);
-
-          if (session?.sourceMaterials) {
-            const materials = session.sourceMaterials as {
-              text?: string;
-              pdfUrl?: string;
-            };
-
-            // Extract PDF URL if available
-            pdfUrl = materials.pdfUrl;
-
-            // Only use extracted text as fallback if NO PDF URL is available
-            // This preserves the user's message context when PDF is present
-            if (!pdfUrl && materials.text) {
-              materialText = materials.text;
-            }
-          }
-        } catch (error) {
-          console.error("Error loading source materials:", error);
-          // Continue with provided content if loading fails
-        }
-      }
-
       // Use FactExtractionAgent for better fact extraction quality
       const agent = new FactExtractionAgent();
 
       const result = await agent.process({
-        sessionId: sessionId ?? "",
         data: {
-          content: materialText,
+          content,
           pdfUrl,
         },
       });

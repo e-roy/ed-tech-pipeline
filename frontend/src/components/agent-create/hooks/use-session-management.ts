@@ -42,9 +42,14 @@ export function useSessionManagement({
 
       // Add error message to chat
       const errorMessage = {
+        id: `msg-${Date.now()}`,
         role: "assistant" as const,
-        content: `Failed to delete session: ${error.message}`,
-        id: Date.now().toString(),
+        parts: [
+          {
+            type: "text" as const,
+            text: `Failed to delete session: ${error.message}`,
+          },
+        ],
       };
       const store = useAgentCreateStore.getState();
       store.addMessage(errorMessage);
@@ -110,4 +115,3 @@ export function useSessionManagement({
     deleteMutation,
   };
 }
-

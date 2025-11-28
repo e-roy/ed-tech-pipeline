@@ -36,36 +36,22 @@ export class FactExtractionAgent {
         );
       }
 
-      // console.log("content   ===>", content);
-      // console.log("pdfUrl    ===>", pdfUrl);
-
       const systemPrompt = this.buildSystemPrompt();
       const userPrompt = this.buildUserPrompt(content ?? "");
 
-      // Build message content array
+      // Build message content - AI SDK handles PDF fetching
       const messageContent: Array<
         | { type: "text"; text: string }
-        | { type: "file"; data: string; mediaType: string }
-      > = [
-        {
-          type: "text",
-          text: userPrompt,
-        },
-      ];
+        | { type: "file"; data: URL; mediaType: string }
+      > = [{ type: "text", text: userPrompt }];
 
-      // If PDF URL is provided, fetch and add it
+      // Add PDF URL directly (AI SDK fetches it)
       if (pdfUrl) {
-        try {
-          const pdfDataUrl = await this.fetchPdfAsDataUrl(pdfUrl);
-          messageContent.push({
-            type: "file",
-            data: pdfDataUrl,
-            mediaType: "application/pdf",
-          });
-        } catch (error) {
-          console.error("Error fetching PDF:", error);
-          // Continue with text-only if PDF fetch fails
-        }
+        messageContent.push({
+          type: "file",
+          data: new URL(pdfUrl),
+          mediaType: "application/pdf",
+        });
       }
 
       const result = await generateObject({
@@ -114,25 +100,6 @@ export class FactExtractionAgent {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }
-
-  private async fetchPdfAsDataUrl(pdfUrl: string): Promise<string> {
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.statusText}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    // Convert to base64
-    const charArray = Array.from(uint8Array, (byte) =>
-      String.fromCharCode(byte),
-    );
-    const binaryString = charArray.join("");
-    const base64Data = btoa(binaryString);
-
-    return `data:application/pdf;base64,${base64Data}`;
   }
 
   private buildSystemPrompt(): string {

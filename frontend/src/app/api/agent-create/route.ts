@@ -1,5 +1,6 @@
 import { openai } from "@ai-sdk/openai";
-import { type ModelMessage, streamText } from "ai";
+import { streamText, convertToModelMessages, type UIMessage } from "ai";
+import type { ToolCallOptions } from "@ai-sdk/provider-utils";
 
 import type { Fact } from "@/types";
 import { auth } from "@/server/auth";
@@ -18,12 +19,10 @@ import { parseToolResult } from "@/lib/ai-utils";
 import { extractFactsTool } from "./_tools/extract-facts-tools";
 import { saveStudentInfoTool } from "./_tools/save-student-info-tool";
 
-// export const maxDuration = 30;
-
 export const runtime = "nodejs";
 
 interface RequestBody {
-  messages: ModelMessage[];
+  messages: UIMessage[];
   selectedFacts?: Fact[];
   sessionId?: string | null;
 }
@@ -204,59 +203,58 @@ export async function POST(req: Request) {
 CRITICAL RULES - Follow these EXACTLY:
 
 1. If user mentions student age/interests → call saveStudentInfoTool
-2. If user message says "PDF materials uploaded" OR provides lesson content → IMMEDIATELY call extractFactsTool with the user's message content
+2. If user message says "PDF materials uploaded" OR provides lesson content → IMMEDIATELY call extractFactsTool
 3. DO NOT just acknowledge uploads - you MUST call extractFactsTool
 
-The extractFactsTool will automatically access uploaded PDFs from the session.
-Just call it with the user's message text as the content parameter.
+When calling extractFactsTool:
+- Pass the user's message text as the content parameter
+- The tool will automatically extract PDF URLs from file attachments in the message
 
 After extracting facts, the user will select which ones to use.`;
 
-  // Wrap tools to inject sessionId
-  // The AI SDK Tool type expects execute to take 2 args, but our tools only take 1
-  // We use type assertion to work around this mismatch
+  // Wrap tools to inject sessionId and extract PDF URL from message parts
   const toolsWithSessionId = {
     saveStudentInfoTool: {
       ...saveStudentInfoTool,
       execute: async (
-        args: { child_age: string; child_interest: string; sessionId?: string },
-        _options?: unknown,
+        args: { child_age: string; child_interest: string },
+        options: ToolCallOptions,
       ): Promise<string> => {
-        if (!saveStudentInfoTool.execute) {
-          throw new Error("saveStudentInfoTool.execute is not defined");
-        }
-        const originalExecute = saveStudentInfoTool.execute as (args: {
-          child_age: string;
-          child_interest: string;
-          sessionId?: string;
-        }) => Promise<string>;
-        const result = await originalExecute({
-          ...args,
-          sessionId,
-        });
-        return result;
+        return (await saveStudentInfoTool.execute!(
+          { ...args, sessionId },
+          options,
+        )) as string;
       },
     } as typeof saveStudentInfoTool,
     extractFactsTool: {
       ...extractFactsTool,
       execute: async (
-        args: { content: string; sessionId?: string },
-        _options?: unknown,
+        args: { content: string; pdfUrl?: string },
+        options: ToolCallOptions,
       ): Promise<string> => {
-        if (!extractFactsTool.execute) {
-          throw new Error("extractFactsTool.execute is not defined");
+        // Extract PDF URL from last user message if not provided
+        let pdfUrl = args.pdfUrl;
+        if (!pdfUrl) {
+          const lastUserMessage = [...messages]
+            .reverse()
+            .find((m) => m.role === "user");
+          if (lastUserMessage?.parts) {
+            const filePart = lastUserMessage.parts.find(
+              (p) =>
+                typeof p === "object" &&
+                p !== null &&
+                "type" in p &&
+                p.type === "file",
+            );
+            if (filePart && "url" in filePart) {
+              pdfUrl = filePart.url;
+            }
+          }
         }
-        // Call original execute with injected sessionId
-        // Type assertion needed because Tool.execute signature expects 2 args
-        const originalExecute = extractFactsTool.execute as (args: {
-          content: string;
-          sessionId?: string;
-        }) => Promise<string>;
-        const result = await originalExecute({
-          ...args,
-          sessionId,
-        });
-        return result;
+        return (await extractFactsTool.execute!(
+          { content: args.content, pdfUrl },
+          options,
+        )) as string;
       },
     } as typeof extractFactsTool,
   };
@@ -269,9 +267,10 @@ After extracting facts, the user will select which ones to use.`;
     });
 
     const result = streamText({
-      model: openai("gpt-4o-mini"),
+      // model: openai("gpt-4o-mini"),
+      model: openai("gpt-4.1-mini-2025-04-14"),
       system: systemPrompt,
-      messages: messages,
+      messages: convertToModelMessages(messages),
       tools: toolsWithSessionId,
       onFinish: async (finishResult) => {
         try {
