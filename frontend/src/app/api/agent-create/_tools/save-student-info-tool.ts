@@ -38,10 +38,10 @@ export const saveStudentInfoTool: Tool = {
   ) => {
     try {
       if (!sessionId) {
-        return JSON.stringify({
+        return {
           success: false,
           message: "Session ID is required to save student information.",
-        });
+        };
       }
 
       // Save to database
@@ -54,18 +54,19 @@ export const saveStudentInfoTool: Tool = {
         })
         .where(eq(videoSessions.id, sessionId));
 
-      return JSON.stringify({
+      // Return object directly (AI SDK will handle serialization)
+      return {
         success: true,
         message: `Perfect! I'll personalize the video for a ${child_age}-year-old who loves ${child_interest}. Now, please share your history lesson material - you can type it in, paste text, or upload a PDF.`,
         child_age,
         child_interest,
-      });
+      };
     } catch (error) {
       console.error("Error saving student info:", error);
-      return JSON.stringify({
+      return {
         success: false,
         message: `Failed to save student information: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
+      };
     }
   },
 };

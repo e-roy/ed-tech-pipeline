@@ -32,25 +32,28 @@ export const extractFactsTool: Tool = {
       });
 
       if (!result.success) {
-        return JSON.stringify({
+        return {
+          success: false,
           facts: [],
           message: `Failed to extract facts: ${result.error ?? "Unknown error"}`,
-        });
+        };
       }
 
-      // Return in the expected tool format
-      return JSON.stringify({
+      // Return object directly (AI SDK will handle serialization)
+      return {
+        success: true,
         facts: result.data.facts ?? [],
         message: result.data.message ?? "Facts extracted successfully",
         topic: result.data.topic,
         learningObjective: result.data.learningObjective,
-      });
+      };
     } catch (error) {
       console.error("Error extracting facts:", error);
-      return JSON.stringify({
+      return {
+        success: false,
         facts: [],
         message: `Failed to extract facts: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
+      };
     }
   },
 };

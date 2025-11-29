@@ -38,6 +38,25 @@ The system uses AI SDK's tool calling where the LLM decides which tools to invok
 - Sessions enable resumption and history viewing
 - URL-based session routing for deep linking
 
+### 4. **File Handling Optimization**
+
+To prevent unnecessary token usage, file attachments are stripped before sending messages to the LLM:
+
+- **PDF Upload Flow**:
+
+  1. Client uploads PDF → Extracted to S3 via `processPdfUploads()` utility
+  2. S3 URL stored in message parts for UI display
+  3. Before sending to LLM: `stripFileParts()` removes file attachments
+  4. PDF URL extracted separately and passed to `extractFactsTool` via wrapper
+
+- **Benefits**:
+  - LLM never receives binary/file data (can't process anyway)
+  - Reduced token usage and latency
+  - Cleaner context for AI decision-making
+  - Tools receive PDF URLs via parameter injection
+
+**Implementation**: `stripFileParts()` in `/api/agent-create/route.ts` filters out `file` type parts before calling `convertToModelMessages()`.
+
 ## Architecture Diagram
 
 ```mermaid
@@ -182,32 +201,29 @@ Content-Type: application/json
 
 ### Response Format
 
+All API responses follow a standardized format via `StandardApiResponse`:
+
 ```typescript
 {
-  // From tool execution
-  "type": "tool-result",
-  "output": string,  // JSON string containing:
-
-  // For extractFactsTool:
-  {
-    "facts": Fact[],
-    "message": string,
-    "topic": string,
-    "learningObjective": string
-  }
-
-  // For saveStudentInfoTool:
-  {
-    "success": boolean,
-    "message": string,
-    "child_age": string,
-    "child_interest": string
-  }
+  "success": boolean,
+  "facts"?: Fact[],
+  "narration"?: Narration,
+  "message"?: string,
+  "topic"?: string,
+  "learningObjective"?: string,
+  "childAge"?: string,
+  "childInterest"?: string,
+  "error"?: string
 }
 
 // Headers:
 X-Session-Id: string  // Returned on first message if new session
 ```
+
+**Helper Functions** (`lib/api-response.ts`):
+
+- `buildStandardResponse()`: Normalizes tool results into standard format
+- `unwrapToolResult()`: Unwraps AI SDK tool result wrappers and parses JSON strings
 
 **Note**: Narration generation now uses a separate endpoint (see "Direct Narration Endpoint" section below) for optimal performance.
 
@@ -216,30 +232,19 @@ X-Session-Id: string  // Returned on first message if new session
 The AI is guided by a conversational system prompt:
 
 ```typescript
-const systemPrompt = `You are an expert educational AI assistant helping teachers create personalized history videos for individual students.
+const systemPrompt = `You are an AI assistant helping teachers create educational videos.
 
-Your role:
-- Help teachers create engaging history videos tailored to specific students
-- Gather student information (age and interests) when provided to personalize content
-- Extract key facts from lesson materials
+CRITICAL RULES - Follow these EXACTLY:
 
-Available Tools:
-1. saveStudentInfoTool - Save student age and interest for personalization (OPTIONAL)
-2. extractFactsTool - Extract educational facts from learning materials
+1. If user mentions student age/interests → call saveStudentInfoTool
+2. If user message says "PDF materials uploaded for analysis" OR provides lesson content → IMMEDIATELY call extractFactsTool
+3. DO NOT just acknowledge uploads - you MUST call extractFactsTool
 
-Conversation Flow (FLEXIBLE):
-- If the teacher mentions student age or interests, use saveStudentInfoTool
-- When the teacher provides lesson content/materials, ALWAYS use extractFactsTool
-- Personalization is OPTIONAL but recommended
+When calling extractFactsTool:
+- Pass the user's message text as the content parameter
+- The tool will automatically access the PDF from the file attachment
 
-Key Guidelines:
-- Be warm, conversational, and helpful
-- Gently encourage personalization but don't require it
-- Always extract facts when content is provided
-- Guide the teacher through the process naturally
-
-Note: After facts are extracted and selected by the teacher, narration generation 
-happens automatically through a direct API endpoint for optimal performance.`;
+After extracting facts, the user will select which ones to use.`;
 ```
 
 ## Tools
@@ -840,17 +845,21 @@ try {
 
 ### Tool Errors
 
-Tools catch errors and return JSON with error messages:
+Tools catch errors and return objects (AI SDK handles serialization):
 
 ```typescript
 try {
   // ... tool logic
-  return JSON.stringify({ success: true, ... });
+  return {
+    success: true,
+    facts: extractedFacts,
+    message: "Successfully extracted facts",
+  };
 } catch (error) {
-  return JSON.stringify({
+  return {
     success: false,
-    message: `Failed: ${error.message}`
-  });
+    message: `Failed: ${error.message}`,
+  };
 }
 ```
 
@@ -896,6 +905,52 @@ const cost =
 
 Agents return `cost` and `duration` in their response for monitoring.
 
+## Utilities
+
+### PDF Upload Processing (`lib/pdf-upload.ts`)
+
+Extracted from the Zustand store for better separation of concerns:
+
+**Functions**:
+
+- `processPdfUploads()`: Main entry point
+
+  - Fetches PDF blobs
+  - Extracts text using `extractTextFromPDF()`
+  - Uploads to S3
+  - Returns S3 URLs as `FileUIPart[]`
+  - Backgrounds image extraction (non-blocking)
+
+- `backgroundExtractImages()`: Async background task
+  - Extracts images from PDF
+  - Uploads to S3
+  - Fire-and-forget (doesn't block chat flow)
+
+**Benefits**:
+
+- Testable: Can unit test PDF logic independently
+- Reusable: Can use in other components
+- Cleaner store: Reduced from 735 to 640 lines (~13% reduction)
+
+### API Response Helpers (`lib/api-response.ts`)
+
+Standardizes all API responses for consistency:
+
+**Types**:
+
+- `StandardApiResponse`: Interface for all tool/API responses
+
+**Functions**:
+
+- `unwrapToolResult()`: Handles AI SDK wrapper unwrapping + JSON parsing
+- `buildStandardResponse()`: Normalizes tool results to standard format
+
+**Benefits**:
+
+- Single source of truth for response parsing
+- Eliminates ~150 lines of redundant parsing logic
+- Full type safety across frontend/backend boundary
+
 ## File Structure
 
 ```
@@ -912,6 +967,11 @@ frontend/src/
 │               ├── save-student-info-tool.ts
 │               ├── extract-facts-tools.ts
 │               └── generate-narration-tool.ts  # Preserved for reference (not used)
+├── lib/
+│   ├── api-response.ts              # StandardApiResponse type & helpers
+│   ├── pdf-upload.ts                # PDF processing utilities
+│   ├── extractPDF.ts                # PDF text extraction
+│   └── pdf-image-extractor.ts       # PDF image extraction
 ├── server/
 │   ├── agents/
 │   │   ├── fact-extraction.ts
@@ -1014,6 +1074,56 @@ Tool results are saved to database asynchronously:
 - Token reduction: 60-70% per image analysis
 - Accuracy improvement: Teacher-selected concepts improve relevance
 - Better matching: Facts provide conceptual context for image selection
+
+### 3. ✅ Standardized Response Format (Completed)
+
+**Problem**: Response parsing happened in 3 different places with inconsistent formats
+
+**Solution**: Created `StandardApiResponse` type and centralized parsing utilities (`lib/api-response.ts`)
+
+**Impact**:
+
+- Code reduction: ~150 lines removed (redundant parsing logic)
+- Type safety: Full autocomplete and compile-time checks
+- Maintainability: Single source of truth for response handling
+- Bug reduction: Fixed duplicate message issue
+
+### 4. ✅ File Attachment Optimization (Completed)
+
+**Problem**: LLM received PDF file attachments it couldn't process, wasting tokens
+
+**Solution**: `stripFileParts()` removes files before sending to LLM; tools receive URLs separately
+
+**Impact**:
+
+- Token reduction: Eliminates file data from LLM context
+- Faster responses: Less data to process
+- Cleaner architecture: Clear separation between display and processing
+
+### 5. ✅ PDF Processing Refactor (Completed)
+
+**Problem**: 105 lines of PDF processing inline in Zustand store
+
+**Solution**: Extracted to `lib/pdf-upload.ts` utility
+
+**Impact**:
+
+- Store reduction: 735 → 640 lines (13% smaller)
+- Testability: Can unit test PDF logic independently
+- Reusability: Available for other components
+- Maintainability: Easier to update PDF handling
+
+### 6. ✅ Tools Return Objects (Completed)
+
+**Problem**: Tools returned JSON strings that required parsing in multiple places
+
+**Solution**: Tools return plain objects; AI SDK handles serialization automatically
+
+**Impact**:
+
+- Simpler code: No manual JSON.stringify() calls
+- Fewer errors: Eliminates JSON parsing failures
+- Better DX: Cleaner tool implementations
 
 ## Future Enhancements
 

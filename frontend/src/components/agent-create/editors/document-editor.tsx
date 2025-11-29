@@ -38,10 +38,8 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
     factsLocked,
     childAge,
     childInterest,
-    showFactSelectionPrompt,
     thinkingStatus,
     toggleFact,
-    handleSubmitFacts,
     sessionId,
     isVideoGenerating,
     setIsVideoGenerating,
@@ -185,21 +183,6 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
           >
             <Settings className="mr-2 size-4" />
             Debug
-          </Button>
-        )}
-        {isLoading && (
-          <span className="text-muted-foreground ml-auto text-xs">
-            Updating...
-          </span>
-        )}
-        {mode === "select-facts" && !showFactSelectionPrompt && (
-          <Button
-            size="sm"
-            onClick={handleSubmitFacts}
-            className="ml-auto"
-            disabled={selectedFacts.length === 0 || isLoading}
-          >
-            Submit Selected Facts ({selectedFacts.length})
           </Button>
         )}
       </div>

@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { nanoid } from "nanoid";
 import type { Fact, Narration, AgentSessionResponse } from "@/types";
-import { parseToolResult } from "@/lib/ai-utils";
+import type { StandardApiResponse } from "@/lib/api-response";
 import type { FileUIPart, UIMessage } from "ai";
+import { processPdfUploads } from "@/lib/pdf-upload";
 
 type WorkflowStep = "input" | "selection" | "review";
 
@@ -69,12 +71,12 @@ interface AgentCreateState {
   loadSession: (sessionId: string) => Promise<void>;
 }
 
-// Helper: Create message with auto-generated ID
+// Helper: Create message with auto-generated unique ID
 const createMessage = (
   role: "user" | "assistant",
   content: string,
 ): UIMessage => ({
-  id: `msg-${Date.now()}`,
+  id: `msg-${nanoid()}`,
   role,
   parts: [{ type: "text", text: content }],
 });
@@ -87,7 +89,7 @@ const extractSessionId = (response: Response): string | null =>
 
 /**
  * Helper to parse tool response from API
- * Handles both tool-result format and direct JSON format
+ * Now handles standardized format from buildStandardResponse
  */
 const parseToolResponse = (
   jsonData: unknown,
@@ -104,90 +106,38 @@ const parseToolResponse = (
   },
 ): boolean => {
   try {
-    const directJson = jsonData as {
-      type?: string;
-      toolName?: string;
-      output?: string;
-      facts?: Fact[];
-      narration?: Narration;
-      message?: string;
-      child_age?: string;
-      child_interest?: string;
-      success?: boolean;
-    };
+    const data = jsonData as StandardApiResponse;
 
-    // Handle tool-result format with output field
-    if (directJson.type === "tool-result" && directJson.output) {
-      const parsedOutput = parseToolResult<{
-        facts?: Fact[];
-        narration?: Narration;
-        message?: string;
-        child_age?: string;
-        child_interest?: string;
-        success?: boolean;
-      }>(directJson.output);
-
-      if (
-        directJson.toolName === "saveStudentInfoTool" &&
-        parsedOutput.success
-      ) {
-        if (parsedOutput.child_age && parsedOutput.child_interest) {
-          state.setChildInfo(
-            parsedOutput.child_age,
-            parsedOutput.child_interest,
-          );
-        }
-        state.addMessage(
-          createMessage(
-            "assistant",
-            parsedOutput.message ?? "Student information saved successfully.",
-          ),
-        );
-        return true;
-      } else if (
-        directJson.toolName === "extractFactsTool" &&
-        parsedOutput.facts
-      ) {
-        state.handleFactExtractionResponse(parsedOutput);
-        return true;
-      }
-    }
-
-    // Handle direct formats
-    if (directJson.facts) {
-      state.handleFactExtractionResponse(directJson);
+    // Handle fact extraction (adds its own message)
+    if (data.facts) {
+      state.handleFactExtractionResponse(data);
       return true;
     }
 
-    if (directJson.narration) {
-      state.setNarration(directJson.narration);
+    // Handle narration
+    if (data.narration) {
+      state.setNarration(data.narration);
       state.setWorkflowStep("review");
       state.setShowNarrationReviewPrompt(true);
-      if (directJson.message) {
-        state.addMessage(createMessage("assistant", directJson.message));
+      if (data.message) {
+        state.addMessage(createMessage("assistant", data.message));
       }
       return true;
     }
 
-    if (
-      directJson.success &&
-      directJson.child_age &&
-      directJson.child_interest
-    ) {
-      state.setChildInfo(directJson.child_age, directJson.child_interest);
-      state.addMessage(
-        createMessage(
-          "assistant",
-          directJson.message ?? "Student information saved successfully.",
-        ),
-      );
+    // Handle student info save
+    if (data.childAge && data.childInterest) {
+      state.setChildInfo(data.childAge, data.childInterest);
+      if (data.message) {
+        state.addMessage(createMessage("assistant", data.message));
+      }
       return true;
     }
-  } catch {
-    // Silently fail and try alternative parsing
-  }
 
-  return false;
+    return data.success === true;
+  } catch {
+    return false;
+  }
 };
 
 export const useAgentCreateStore = create<AgentCreateState>()(
@@ -488,119 +438,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           message.text.trim() ||
           (hasPdf ? "PDF materials uploaded for analysis" : "");
 
-        // Upload PDF FIRST and get S3 URL before creating message
-        const s3FileParts: FileUIPart[] = [];
-
+        // Process PDFs and get S3 URLs
+        let s3FileParts: FileUIPart[] = [];
         if (hasPdf) {
-          for (const filePart of message.files) {
-            if (filePart.mediaType === "application/pdf") {
-              try {
-                const response = await fetch(filePart.url);
-                const blob = await response.blob();
-                const file = new File(
-                  [blob],
-                  filePart.filename ?? "document.pdf",
-                  { type: "application/pdf" },
-                );
-
-                // Extract text immediately
-                const { extractTextFromPDF } = await import("@/lib/extractPDF");
-                const pdfText = await extractTextFromPDF(file);
-
-                // Upload PDF to S3
-                const formData = new FormData();
-                formData.append("pdf", file);
-                const currentSessionId = get().sessionId;
-                if (currentSessionId) {
-                  formData.append("sessionId", currentSessionId);
-                }
-                formData.append("extractedText", pdfText);
-                formData.append("imageCount", "0");
-
-                const uploadResponse = await fetch(
-                  "/api/agent-create/session/upload-pdf",
-                  {
-                    method: "POST",
-                    body: formData,
-                  },
-                );
-
-                if (!uploadResponse.ok) {
-                  console.error(
-                    "Failed to upload PDF:",
-                    await uploadResponse.text(),
-                  );
-                } else {
-                  const uploadData = (await uploadResponse.json()) as {
-                    sessionId: string;
-                    pdfUrl: string;
-                    imageCount: number;
-                  };
-
-                  // Store sessionId if it was just created
-                  if (uploadData.sessionId && !get().sessionId) {
-                    get().setSessionId(uploadData.sessionId);
-                  }
-
-                  // Create FileUIPart with S3 URL (not blob URL)
-                  s3FileParts.push({
-                    type: "file",
-                    mediaType: "application/pdf",
-                    filename: filePart.filename,
-                    url: uploadData.pdfUrl, // S3 URL, accessible by server
-                  });
-
-                  if (process.env.NODE_ENV === "development") {
-                    console.log(`PDF uploaded to S3: ${uploadData.pdfUrl}`);
-                  }
-
-                  // Extract and upload images in background (non-blocking)
-                  void (async () => {
-                    try {
-                      const { extractImagesFromPdf } = await import(
-                        "@/lib/pdf-image-extractor"
-                      );
-                      const extractedImages = await extractImagesFromPdf(file);
-
-                      if (extractedImages.length > 0 && uploadData.sessionId) {
-                        const imageFormData = new FormData();
-                        imageFormData.append("sessionId", uploadData.sessionId);
-                        imageFormData.append(
-                          "imageCount",
-                          extractedImages.length.toString(),
-                        );
-
-                        extractedImages.forEach((img, index) => {
-                          const filename = `page_${img.pageNumber}_img_${img.imageIndex}.png`;
-                          const imageFile = new File([img.blob], filename, {
-                            type: "image/png",
-                          });
-                          imageFormData.append(`image_${index}`, imageFile);
-                        });
-
-                        await fetch("/api/agent-create/session/upload-images", {
-                          method: "POST",
-                          body: imageFormData,
-                        });
-                      }
-                    } catch (error) {
-                      console.error(
-                        "Background image extraction failed:",
-                        error,
-                      );
-                    }
-                  })();
-                }
-              } catch (error) {
-                console.error("Error processing PDF:", error);
-              }
-            }
-          }
+          const result = await processPdfUploads({
+            files: message.files,
+            currentSessionId: get().sessionId,
+            onSessionIdCreated: (sessionId) => {
+              get().setSessionId(sessionId);
+            },
+          });
+          s3FileParts = result.s3FileParts;
         }
 
-        // Create message with S3 URLs (or no files if upload failed)
+        // Create message with S3 URLs
         const newMessage: UIMessage = {
-          id: `msg-${Date.now()}`,
+          id: `msg-${nanoid()}`,
           role: "user",
           parts: [{ type: "text", text: textContent }, ...s3FileParts],
         };
@@ -729,7 +582,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             // If message already has parts, use it as-is (new format)
             if (msg.parts && Array.isArray(msg.parts)) {
               return {
-                id: msg.id ?? `msg-${Date.now()}-${Math.random()}`,
+                id: msg.id ?? `msg-${nanoid()}`,
                 role: (msg.role as "user" | "assistant") ?? "assistant",
                 parts: msg.parts as UIMessage["parts"],
               };
@@ -737,7 +590,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
             // Convert old format (content-based) to new format (parts-based)
             return {
-              id: msg.id ?? `msg-${Date.now()}-${Math.random()}`,
+              id: msg.id ?? `msg-${nanoid()}`,
               role: (msg.role as "user" | "assistant") ?? "assistant",
               parts: [{ type: "text", text: msg.content ?? "" }],
             };
