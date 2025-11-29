@@ -1,6 +1,7 @@
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 import { storageRouter } from "./routers/storage";
 import { scriptRouter } from "./routers/script";
+import { sessionRouter } from "./routers/session";
 import { errorReportsRouter } from "./routers/error-reports";
 import { finalVideosRouter } from "./routers/final-videos";
 
@@ -12,6 +13,7 @@ import { finalVideosRouter } from "./routers/final-videos";
 export const appRouter = createTRPCRouter({
   storage: storageRouter,
   script: scriptRouter,
+  session: sessionRouter,
   errorReports: errorReportsRouter,
   finalVideos: finalVideosRouter,
 });

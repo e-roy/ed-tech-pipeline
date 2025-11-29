@@ -119,11 +119,7 @@ export default function HistoryPage() {
     testWebhookMutation.mutate({});
   };
 
-  const deleteMutation = (
-    api.script as typeof api.script & {
-      delete: typeof api.script.generate;
-    }
-  ).delete.useMutation({
+  const deleteMutation = api.script.delete.useMutation({
     onSuccess: () => {
       toast.success("Session deleted successfully");
       void utils.script.list.invalidate();

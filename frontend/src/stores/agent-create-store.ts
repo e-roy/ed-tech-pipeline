@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
-import type { Fact, Narration, AgentSessionResponse } from "@/types";
+import type { Fact, Narration } from "@/types";
 import type { StandardApiResponse } from "@/lib/api-response";
 import type { FileUIPart, UIMessage } from "ai";
 import { processPdfUploads } from "@/lib/pdf-upload";
+import { getVanillaClient } from "@/trpc/react";
 
 type WorkflowStep = "input" | "selection" | "review";
 
@@ -318,6 +319,13 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       handleSubmitFacts: async () => {
         const state = get();
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient || !state.sessionId) {
+          console.warn("tRPC client or sessionId not available");
+          return;
+        }
+
         state.setIsLoading(true);
         state.setError(null);
         state.setFactsLocked(true);
@@ -339,41 +347,27 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         );
 
         try {
-          // Call dedicated narration endpoint (bypasses orchestrator)
-          // This eliminates sending conversation history, saving 1-3 seconds
-          const response = await fetch("/api/agent-create/session/narration", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              sessionId: state.sessionId,
-              selectedFacts: state.selectedFacts,
-            }),
+          const result = await trpcClient.session.generateNarration.mutate({
+            sessionId: state.sessionId,
+            selectedFacts: state.selectedFacts.map((f) => ({
+              concept: f.concept,
+              details: f.details,
+            })),
           });
-
-          state.updateSessionIdFromResponse(response);
-
-          if (!response.ok) {
-            throw new Error("Failed to generate narration");
-          }
-
-          const jsonData = (await response.json()) as unknown;
 
           // Development-only logging
           if (process.env.NODE_ENV === "development") {
             console.groupCollapsed("📝 Narration Generation Response");
-            console.log("Response Data:", jsonData);
+            console.log("Response Data:", result);
             console.groupEnd();
           }
 
-          // Parse the response
-          if (parseToolResponse(jsonData, state)) {
-            state.setThinkingStatus(null);
-            return;
-          }
-
-          throw new Error("No narration extracted from response");
+          // Update state with narration
+          state.setNarration(result.narration);
+          state.setWorkflowStep("review");
+          state.setShowNarrationReviewPrompt(true);
+          state.addMessage(createMessage("assistant", result.message));
+          state.setThinkingStatus(null);
         } catch (e) {
           console.error("Failed to generate narration", e);
           state.setError(e as Error);
@@ -385,24 +379,21 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       handleVerifyNarration: async () => {
         const state = get();
-        if (!state.sessionId || !state.narration) return;
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient || !state.sessionId || !state.narration) {
+          console.warn("tRPC client, sessionId, or narration not available");
+          return;
+        }
 
         try {
           state.setIsLoading(true);
           state.setError(null);
 
-          const response = await fetch("/api/agent-create/session/narration", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: state.sessionId,
-              narration: state.narration,
-            }),
+          await trpcClient.session.verifyNarration.mutate({
+            sessionId: state.sessionId,
+            narration: state.narration,
           });
-
-          if (!response.ok) {
-            throw new Error("Failed to save narration changes");
-          }
 
           // Lock the narration after successful save
           state.setNarrationLocked(true);
@@ -482,25 +473,18 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       loadSession: async (sessionId) => {
         const state = get();
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient) {
+          console.warn("tRPC client not available (server-side)");
+          return;
+        }
+
         try {
           state.setIsSessionLoading(true);
           state.setError(null);
 
-          const response = await fetch(
-            `/api/agent-create/session?sessionId=${sessionId}`,
-          );
-
-          if (!response.ok) {
-            // If session not found (404), clear the invalid sessionId
-            if (response.status === 404) {
-              console.warn("Session not found, clearing invalid sessionId");
-              state.setSessionId(null);
-              return;
-            }
-            throw new Error(`Failed to load session: ${response.status}`);
-          }
-
-          const data = (await response.json()) as AgentSessionResponse;
+          const data = await trpcClient.session.get.query({ sessionId });
 
           // Development-only client-side logging
           if (process.env.NODE_ENV === "development") {
@@ -518,8 +502,8 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           }
 
           // Restore state from DB
-          const extractedFacts = data.session.extractedFacts ?? [];
-          const confirmedFacts = data.session.confirmedFacts ?? [];
+          const extractedFacts = (data.session.extractedFacts ?? []) as Fact[];
+          const confirmedFacts = (data.session.confirmedFacts ?? []) as Fact[];
           const hasExtractedFacts = extractedFacts.length > 0;
           const hasConfirmedFacts = confirmedFacts.length > 0;
           const hasGeneratedScript = !!data.session.generatedScript;
@@ -527,8 +511,6 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             data.session.status === "narration_verified";
           const isVideoGenerating = data.session.status === "video_generating";
           const isVideoComplete = data.session.status === "video_complete";
-          // isVideoFailed could be used for error handling in the future
-          // const isVideoFailed = data.session.status === "video_failed";
 
           // Ensure all facts have confidence values (normalize for backward compatibility)
           const normalizeFact = (fact: unknown): Fact => {
@@ -571,28 +553,26 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             .filter((f) => f.concept !== "" && f.details !== "");
 
           // Normalize messages to UIMessage format (handles both old and new formats)
-          const normalizeMessage = (m: unknown): UIMessage => {
-            const msg = m as {
-              id?: string;
-              role?: string;
-              content?: string;
-              parts?: unknown[];
-            };
-
+          const normalizeMessage = (m: {
+            id: string;
+            role: string;
+            content: string | null;
+            parts?: unknown;
+          }): UIMessage => {
             // If message already has parts, use it as-is (new format)
-            if (msg.parts && Array.isArray(msg.parts)) {
+            if (m.parts && Array.isArray(m.parts)) {
               return {
-                id: msg.id ?? `msg-${nanoid()}`,
-                role: (msg.role as "user" | "assistant") ?? "assistant",
-                parts: msg.parts as UIMessage["parts"],
+                id: m.id,
+                role: m.role as "user" | "assistant",
+                parts: m.parts as UIMessage["parts"],
               };
             }
 
             // Convert old format (content-based) to new format (parts-based)
             return {
-              id: msg.id ?? `msg-${nanoid()}`,
-              role: (msg.role as "user" | "assistant") ?? "assistant",
-              parts: [{ type: "text", text: msg.content ?? "" }],
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              parts: [{ type: "text", text: m.content ?? "" }],
             };
           };
 
@@ -602,7 +582,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             messages: data.messages.map(normalizeMessage),
             facts: normalizedExtractedFacts,
             selectedFacts: normalizedConfirmedFacts,
-            narration: data.session.generatedScript ?? null,
+            narration: (data.session.generatedScript as Narration) ?? null,
             narrationLocked:
               isNarrationVerified || isVideoGenerating || isVideoComplete,
             isVideoGenerating: isVideoGenerating,
@@ -617,15 +597,20 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 : "input",
             // Set UI prompt flags based on session state
             showFactSelectionPrompt: hasExtractedFacts && !hasConfirmedFacts,
-            showNarrationReviewPrompt:
-              hasGeneratedScript && !isNarrationVerified,
+            showNarrationReviewPrompt: hasGeneratedScript,
           });
         } catch (error) {
           console.error("Failed to load session:", error);
-          // Don't set error state for 404s since we're clearing the session
-          if (error instanceof Error && !error.message.includes("404")) {
-            state.setError(error);
+          // If session not found, clear the invalid sessionId
+          if (
+            error instanceof Error &&
+            error.message.includes("Session not found")
+          ) {
+            console.warn("Session not found, clearing invalid sessionId");
+            state.setSessionId(null);
+            return;
           }
+          state.setError(error as Error);
         } finally {
           state.setIsSessionLoading(false);
         }

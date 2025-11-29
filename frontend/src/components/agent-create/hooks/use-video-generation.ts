@@ -13,7 +13,7 @@ export function useVideoGeneration() {
   const { setIsVideoGenerating } = useAgentCreateStore();
 
   // tRPC mutation for video approval
-  const approveMutation = api.script.approve.useMutation({
+  const approveMutation = api.session.approve.useMutation({
     onSuccess: () => {
       setIsGeneratingVideo(false);
       setVideoSuccess(true);
