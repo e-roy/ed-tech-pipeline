@@ -1,4 +1,5 @@
 import { type Tool } from "ai";
+import type { ToolCallOptions } from "@ai-sdk/provider-utils";
 import z from "zod";
 import { db } from "@/server/db";
 import { videoSessions } from "@/server/db/schema";
@@ -23,21 +24,24 @@ export const saveStudentInfoTool: Tool = {
       .optional()
       .describe("Session ID to save the information to"),
   }),
-  execute: async ({
-    child_age,
-    child_interest,
-    sessionId,
-  }: {
-    child_age: string;
-    child_interest: string;
-    sessionId?: string;
-  }) => {
+  execute: async (
+    {
+      child_age,
+      child_interest,
+      sessionId,
+    }: {
+      child_age: string;
+      child_interest: string;
+      sessionId?: string;
+    },
+    _options: ToolCallOptions,
+  ) => {
     try {
       if (!sessionId) {
-        return JSON.stringify({
+        return {
           success: false,
           message: "Session ID is required to save student information.",
-        });
+        };
       }
 
       // Save to database
@@ -50,18 +54,19 @@ export const saveStudentInfoTool: Tool = {
         })
         .where(eq(videoSessions.id, sessionId));
 
-      return JSON.stringify({
+      // Return object directly (AI SDK will handle serialization)
+      return {
         success: true,
         message: `Perfect! I'll personalize the video for a ${child_age}-year-old who loves ${child_interest}. Now, please share your history lesson material - you can type it in, paste text, or upload a PDF.`,
         child_age,
         child_interest,
-      });
+      };
     } catch (error) {
       console.error("Error saving student info:", error);
-      return JSON.stringify({
+      return {
         success: false,
         message: `Failed to save student information: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
+      };
     }
   },
 };

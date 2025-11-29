@@ -133,10 +133,10 @@ export function DebugView({ sessionId }: DebugViewProps) {
   );
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+    <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
       {/* Left: File tree */}
-      <ResizablePanel defaultSize={30} minSize={10}>
-        <div className="flex h-full flex-col border-r">
+      <ResizablePanel defaultSize={30} minSize={15}>
+        <div className="flex h-full min-h-0 flex-col border-r">
           <div className="border-b p-3">
             <h3 className="font-semibold">Session Files</h3>
             <p className="text-muted-foreground text-xs">
@@ -168,7 +168,7 @@ export function DebugView({ sessionId }: DebugViewProps) {
 
       {/* Right: File content viewer */}
       <ResizablePanel defaultSize={70} minSize={30}>
-        <div className="flex h-full flex-col">
+        <div className="flex h-full min-h-0 flex-col">
           <div className="shrink-0 border-b p-3">
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
@@ -194,40 +194,38 @@ export function DebugView({ sessionId }: DebugViewProps) {
               )}
             </div>
           </div>
-          <ScrollArea className="max-w-[60%] flex-1">
-            <div className="p-4">
-              {!selectedFile ? (
-                <div className="text-muted-foreground text-center">
-                  Select a JSON file to view its content
-                </div>
-              ) : (
-                (() => {
-                  const fileContent = fileContents[selectedFile.key];
-                  if (fileContent?.loading) {
-                    return (
-                      <div className="space-y-2">
-                        {Array.from({ length: 10 }).map((_, i) => (
-                          <Skeleton key={i} className="h-4 w-full" />
-                        ))}
-                      </div>
-                    );
-                  }
-                  if (fileContent?.error) {
-                    return (
-                      <div className="text-destructive">
-                        Error: {fileContent.error}
-                      </div>
-                    );
-                  }
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {!selectedFile ? (
+              <div className="text-muted-foreground text-center">
+                Select a JSON file to view its content
+              </div>
+            ) : (
+              (() => {
+                const fileContent = fileContents[selectedFile.key];
+                if (fileContent?.loading) {
                   return (
-                    <pre className="bg-muted max-w-[80%] overflow-x-auto overflow-y-auto rounded-lg p-4 text-xs whitespace-pre">
-                      {JSON.stringify(selectedFile.content, null, 2)}
-                    </pre>
+                    <div className="space-y-2">
+                      {Array.from({ length: 10 }).map((_, i) => (
+                        <Skeleton key={i} className="h-4 w-full" />
+                      ))}
+                    </div>
                   );
-                })()
-              )}
-            </div>
-          </ScrollArea>
+                }
+                if (fileContent?.error) {
+                  return (
+                    <div className="text-destructive">
+                      Error: {fileContent.error}
+                    </div>
+                  );
+                }
+                return (
+                  <pre className="bg-muted rounded-lg p-4 text-xs whitespace-pre">
+                    {JSON.stringify(selectedFile.content, null, 2)}
+                  </pre>
+                );
+              })()
+            )}
+          </div>
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>

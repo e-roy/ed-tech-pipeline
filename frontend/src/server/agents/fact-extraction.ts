@@ -28,44 +28,31 @@ export class FactExtractionAgent {
 
       const content = input.data.content as string | undefined;
       const pdfUrl = input.data.pdfUrl as string | undefined;
+      const websiteUrl = input.data.websiteUrl as string | undefined;
 
-      // Either content or pdfUrl must be provided
-      if ((!content || content.trim().length === 0) && !pdfUrl) {
+      // Either content, pdfUrl, or websiteUrl must be provided
+      if ((!content || content.trim().length === 0) && !pdfUrl && !websiteUrl) {
         throw new Error(
-          "Either content or PDF URL is required for fact extraction",
+          "Either content, PDF URL, or website URL is required for fact extraction",
         );
       }
 
-      // console.log("content   ===>", content);
-      // console.log("pdfUrl    ===>", pdfUrl);
-
       const systemPrompt = this.buildSystemPrompt();
-      const userPrompt = this.buildUserPrompt(content ?? "");
+      const userPrompt = this.buildUserPrompt(content ?? "", websiteUrl);
 
-      // Build message content array
+      // Build message content - AI SDK handles PDF fetching
       const messageContent: Array<
         | { type: "text"; text: string }
-        | { type: "file"; data: string; mediaType: string }
-      > = [
-        {
-          type: "text",
-          text: userPrompt,
-        },
-      ];
+        | { type: "file"; data: URL; mediaType: string }
+      > = [{ type: "text", text: userPrompt }];
 
-      // If PDF URL is provided, fetch and add it
+      // Add PDF URL directly (AI SDK fetches it)
       if (pdfUrl) {
-        try {
-          const pdfDataUrl = await this.fetchPdfAsDataUrl(pdfUrl);
-          messageContent.push({
-            type: "file",
-            data: pdfDataUrl,
-            mediaType: "application/pdf",
-          });
-        } catch (error) {
-          console.error("Error fetching PDF:", error);
-          // Continue with text-only if PDF fetch fails
-        }
+        messageContent.push({
+          type: "file",
+          data: new URL(pdfUrl),
+          mediaType: "application/pdf",
+        });
       }
 
       const result = await generateObject({
@@ -116,25 +103,6 @@ export class FactExtractionAgent {
     }
   }
 
-  private async fetchPdfAsDataUrl(pdfUrl: string): Promise<string> {
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.statusText}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    // Convert to base64
-    const charArray = Array.from(uint8Array, (byte) =>
-      String.fromCharCode(byte),
-    );
-    const binaryString = charArray.join("");
-    const base64Data = btoa(binaryString);
-
-    return `data:application/pdf;base64,${base64Data}`;
-  }
-
   private buildSystemPrompt(): string {
     return `You are an expert educational fact extractor helping teachers create personalized history videos for individual students.
 
@@ -162,11 +130,19 @@ Also provide:
 - message: A friendly message to the teacher explaining what was extracted`;
   }
 
-  private buildUserPrompt(content: string): string {
-    const textPrompt = content?.trim()
-      ? `Extract educational facts from this content:\n\n${content}\n\n`
-      : "";
+  private buildUserPrompt(content: string, websiteUrl?: string): string {
+    let prompt = "";
 
-    return `${textPrompt}Provide a comprehensive analysis with 5-15 key facts, the main topic, and a learning objective.`;
+    if (websiteUrl) {
+      prompt += `Fetch and analyze the educational content from this URL: ${websiteUrl}\n\n`;
+    }
+
+    if (content?.trim()) {
+      prompt += `Extract educational facts from this content:\n\n${content}\n\n`;
+    }
+
+    prompt += "Provide a comprehensive analysis with 5-15 key facts, the main topic, and a learning objective.";
+
+    return prompt;
   }
 }

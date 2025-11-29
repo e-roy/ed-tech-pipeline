@@ -55,9 +55,9 @@ stateDiagram-v2
     end note
 
     note right of ReviewMode
-        Chat input enabled
+        Chat input disabled
         Narration review prompt shown
-        User can edit narration
+        User edits narration via editor
     end note
 ```
 
@@ -114,9 +114,9 @@ sequenceDiagram
     User->>ChatPanel: Click "Submit Facts" in prompt
     ChatPanel->>Store: handleSubmitFacts()
     Store->>Store: setShowFactSelectionPrompt(false)
-    Store->>API: POST /api/agent-create/tools (with selectedFacts)
-    API->>API: Generate narration using AI
-    API-->>Store: Narration generated
+    Store->>API: POST /api/agent-create/session/narration
+    API->>API: Call NarrativeBuilderAgent directly (bypass orchestrator)
+    API-->>Store: JSON response with narration
     Store->>Store: setNarration(), setWorkflowStep("review")
     Store->>Store: setShowNarrationReviewPrompt(true)
     Store-->>ChatPanel: Display assistant message
@@ -124,7 +124,7 @@ sequenceDiagram
 
     %% Step 3: Review Mode
     Note over User,EditorPanel: WORKFLOW STEP: REVIEW
-    ChatPanel->>ChatPanel: Enable input
+    ChatPanel->>ChatPanel: Disable input (review mode)
     ChatPanel->>ChatPanel: Show NarrationReviewPrompt
     EditorPanel->>EditorPanel: Show NarrationEditor
     User->>EditorPanel: Review/edit narration (optional)
@@ -215,8 +215,8 @@ setShowNarrationReviewPrompt(true);
 
 **UI State**:
 
-- Chat input: **Enabled**
-- Placeholder: "Tell me about your student, or share lesson materials..."
+- Chat input: **Disabled**
+- Placeholder: "Review complete. Use the editor to make changes..."
 - Document Editor: Displays `NarrationEditor` with editable script
 - Prompts: `NarrationReviewPrompt` shown in chat
 

@@ -13,7 +13,7 @@ export function useVideoGeneration() {
   const { setIsVideoGenerating } = useAgentCreateStore();
 
   // tRPC mutation for video approval
-  const approveMutation = api.script.approve.useMutation({
+  const approveMutation = api.session.approve.useMutation({
     onSuccess: () => {
       setIsGeneratingVideo(false);
       setVideoSuccess(true);
@@ -22,10 +22,14 @@ export function useVideoGeneration() {
 
       // Add success message to chat
       const successMessage = {
+        id: `msg-${Date.now()}`,
         role: "assistant" as const,
-        content:
-          "🎉 Video generation started! Your video is being created and will be ready soon. You can check the status in your dashboard.",
-        id: Date.now().toString(),
+        parts: [
+          {
+            type: "text" as const,
+            text: "🎉 Video generation started! Your video is being created and will be ready soon. You can check the status in your dashboard.",
+          },
+        ],
       };
       const store = useAgentCreateStore.getState();
       store.addMessage(successMessage);
@@ -37,9 +41,14 @@ export function useVideoGeneration() {
 
       // Add error message to chat
       const errorMessage = {
+        id: `msg-${Date.now()}`,
         role: "assistant" as const,
-        content: `❌ Failed to start video generation: ${error.message}. Please try again.`,
-        id: Date.now().toString(),
+        parts: [
+          {
+            type: "text" as const,
+            text: `❌ Failed to start video generation: ${error.message}. Please try again.`,
+          },
+        ],
       };
       const store = useAgentCreateStore.getState();
       store.addMessage(errorMessage);
@@ -67,9 +76,14 @@ export function useVideoGeneration() {
 
     // Add user message confirming video generation
     const confirmMessage = {
+      id: `msg-${Date.now()}`,
       role: "user" as const,
-      content: "Start generating the video",
-      id: Date.now().toString(),
+      parts: [
+        {
+          type: "text" as const,
+          text: "Start generating the video",
+        },
+      ],
     };
     const store = useAgentCreateStore.getState();
     store.addMessage(confirmMessage);
@@ -102,4 +116,3 @@ export function useVideoGeneration() {
     handleSubmitVideo,
   };
 }
-

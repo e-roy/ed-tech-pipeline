@@ -38,10 +38,8 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
     factsLocked,
     childAge,
     childInterest,
-    showFactSelectionPrompt,
     thinkingStatus,
     toggleFact,
-    handleSubmitFacts,
     sessionId,
     isVideoGenerating,
     setIsVideoGenerating,
@@ -187,48 +185,39 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
             Debug
           </Button>
         )}
-        {isLoading && (
-          <span className="text-muted-foreground ml-auto text-xs">
-            Updating...
-          </span>
-        )}
-        {mode === "select-facts" && !showFactSelectionPrompt && (
-          <Button
-            size="sm"
-            onClick={handleSubmitFacts}
-            className="ml-auto"
-            disabled={selectedFacts.length === 0 || isLoading}
-          >
-            Submit Selected Facts ({selectedFacts.length})
-          </Button>
-        )}
       </div>
-      <ScrollArea className="max-h-[calc(100vh-60px)] flex-1">
-        <div className="h-full p-4">
-          {hasStudentInfo && viewMode !== "debug" && (
-            <div className="bg-muted/50 mb-4 rounded-lg border p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <User className="text-muted-foreground size-4" />
-                <h3 className="text-sm font-semibold">Student Information</h3>
+      {/* Debug view needs its own layout (not inside ScrollArea) */}
+      {viewMode === "debug" && sessionId ? (
+        <div className="min-h-0 flex-1">
+          <DebugView sessionId={sessionId} />
+        </div>
+      ) : (
+        <ScrollArea className="max-h-[calc(100vh-60px)] flex-1">
+          <div className="h-full p-4">
+            {hasStudentInfo && (
+              <div className="bg-muted/50 mb-4 rounded-lg border p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <User className="text-muted-foreground size-4" />
+                  <h3 className="text-sm font-semibold">Student Information</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {childAge && (
+                    <Badge variant="secondary" className="text-xs">
+                      Age: {childAge}
+                    </Badge>
+                  )}
+                  {childInterest && (
+                    <Badge variant="secondary" className="text-xs">
+                      Interest: {childInterest}
+                    </Badge>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {childAge && (
-                  <Badge variant="secondary" className="text-xs">
-                    Age: {childAge}
-                  </Badge>
-                )}
-                {childInterest && (
-                  <Badge variant="secondary" className="text-xs">
-                    Interest: {childInterest}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          )}
+            )}
 
           {/* Loading state: Show skeleton cards while extracting facts */}
           {isExtractingFacts && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={index}
@@ -255,7 +244,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
               provide student age and interests for personalization.
             </div>
           ) : !isExtractingFacts && mode === "select-facts" ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
               {(factsLocked ? selectedFacts : facts).map((fact, index) => {
                 const isSelected = selectedFacts.some(
                   (f) => f.concept === fact.concept,
@@ -307,8 +296,6 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
               />
             ) : viewMode === "script" ? (
               narration && <NarrationEditor />
-            ) : viewMode === "debug" ? (
-              sessionId && <DebugView sessionId={sessionId} />
             ) : (
               <VideoView
                 videoUrl={finalVideo?.presigned_url}
@@ -319,8 +306,9 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
           ) : (
             !isExtractingFacts && narration && <NarrationEditor />
           )}
-        </div>
-      </ScrollArea>
+          </div>
+        </ScrollArea>
+      )}
     </div>
   );
 }

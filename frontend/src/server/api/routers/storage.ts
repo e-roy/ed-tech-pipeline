@@ -19,6 +19,7 @@ import {
 } from "@/server/services/storage";
 import { db } from "@/server/db";
 import { webhookLogs } from "@/server/db/schema";
+import { UserRole } from "@/types";
 
 export const storageRouter = createTRPCRouter({
   /**
@@ -179,7 +180,7 @@ export const storageRouter = createTRPCRouter({
       }
 
       // Admin-only endpoint
-      if (ctx.session.user.role !== "admin") {
+      if (ctx.session.user.role !== UserRole.ADMIN) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Admin access required",
@@ -187,7 +188,7 @@ export const storageRouter = createTRPCRouter({
       }
 
       try {
-        const prefix = input.subfolder || "";
+        const prefix = input.subfolder ?? "";
         const result = await listDirectoryStructure(
           ctx.session.user.id,
           `${input.sessionId}/${prefix}`,

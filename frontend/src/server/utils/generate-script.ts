@@ -15,12 +15,12 @@ export async function generateScript(
 ) {
   const agent = new NarrativeBuilderAgent();
   const result = await agent.process({
-    sessionId: "temp",
     data: {
       topic,
       facts,
       target_duration: targetDuration,
     },
+    metadata: { sessionId: "temp" },
   });
 
   if (!result.success) {

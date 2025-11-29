@@ -1,17 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Fact, Narration, AgentSessionResponse } from "@/types";
-import { parseToolResult } from "@/lib/ai-utils";
-import type { FileUIPart } from "ai";
+import { nanoid } from "nanoid";
+import type { Fact, Narration } from "@/types";
+import type { StandardApiResponse } from "@/lib/api-response";
+import type { FileUIPart, UIMessage } from "ai";
+import { processPdfUploads } from "@/lib/pdf-upload";
+import { getVanillaClient } from "@/trpc/react";
 
 type WorkflowStep = "input" | "selection" | "review";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-  id?: string;
-  files?: FileUIPart[];
-};
 
 type ThinkingStatus = {
   operation: "extracting" | "narrating";
@@ -20,7 +16,7 @@ type ThinkingStatus = {
 
 interface AgentCreateState {
   // State
-  messages: Message[];
+  messages: UIMessage[];
   isLoading: boolean;
   isSessionLoading: boolean;
   error: Error | null;
@@ -40,8 +36,8 @@ interface AgentCreateState {
   isVideoGenerating: boolean;
 
   // Actions
-  addMessage: (message: Message) => void;
-  setMessages: (messages: Message[]) => void;
+  addMessage: (message: UIMessage) => void;
+  setMessages: (messages: UIMessage[]) => void;
   setIsLoading: (loading: boolean) => void;
   setIsSessionLoading: (loading: boolean) => void;
   setError: (error: Error | null) => void;
@@ -58,9 +54,6 @@ interface AgentCreateState {
   setShowFactSelectionPrompt: (show: boolean) => void;
   setShowNarrationReviewPrompt: (show: boolean) => void;
   setIsVideoGenerating: (generating: boolean) => void;
-  selectAllFacts: () => void;
-  selectHighConfidenceFacts: (threshold: number) => void;
-  clearSelectedFacts: () => void;
   reset: () => void;
 
   // Complex actions
@@ -69,7 +62,7 @@ interface AgentCreateState {
     facts?: Fact[];
     message?: string;
   }) => void;
-  extractFacts: (messagesToSend: Message[]) => Promise<void>;
+  extractFacts: (messagesToSend: UIMessage[]) => Promise<void>;
   handleSubmitFacts: () => Promise<void>;
   handleVerifyNarration: () => Promise<void>;
   handleSubmit: (message: {
@@ -79,14 +72,25 @@ interface AgentCreateState {
   loadSession: (sessionId: string) => Promise<void>;
 }
 
-// Helper: Parse JSON response directly (optimized)
-const parseJsonResponse = async (response: Response): Promise<unknown> => {
-  return response.json();
-};
+// Helper: Create message with auto-generated unique ID
+const createMessage = (
+  role: "user" | "assistant",
+  content: string,
+): UIMessage => ({
+  id: `msg-${nanoid()}`,
+  role,
+  parts: [{ type: "text", text: content }],
+});
+
+// Helper: Extract session ID from response headers
+const extractSessionId = (response: Response): string | null =>
+  response.headers.get("x-session-id") ??
+  response.headers.get("X-Session-Id") ??
+  null;
 
 /**
  * Helper to parse tool response from API
- * Handles both tool-result format and direct JSON format
+ * Now handles standardized format from buildStandardResponse
  */
 const parseToolResponse = (
   jsonData: unknown,
@@ -97,114 +101,44 @@ const parseToolResponse = (
     }) => void;
     setNarration: (narration: Narration | null) => void;
     setWorkflowStep: (step: WorkflowStep) => void;
-    addMessage: (message: Message) => void;
+    addMessage: (message: UIMessage) => void;
     setChildInfo: (age: string, interest: string) => void;
     setShowNarrationReviewPrompt: (show: boolean) => void;
   },
 ): boolean => {
   try {
-    const directJson = jsonData as {
-      type?: string;
-      toolName?: string;
-      output?: string;
-      facts?: Fact[];
-      narration?: Narration;
-      message?: string;
-      child_age?: string;
-      child_interest?: string;
-      success?: boolean;
-    };
+    const data = jsonData as StandardApiResponse;
 
-    // Handle tool-result format with output field
-    if (directJson.type === "tool-result" && directJson.output) {
-      const parsedOutput = parseToolResult<{
-        facts?: Fact[];
-        narration?: Narration;
-        message?: string;
-        child_age?: string;
-        child_interest?: string;
-        success?: boolean;
-      }>(directJson.output);
-
-      if (
-        directJson.toolName === "saveStudentInfoTool" &&
-        parsedOutput.success
-      ) {
-        if (parsedOutput.child_age && parsedOutput.child_interest) {
-          state.setChildInfo(
-            parsedOutput.child_age,
-            parsedOutput.child_interest,
-          );
-        }
-        state.addMessage({
-          role: "assistant",
-          content:
-            parsedOutput.message ?? "Student information saved successfully.",
-          id: Date.now().toString(),
-        });
-        return true;
-      } else if (
-        directJson.toolName === "extractFactsTool" &&
-        parsedOutput.facts
-      ) {
-        state.handleFactExtractionResponse(parsedOutput);
-        return true;
-      } else if (
-        directJson.toolName === "generateNarrationTool" &&
-        parsedOutput.narration
-      ) {
-        state.setNarration(parsedOutput.narration);
-        state.setWorkflowStep("review");
-        state.setShowNarrationReviewPrompt(true);
-        state.addMessage({
-          role: "assistant",
-          content:
-            parsedOutput.message ??
-            "I've created the narration. Please review it.",
-          id: Date.now().toString(),
-        });
-        return true;
-      }
-    }
-
-    // Handle direct formats
-    if (directJson.facts) {
-      state.handleFactExtractionResponse(directJson);
+    // Handle fact extraction (adds its own message)
+    if (data.facts) {
+      state.handleFactExtractionResponse(data);
       return true;
     }
 
-    if (directJson.narration) {
-      state.setNarration(directJson.narration);
+    // Handle narration
+    if (data.narration) {
+      state.setNarration(data.narration);
       state.setWorkflowStep("review");
       state.setShowNarrationReviewPrompt(true);
-      state.addMessage({
-        role: "assistant",
-        content:
-          directJson.message ?? "I've created the narration. Please review it.",
-        id: Date.now().toString(),
-      });
+      if (data.message) {
+        state.addMessage(createMessage("assistant", data.message));
+      }
       return true;
     }
 
-    if (
-      directJson.success &&
-      directJson.child_age &&
-      directJson.child_interest
-    ) {
-      state.setChildInfo(directJson.child_age, directJson.child_interest);
-      state.addMessage({
-        role: "assistant",
-        content:
-          directJson.message ?? "Student information saved successfully.",
-        id: Date.now().toString(),
-      });
+    // Handle student info save
+    if (data.childAge && data.childInterest) {
+      state.setChildInfo(data.childAge, data.childInterest);
+      if (data.message) {
+        state.addMessage(createMessage("assistant", data.message));
+      }
       return true;
     }
+
+    return data.success === true;
   } catch {
-    // Silently fail and try alternative parsing
+    return false;
   }
-
-  return false;
 };
 
 export const useAgentCreateStore = create<AgentCreateState>()(
@@ -266,15 +200,6 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         set({ showNarrationReviewPrompt: show }),
       setIsVideoGenerating: (generating) =>
         set({ isVideoGenerating: generating }),
-      selectAllFacts: () =>
-        set((state) => ({
-          selectedFacts: [...state.facts],
-        })),
-      selectHighConfidenceFacts: (threshold) =>
-        set((state) => ({
-          selectedFacts: state.facts.filter((f) => f.confidence >= threshold),
-        })),
-      clearSelectedFacts: () => set({ selectedFacts: [] }),
       reset: () =>
         set({
           messages: [],
@@ -299,10 +224,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       // Complex actions
       updateSessionIdFromResponse: (response) => {
-        const responseSessionId =
-          response.headers.get("x-session-id") ??
-          response.headers.get("X-Session-Id");
-
+        const responseSessionId = extractSessionId(response);
         const currentSessionId = get().sessionId;
         if (responseSessionId && responseSessionId !== currentSessionId) {
           get().setSessionId(responseSessionId);
@@ -316,22 +238,22 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             workflowStep: "selection",
             showFactSelectionPrompt: true,
           });
-          get().addMessage({
-            role: "assistant",
-            content:
+          get().addMessage(
+            createMessage(
+              "assistant",
               json.message ??
-              "I've extracted these facts. Please select the ones you want to keep.",
-            id: Date.now().toString(),
-          });
+                "I've extracted these facts. Please select the ones you want to keep.",
+            ),
+          );
         } else if (json.facts?.length === 0) {
           // No facts found, stay in input mode
-          get().addMessage({
-            role: "assistant",
-            content:
+          get().addMessage(
+            createMessage(
+              "assistant",
               json.message ??
-              "I couldn't find any facts in the provided content. Please try providing more detailed educational content or a different source.",
-            id: Date.now().toString(),
-          });
+                "I couldn't find any facts in the provided content. Please try providing more detailed educational content or a different source.",
+            ),
+          );
         }
       },
 
@@ -349,27 +271,14 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             ],
           });
 
-          // Convert messages to include files as parts for proper storage
-          const apiMessages = messagesToSend.map((msg) => {
-            if (!msg.files || msg.files.length === 0) {
-              return { role: msg.role, content: msg.content };
-            }
-
-            // Include parts for messages with file attachments
-            return {
-              role: msg.role,
-              content: msg.content,
-              parts: msg.files,
-            };
-          });
-
-          const response = await fetch("/api/agent-create/tools", {
+          // UIMessage already has the right structure with parts
+          const response = await fetch("/api/agent-create", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              messages: apiMessages,
+              messages: messagesToSend,
               sessionId: state.sessionId,
             }),
           });
@@ -380,7 +289,7 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             throw new Error("Failed to fetch response");
           }
 
-          const jsonData = await parseJsonResponse(response);
+          const jsonData = (await response.json()) as unknown;
 
           // Development-only logging
           if (process.env.NODE_ENV === "development") {
@@ -410,6 +319,13 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       handleSubmitFacts: async () => {
         const state = get();
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient || !state.sessionId) {
+          console.warn("tRPC client or sessionId not available");
+          return;
+        }
+
         state.setIsLoading(true);
         state.setError(null);
         state.setFactsLocked(true);
@@ -423,67 +339,35 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           ],
         });
 
-        const confirmationMessage: Message = {
-          role: "user",
-          content: `I've selected these facts. Please create a narration based on them.`,
-        };
-
-        const messagesWithConfirmation = [
-          ...state.messages,
-          confirmationMessage,
-        ];
-
-        state.addMessage(confirmationMessage);
+        state.addMessage(
+          createMessage(
+            "user",
+            `I've selected these facts. Please create a narration based on them.`,
+          ),
+        );
 
         try {
-          // Convert messages to include files as parts for proper storage
-          const apiMessages = messagesWithConfirmation.map((msg) => {
-            if (!msg.files || msg.files.length === 0) {
-              return { role: msg.role, content: msg.content };
-            }
-
-            // Include parts for messages with file attachments
-            return {
-              role: msg.role,
-              content: msg.content,
-              parts: msg.files,
-            };
+          const result = await trpcClient.session.generateNarration.mutate({
+            sessionId: state.sessionId,
+            selectedFacts: state.selectedFacts.map((f) => ({
+              concept: f.concept,
+              details: f.details,
+            })),
           });
-
-          const response = await fetch("/api/agent-create/tools", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messages: apiMessages,
-              selectedFacts: state.selectedFacts,
-              sessionId: state.sessionId,
-            }),
-          });
-
-          state.updateSessionIdFromResponse(response);
-
-          if (!response.ok) {
-            throw new Error("Failed to generate narration");
-          }
-
-          const jsonData = await parseJsonResponse(response);
 
           // Development-only logging
           if (process.env.NODE_ENV === "development") {
             console.groupCollapsed("📝 Narration Generation Response");
-            console.log("Response Data:", jsonData);
+            console.log("Response Data:", result);
             console.groupEnd();
           }
 
-          // Parse the response
-          if (parseToolResponse(jsonData, state)) {
-            state.setThinkingStatus(null);
-            return;
-          }
-
-          throw new Error("No narration extracted from response");
+          // Update state with narration
+          state.setNarration(result.narration);
+          state.setWorkflowStep("review");
+          state.setShowNarrationReviewPrompt(true);
+          state.addMessage(createMessage("assistant", result.message));
+          state.setThinkingStatus(null);
         } catch (e) {
           console.error("Failed to generate narration", e);
           state.setError(e as Error);
@@ -495,35 +379,32 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       handleVerifyNarration: async () => {
         const state = get();
-        if (!state.sessionId || !state.narration) return;
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient || !state.sessionId || !state.narration) {
+          console.warn("tRPC client, sessionId, or narration not available");
+          return;
+        }
 
         try {
           state.setIsLoading(true);
           state.setError(null);
 
-          const response = await fetch("/api/agent-create/session/narration", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: state.sessionId,
-              narration: state.narration,
-            }),
+          await trpcClient.session.verifyNarration.mutate({
+            sessionId: state.sessionId,
+            narration: state.narration,
           });
-
-          if (!response.ok) {
-            throw new Error("Failed to save narration changes");
-          }
 
           // Lock the narration after successful save
           state.setNarrationLocked(true);
 
           // Add confirmation message
-          state.addMessage({
-            role: "assistant",
-            content:
+          state.addMessage(
+            createMessage(
+              "assistant",
               "Narration verified and saved! You can now proceed to create the video.",
-            id: Date.now().toString(),
-          });
+            ),
+          );
         } catch (error) {
           console.error("Failed to verify narration:", error);
           state.setError(error as Error);
@@ -536,173 +417,40 @@ export const useAgentCreateStore = create<AgentCreateState>()(
         if (!message.text.trim() && message.files.length === 0) return;
 
         const state = get();
+        state.setIsLoading(true);
+        state.setError(null);
 
         // Check if PDF is present
         const hasPdf = message.files.some(
           (f) => f.mediaType === "application/pdf",
         );
 
-        // Create clean message WITHOUT embedded PDF text
-        const fileAttachments = message.files.filter(
-          (file) => file.mediaType === "application/pdf",
-        );
+        const textContent =
+          message.text.trim() ||
+          (hasPdf ? "PDF materials uploaded for analysis" : "");
 
-        const newMessage: Message = {
+        // Process PDFs and get S3 URLs
+        let s3FileParts: FileUIPart[] = [];
+        if (hasPdf) {
+          const result = await processPdfUploads({
+            files: message.files,
+            currentSessionId: get().sessionId,
+            onSessionIdCreated: (sessionId) => {
+              get().setSessionId(sessionId);
+            },
+          });
+          s3FileParts = result.s3FileParts;
+        }
+
+        // Create message with S3 URLs
+        const newMessage: UIMessage = {
+          id: `msg-${nanoid()}`,
           role: "user",
-          content:
-            message.text.trim() ||
-            (hasPdf ? "PDF materials uploaded for analysis" : ""),
-          id: Date.now().toString(),
-          files: fileAttachments.length > 0 ? fileAttachments : undefined,
+          parts: [{ type: "text", text: textContent }, ...s3FileParts],
         };
 
         const newMessages = [...state.messages, newMessage];
         state.setMessages(newMessages);
-        state.setIsLoading(true);
-        state.setError(null);
-
-        // Process PDF BEFORE sending to AI (upload must complete first)
-        if (hasPdf) {
-          // Let React update UI first by yielding control
-          await new Promise((resolve) => setTimeout(resolve, 0));
-
-          for (const filePart of message.files) {
-            if (filePart.mediaType === "application/pdf") {
-              try {
-                const response = await fetch(filePart.url);
-                const blob = await response.blob();
-                const file = new File(
-                  [blob],
-                  filePart.filename ?? "document.pdf",
-                  { type: "application/pdf" },
-                );
-
-                // Extract text immediately (fast - doesn't block UI)
-                const { extractTextFromPDF } = await import("@/lib/extractPDF");
-                const pdfText = await extractTextFromPDF(file);
-
-                // Upload PDF with text first (fast path - don't wait for images)
-                const formData = new FormData();
-                formData.append("pdf", file);
-                const currentSessionId = get().sessionId;
-                if (currentSessionId) {
-                  formData.append("sessionId", currentSessionId);
-                }
-                formData.append("extractedText", pdfText);
-                formData.append("imageCount", "0"); // Will upload images separately
-
-                const uploadResponse = await fetch(
-                  "/api/agent-create/session/upload-pdf",
-                  {
-                    method: "POST",
-                    body: formData,
-                  },
-                );
-
-                if (!uploadResponse.ok) {
-                  const errorText = await uploadResponse.text();
-                  console.error("Failed to upload PDF:", errorText);
-                  // Don't stop - continue to extractFacts even if upload fails
-                } else {
-                  const uploadData = (await uploadResponse.json()) as {
-                    sessionId: string;
-                    pdfUrl: string;
-                    imageCount: number;
-                  };
-
-                  // Store sessionId if it was just created
-                  if (uploadData.sessionId && !get().sessionId) {
-                    get().setSessionId(uploadData.sessionId);
-                  }
-
-                  if (process.env.NODE_ENV === "development") {
-                    console.log(`PDF uploaded: ${uploadData.pdfUrl}`);
-                  }
-
-                  // Extract and upload images in background (non-blocking)
-                  void (async () => {
-                    try {
-                      if (process.env.NODE_ENV === "development") {
-                        console.log("Background: Starting image extraction...");
-                      }
-
-                      const { extractImagesFromPdf } = await import(
-                        "@/lib/pdf-image-extractor"
-                      );
-                      const extractedImages = await extractImagesFromPdf(file);
-
-                      if (process.env.NODE_ENV === "development") {
-                        console.log(
-                          `Background: Extracted ${extractedImages.length} images`,
-                        );
-                      }
-
-                      if (extractedImages.length > 0 && uploadData.sessionId) {
-                        if (process.env.NODE_ENV === "development") {
-                          console.log(
-                            "Background: Uploading images to server...",
-                          );
-                        }
-
-                        // Upload images separately
-                        const imageFormData = new FormData();
-                        imageFormData.append("sessionId", uploadData.sessionId);
-                        imageFormData.append(
-                          "imageCount",
-                          extractedImages.length.toString(),
-                        );
-
-                        extractedImages.forEach((img, index) => {
-                          const filename = `page_${img.pageNumber}_img_${img.imageIndex}.png`;
-                          const imageFile = new File([img.blob], filename, {
-                            type: "image/png",
-                          });
-                          imageFormData.append(`image_${index}`, imageFile);
-                        });
-
-                        const imageUploadResponse = await fetch(
-                          "/api/agent-create/session/upload-images",
-                          {
-                            method: "POST",
-                            body: imageFormData,
-                          },
-                        );
-
-                        if (imageUploadResponse.ok) {
-                          if (process.env.NODE_ENV === "development") {
-                            console.log(
-                              `Background: Uploaded ${extractedImages.length} images from PDF`,
-                            );
-                          }
-                        } else {
-                          console.error(
-                            "Background image upload failed:",
-                            await imageUploadResponse.text(),
-                          );
-                        }
-                      } else {
-                        if (process.env.NODE_ENV === "development") {
-                          console.log(
-                            `Background: Skipping image upload - images: ${extractedImages.length}, sessionId: ${uploadData.sessionId ? "present" : "missing"}`,
-                          );
-                        }
-                      }
-                    } catch (error) {
-                      console.error(
-                        "Background image extraction failed:",
-                        error,
-                      );
-                      // Silent fail - images are optional
-                    }
-                  })();
-                }
-              } catch (error) {
-                console.error("Error processing PDF:", error);
-                // Don't stop - continue to extractFacts even if PDF processing fails
-              }
-            }
-          }
-        }
 
         try {
           if (state.workflowStep === "input") {
@@ -725,27 +473,18 @@ export const useAgentCreateStore = create<AgentCreateState>()(
 
       loadSession: async (sessionId) => {
         const state = get();
+        const trpcClient = getVanillaClient();
+
+        if (!trpcClient) {
+          console.warn("tRPC client not available (server-side)");
+          return;
+        }
+
         try {
           state.setIsSessionLoading(true);
           state.setError(null);
 
-          const response = await fetch(
-            `/api/agent-create/session?sessionId=${sessionId}`,
-          );
-
-          if (!response.ok) {
-            // If session not found (404), clear the invalid sessionId
-            if (response.status === 404) {
-              console.warn("Session not found, clearing invalid sessionId");
-              state.setSessionId(null);
-              return;
-            }
-            throw new Error(`Failed to load session: ${response.status}`);
-          }
-
-          const data = (await parseJsonResponse(
-            response,
-          )) as AgentSessionResponse;
+          const data = await trpcClient.session.get.query({ sessionId });
 
           // Development-only client-side logging
           if (process.env.NODE_ENV === "development") {
@@ -763,8 +502,8 @@ export const useAgentCreateStore = create<AgentCreateState>()(
           }
 
           // Restore state from DB
-          const extractedFacts = data.session.extractedFacts ?? [];
-          const confirmedFacts = data.session.confirmedFacts ?? [];
+          const extractedFacts = (data.session.extractedFacts ?? []) as Fact[];
+          const confirmedFacts = (data.session.confirmedFacts ?? []) as Fact[];
           const hasExtractedFacts = extractedFacts.length > 0;
           const hasConfirmedFacts = confirmedFacts.length > 0;
           const hasGeneratedScript = !!data.session.generatedScript;
@@ -772,8 +511,6 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             data.session.status === "narration_verified";
           const isVideoGenerating = data.session.status === "video_generating";
           const isVideoComplete = data.session.status === "video_complete";
-          // isVideoFailed could be used for error handling in the future
-          // const isVideoFailed = data.session.status === "video_failed";
 
           // Ensure all facts have confidence values (normalize for backward compatibility)
           const normalizeFact = (fact: unknown): Fact => {
@@ -815,36 +552,37 @@ export const useAgentCreateStore = create<AgentCreateState>()(
             .map(normalizeFact)
             .filter((f) => f.concept !== "" && f.details !== "");
 
+          // Normalize messages to UIMessage format (handles both old and new formats)
+          const normalizeMessage = (m: {
+            id: string;
+            role: string;
+            content: string | null;
+            parts?: unknown;
+          }): UIMessage => {
+            // If message already has parts, use it as-is (new format)
+            if (m.parts && Array.isArray(m.parts)) {
+              return {
+                id: m.id,
+                role: m.role as "user" | "assistant",
+                parts: m.parts as UIMessage["parts"],
+              };
+            }
+
+            // Convert old format (content-based) to new format (parts-based)
+            return {
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              parts: [{ type: "text", text: m.content ?? "" }],
+            };
+          };
+
           set({
             sessionId: data.session.id,
             sessionStatus: data.session.status,
-            messages: data.messages.map((m) => {
-              const message: Message = {
-                role: m.role as "user" | "assistant",
-                content: m.content,
-                id: m.id,
-              };
-
-              // Extract files from parts if present
-              if (m.parts && Array.isArray(m.parts)) {
-                const files = m.parts.filter(
-                  (part: unknown) =>
-                    typeof part === "object" &&
-                    part !== null &&
-                    "type" in part &&
-                    part.type === "file",
-                ) as FileUIPart[];
-
-                if (files.length > 0) {
-                  message.files = files;
-                }
-              }
-
-              return message;
-            }),
+            messages: data.messages.map(normalizeMessage),
             facts: normalizedExtractedFacts,
             selectedFacts: normalizedConfirmedFacts,
-            narration: data.session.generatedScript ?? null,
+            narration: (data.session.generatedScript as Narration) ?? null,
             narrationLocked:
               isNarrationVerified || isVideoGenerating || isVideoComplete,
             isVideoGenerating: isVideoGenerating,
@@ -859,15 +597,20 @@ export const useAgentCreateStore = create<AgentCreateState>()(
                 : "input",
             // Set UI prompt flags based on session state
             showFactSelectionPrompt: hasExtractedFacts && !hasConfirmedFacts,
-            showNarrationReviewPrompt:
-              hasGeneratedScript && !isNarrationVerified,
+            showNarrationReviewPrompt: hasGeneratedScript,
           });
         } catch (error) {
           console.error("Failed to load session:", error);
-          // Don't set error state for 404s since we're clearing the session
-          if (error instanceof Error && !error.message.includes("404")) {
-            state.setError(error);
+          // If session not found, clear the invalid sessionId
+          if (
+            error instanceof Error &&
+            error.message.includes("Session not found")
+          ) {
+            console.warn("Session not found, clearing invalid sessionId");
+            state.setSessionId(null);
+            return;
           }
+          state.setError(error as Error);
         } finally {
           state.setIsSessionLoading(false);
         }

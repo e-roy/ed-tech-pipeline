@@ -48,7 +48,7 @@ Key integration points for a new editing page exist in the routing structure, AP
 #### Layout Hierarchy
 
 - **Root Layout** (`src/app/layout.tsx:19-29`): Wraps with `TRPCReactProvider`
-- **Dashboard Layout** (`src/app/dashboard/layout.tsx:11-23`): Wraps with ThemeProvider, SidebarProvider, ChatProvider, FactExtractionProvider
+- **Dashboard Layout** (`src/app/dashboard/layout.tsx:14-22`): Wraps with ThemeProvider, SidebarProvider
 - **Dashboard Layout Client** (`src/app/dashboard/layout-client.tsx:15-21`): Conditionally renders double-panel layout for `/dashboard/create` and `/dashboard/history/*`
 
 #### Standard Page Pattern
@@ -113,7 +113,7 @@ const response = await fetch(
     headers: {
       "X-User-Email": userEmail,
     },
-  },
+  }
 );
 ```
 
@@ -148,7 +148,7 @@ const presignedUrl = await getSignedUrl(
     Bucket: env.S3_BUCKET_NAME,
     Key: key,
   }),
-  { expiresIn: 3600 }, // 1 hour
+  { expiresIn: 3600 } // 1 hour
 );
 ```
 
@@ -329,7 +329,7 @@ export interface FinalVideo {
 
 ### Frontend - Routing
 
-- `src/app/dashboard/layout.tsx:11-23` - Dashboard layout with providers
+- `src/app/dashboard/layout.tsx:14-22` - Dashboard layout with providers
 - `src/app/dashboard/layout-client.tsx:15-21` - Conditional panel rendering
 - `src/app/dashboard/history/[id]/page.tsx:1-15` - Dynamic route pattern
 

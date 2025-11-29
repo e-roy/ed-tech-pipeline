@@ -2,85 +2,157 @@
 alwaysApply: true
 ---
 
----
-
 ## File Structure
 
 ```
 frontend/
 ├── src/
 │   ├── app/
-│   │   ├── _components/
 │   │   ├── api/
+│   │   │   ├── agent-create/
+│   │   │   │   ├── _tools/
+│   │   │   │   │   ├── extract-facts-tools.ts
+│   │   │   │   │   ├── generate-narration-tool.ts
+│   │   │   │   │   └── save-student-info-tool.ts
+│   │   │   │   ├── route.ts
+│   │   │   │   └── session/
+│   │   │   │       ├── upload-images/
+│   │   │   │       │   └── route.ts
+│   │   │   │       └── upload-pdf/
+│   │   │   │           └── route.ts
 │   │   │   ├── auth/
 │   │   │   │   └── [...nextauth]/
 │   │   │   │       └── route.ts
-│   │   │   ├── chat/
-│   │   │   │   └── route.ts
-│   │   │   └── trpc/
-│   │   │       └── [trpc]/
+│   │   │   ├── trpc/
+│   │   │   │   └── [trpc]/
+│   │   │   │       └── route.ts
+│   │   │   └── webhooks/
+│   │   │       └── video-complete/
 │   │   │           └── route.ts
 │   │   ├── dashboard/
+│   │   │   ├── admin/
+│   │   │   │   └── assets/
+│   │   │   │       └── page.tsx
 │   │   │   ├── assets/
 │   │   │   │   └── page.tsx
 │   │   │   ├── create/
 │   │   │   │   └── page.tsx
-│   │   │   ├── history/
+│   │   │   ├── editing/
 │   │   │   │   └── [id]/
+│   │   │   │       ├── editing-page-client.tsx
+│   │   │   │       ├── layout.tsx
 │   │   │   │       └── page.tsx
+│   │   │   ├── history/
+│   │   │   │   ├── [id]/
+│   │   │   │   │   └── page.tsx
+│   │   │   │   └── page.tsx
 │   │   │   ├── layout-client.tsx
 │   │   │   ├── layout.tsx
 │   │   │   └── page.tsx
+│   │   ├── error.tsx
+│   │   ├── layout.tsx
 │   │   ├── login/
 │   │   │   └── page.tsx
-│   │   ├── layout.tsx
 │   │   ├── not-found.tsx
 │   │   └── page.tsx
 │   ├── components/
+│   │   ├── agent-create/          # Agent creation interface
+│   │   │   ├── agent-create-interface.tsx
+│   │   │   ├── chat/
+│   │   │   │   ├── chat-header.tsx
+│   │   │   │   ├── chat-message-list.tsx
+│   │   │   │   └── chat-welcome.tsx
+│   │   │   ├── dialogs/
+│   │   │   │   └── session-delete-dialog.tsx
+│   │   │   ├── editors/
+│   │   │   │   ├── document-editor.tsx
+│   │   │   │   └── narration-editor.tsx
+│   │   │   ├── hooks/
+│   │   │   │   ├── use-session-management.ts
+│   │   │   │   └── use-video-generation.ts
+│   │   │   ├── loading/
+│   │   │   │   ├── chat-loading-skeleton.tsx
+│   │   │   │   └── editor-loading-skeleton.tsx
+│   │   │   ├── prompts/
+│   │   │   │   ├── fact-selection-prompt.tsx
+│   │   │   │   └── narration-review-prompt.tsx
+│   │   │   └── views/
+│   │   │       ├── debug-view.tsx
+│   │   │       ├── facts-view.tsx
+│   │   │       └── video-view.tsx
 │   │   ├── ai-elements/          # AI SDK components
-│   │   ├── chat/
-│   │   │   ├── chat-context.tsx
-│   │   │   ├── chat-preview.tsx
-│   │   │   ├── chatConstants.ts
-│   │   │   ├── ChatMessage.tsx
-│   │   │   └── useFactExtractionSubmit.ts
 │   │   ├── content/
 │   │   │   ├── ContentActions.tsx
 │   │   │   ├── ContentCard.tsx
 │   │   │   ├── ContentFilters.tsx
 │   │   │   ├── ContentGallery.tsx
+│   │   │   ├── FinalVideoCard.tsx
+│   │   │   ├── FinalVideosGallery.tsx
 │   │   │   └── utils.ts
-│   │   ├── fact-extraction/
-│   │   │   ├── FactExtractionChainOfThought.tsx
-│   │   │   ├── FactExtractionContext.tsx
-│   │   │   └── FactExtractionPanel.tsx
 │   │   ├── generation/
 │   │   │   ├── ImageGrid.tsx
 │   │   │   ├── ProgressIndicator.tsx
+│   │   │   ├── ScriptGenerationChainOfThought.tsx
 │   │   │   └── VideoGrid.tsx
 │   │   ├── landing/
+│   │   │   ├── cta-section.tsx
+│   │   │   ├── features.tsx
+│   │   │   ├── footer.tsx
 │   │   │   ├── header.tsx
-│   │   │   └── hero.tsx
+│   │   │   ├── hero.tsx
+│   │   │   ├── platform-compatibility.tsx
+│   │   │   ├── trust-bar.tsx
+│   │   │   └── video-interface.tsx
 │   │   ├── layout/
 │   │   │   ├── app-sidebar.tsx
 │   │   │   ├── nav-user.tsx
+│   │   │   ├── session-provider-wrapper.tsx
 │   │   │   ├── theme-provider.tsx
+│   │   │   ├── theme-toggle.tsx
 │   │   │   └── user-sidebar.tsx
 │   │   ├── login/
 │   │   │   ├── auth-form.tsx
 │   │   │   ├── google-signin-form.tsx
 │   │   │   └── submit-button.tsx
-│   │   └── ui/                   # shadcn/ui components
+│   │   ├── ui/                   # shadcn/ui components
+│   │   └── video-editor/         # Video editing interface
+│   │       ├── EditorLayout.tsx
+│   │       ├── EditorSidebar.tsx
+│   │       ├── ExportDialog.tsx
+│   │       ├── MediaBin.tsx
+│   │       ├── PreviewPlayer.tsx
+│   │       ├── properties/
+│   │       │   ├── MediaProperties.tsx
+│   │       │   └── TextProperties.tsx
+│   │       ├── PropertiesPanel.tsx
+│   │       ├── remotion/
+│   │       │   ├── Composition.tsx
+│   │       │   └── sequences/
+│   │       │       ├── AudioSequence.tsx
+│   │       │       ├── ImageSequence.tsx
+│   │       │       ├── TextSequence.tsx
+│   │       │       └── VideoSequence.tsx
+│   │       ├── theme.ts
+│   │       ├── timeline/
+│   │       │   ├── Playhead.tsx
+│   │       │   ├── TimelineClip.tsx
+│   │       │   ├── TimeRuler.tsx
+│   │       │   └── Track.tsx
+│   │       ├── Timeline.tsx
+│   │       └── Toolbar.tsx
 │   ├── hooks/
 │   │   ├── use-mobile.ts
+│   │   ├── useKeyboardShortcuts.ts
 │   │   ├── useVideoSession.ts
 │   │   └── useWebSocket.ts
 │   ├── lib/
+│   │   ├── api-response.ts
 │   │   ├── api.ts
-│   │   ├── extractFacts.ts
+│   │   ├── auth-utils.ts
 │   │   ├── extractPDF.ts
-│   │   ├── factParsing.ts
-│   │   ├── fetchURL.ts
+│   │   ├── logger.ts
+│   │   ├── pdf-image-extractor.ts
+│   │   ├── pdf-upload.ts
 │   │   ├── pdfWorker.ts
 │   │   └── utils.ts
 │   ├── server/
@@ -88,9 +160,17 @@ frontend/
 │   │   │   ├── auth.ts
 │   │   │   ├── google-auth.ts
 │   │   │   └── signout.ts
+│   │   ├── agents/
+│   │   │   ├── __tests__/
+│   │   │   ├── fact-extraction.ts
+│   │   │   └── narrative-builder.ts
 │   │   ├── api/
 │   │   │   ├── root.ts
 │   │   │   ├── routers/
+│   │   │   │   ├── error-reports.ts
+│   │   │   │   ├── final-videos.ts
+│   │   │   │   ├── script.ts
+│   │   │   │   ├── session.ts
 │   │   │   │   └── storage.ts
 │   │   │   └── trpc.ts
 │   │   ├── auth/
@@ -99,10 +179,25 @@ frontend/
 │   │   ├── db/
 │   │   │   ├── auth/
 │   │   │   │   └── schema.ts
+│   │   │   ├── error-reports/
+│   │   │   │   └── schema.ts
 │   │   │   ├── index.ts
-│   │   │   └── schema.ts
-│   │   └── services/
-│   │       └── storage.ts
+│   │   │   ├── schema.ts
+│   │   │   ├── video-generation/
+│   │   │   │   └── schema.ts
+│   │   │   └── webhooks/
+│   │   │       └── schema.ts
+│   │   ├── services/
+│   │   │   ├── diagram-selector.ts
+│   │   │   ├── pdf-storage.ts
+│   │   │   └── storage.ts
+│   │   └── utils/
+│   │       ├── generate-script.ts
+│   │       ├── message-utils.ts
+│   │       └── session-utils.ts
+│   ├── stores/
+│   │   ├── agent-create-store.ts
+│   │   └── editorStore.ts
 │   ├── styles/
 │   │   └── globals.css
 │   ├── trpc/
@@ -110,6 +205,7 @@ frontend/
 │   │   ├── react.tsx
 │   │   └── server.ts
 │   ├── types/
+│   │   ├── agent.ts
 │   │   ├── chat.ts
 │   │   ├── index.ts
 │   │   └── storage.ts
@@ -128,7 +224,6 @@ frontend/
 ├── package.json
 ├── postcss.config.js
 ├── prettier.config.js
-├── start-database.sh
 ├── tailwind.config.ts
 ├── tsconfig.json
 └── .env.local.example
@@ -138,9 +233,9 @@ frontend/
 
 ### UI Framework & Core
 
-- **next** (^15.2.3) - Next.js framework
-- **react** (^19.0.0) - React library
-- **react-dom** (^19.0.0) - React DOM renderer
+- **next** (^16.0.3) - Next.js framework
+- **react** (^19.2.0) - React library
+- **react-dom** (^19.2.0) - React DOM renderer
 
 ### Styling
 
@@ -154,7 +249,16 @@ frontend/
 ### UI Components (Radix UI)
 
 - **@radix-ui/react-\*** - Comprehensive set of accessible UI primitives
-  - accordion, alert-dialog, avatar, checkbox, dialog, dropdown-menu, hover-card, label, popover, progress, radio-group, scroll-area, select, separator, slider, switch, tabs, toggle, tooltip, and more
+  - accordion, alert-dialog, aspect-ratio, avatar, checkbox, collapsible, context-menu, dialog, dropdown-menu, hover-card, label, menubar, navigation-menu, popover, progress, radio-group, scroll-area, select, separator, slider, slot, switch, tabs, toggle, toggle-group, tooltip, use-controllable-state, and more
+
+### Material-UI (MUI)
+
+- **@mui/material** (^7.3.5) - Material-UI component library
+- **@mui/icons-material** (^7.3.5) - Material-UI icons
+- **@mui/material-nextjs** (^7.3.5) - Next.js integration for MUI
+- **@emotion/react** (^11.14.0) - CSS-in-JS library (MUI dependency)
+- **@emotion/styled** (^11.14.1) - Styled components for Emotion
+- **@emotion/cache** (^11.14.0) - Emotion cache utilities
 
 ### State Management & Data Fetching
 
@@ -179,8 +283,15 @@ frontend/
 ### AI & ML
 
 - **ai** (^5.0.93) - AI SDK for building AI applications
-- **@ai-sdk/openai** (^2.0.67) - OpenAI SDK integration
+- **@ai-sdk/openai** (^2.0.68) - OpenAI SDK integration
 - **@ai-sdk/react** (^2.0.93) - React hooks for AI SDK
+
+### Video Processing & Editing
+
+- **remotion** (^4.0.377) - Create videos programmatically with React
+- **@remotion/player** (^4.0.377) - Remotion player component
+- **react-moveable** (^0.56.0) - Draggable, resizable, scalable components
+- **@scena/react-guides** (^0.28.2) - Ruler/guide components for editors
 
 ### Storage
 
@@ -192,6 +303,7 @@ frontend/
 - **react-hook-form** (^7.66.0) - Form state management
 - **@hookform/resolvers** (^5.2.2) - Validation resolvers
 - **zod** (^3.24.0) - Schema validation
+- **react-day-picker** (^9.11.1) - Date picker component
 
 ### Utilities & Helpers
 
@@ -199,6 +311,8 @@ frontend/
 - **nanoid** (^5.1.6) - Unique ID generation
 - **superjson** (^2.2.1) - JSON serialization
 - **@t3-oss/env-nextjs** (^0.12.0) - Environment variable validation
+- **lodash** (^4.17.21) - Utility library
+- **server-only** (^0.0.1) - Mark modules as server-only
 
 ### PDF Processing
 
@@ -227,10 +341,12 @@ frontend/
 - **typescript** (^5.8.2) - TypeScript compiler
 - **eslint** (^9.23.0) - Linting
 - **eslint-config-next** (^15.2.3) - Next.js ESLint config
+- **@eslint/eslintrc** (^3.3.1) - ESLint configuration utilities
 - **prettier** (^3.5.3) - Code formatter
 - **prettier-plugin-tailwindcss** (^0.6.11) - Tailwind Prettier plugin
 - **typescript-eslint** (^8.27.0) - TypeScript ESLint rules
 - **eslint-plugin-drizzle** (^0.2.3) - Drizzle ESLint plugin
+- **tw-animate-css** (^1.4.0) - Tailwind animation utilities
 
 ## Global Rules
 

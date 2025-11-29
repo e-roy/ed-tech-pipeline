@@ -72,12 +72,10 @@ export function NarrationReviewPrompt({
 
           {/* Show Verify button if not locked yet */}
           {!narrationLocked && (
-            <Alert className="border-blue-200 bg-blue-50">
+            <Alert>
               <AlertDescription>
                 <div className="flex w-full items-center justify-between">
-                  <span className="text-sm font-medium">
-                    Review your edits
-                  </span>
+                  <span className="text-sm font-medium">Review your edits</span>
                   <Button
                     onClick={onVerifyNarration}
                     size="sm"
@@ -147,4 +145,3 @@ export function NarrationReviewPrompt({
     </Message>
   );
 }
-

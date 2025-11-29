@@ -125,7 +125,6 @@ export const generateNarrationTool: Tool = {
       }));
 
       const result = await agent.process({
-        sessionId: sessionId ?? "",
         data: {
           topic: inferredTopic,
           facts: agentFacts,
@@ -133,6 +132,7 @@ export const generateNarrationTool: Tool = {
           child_age: childAge ?? null,
           child_interest: childInterest ?? null,
         },
+        metadata: sessionId ? { sessionId } : undefined,
       });
 
       if (!result.success) {

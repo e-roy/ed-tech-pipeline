@@ -2,7 +2,12 @@
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink, Film, Calendar } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Download, ExternalLink, Film, Calendar, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { formatBytes } from "./utils";
 import { format } from "date-fns";
@@ -25,7 +30,7 @@ export function FinalVideoCard({
   const router = useRouter();
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden py-0">
       <div className="bg-muted/50 relative aspect-video">
         <video
           src={videoUrl}
@@ -53,40 +58,64 @@ export function FinalVideoCard({
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="default"
-            onClick={() =>
-              router.push(
-                `/dashboard/editing/${sessionId}?videoUrl=${encodeURIComponent(videoUrl)}&autoEdit=true`,
-              )
-            }
-          >
-            <Film className="mr-2 size-4" />
-            Edit
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => window.open(videoUrl, "_blank")}
-          >
-            <ExternalLink className="mr-2 size-4" />
-            View
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const link = document.createElement("a");
-              link.href = videoUrl;
-              link.download = `${topic ?? "video"}.mp4`;
-              link.click();
-            }}
-          >
-            <Download className="mr-2 size-4" />
-            Download
-          </Button>
+        <div className="flex gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="default"
+                onClick={() =>
+                  router.push(
+                    `/dashboard/editing/${sessionId}?videoUrl=${encodeURIComponent(videoUrl)}&autoEdit=true`,
+                  )
+                }
+              >
+                <Film className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Edit video</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => window.open(videoUrl, "_blank")}
+              >
+                <ExternalLink className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View in new tab</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => {
+                  const link = document.createElement("a");
+                  link.href = videoUrl;
+                  link.download = `${topic ?? "video"}.mp4`;
+                  link.click();
+                }}
+              >
+                <Download className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => router.push(`/dashboard/history/${sessionId}`)}
+              >
+                <FileText className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View session</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </Card>
