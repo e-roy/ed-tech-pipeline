@@ -43,7 +43,7 @@ export function FactsView({
               <span>Analyzing PDF images to find relevant diagrams...</span>
             </div>
           ) : diagrams.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
               {diagrams.map((diagram, index) => (
                 <div
                   key={diagram.key}
@@ -80,7 +80,7 @@ export function FactsView({
           </span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
           {facts.map((fact, index) => (
             <div
               key={index}

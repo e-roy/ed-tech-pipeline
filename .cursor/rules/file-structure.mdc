@@ -16,11 +16,6 @@ frontend/
 │   │   │   │   │   └── save-student-info-tool.ts
 │   │   │   │   ├── route.ts
 │   │   │   │   └── session/
-│   │   │   │       ├── narration/
-│   │   │   │       │   └── route.ts
-│   │   │   │       ├── route.ts
-│   │   │   │       ├── select-diagrams/
-│   │   │   │       │   └── route.ts
 │   │   │   │       ├── upload-images/
 │   │   │   │       │   └── route.ts
 │   │   │   │       └── upload-pdf/
@@ -94,9 +89,6 @@ frontend/
 │   │   │   ├── FinalVideoCard.tsx
 │   │   │   ├── FinalVideosGallery.tsx
 │   │   │   └── utils.ts
-│   │   ├── fact-extraction/
-│   │   │   ├── FactExtractionChainOfThought.tsx
-│   │   │   └── FactExtractionContext.tsx
 │   │   ├── generation/
 │   │   │   ├── ImageGrid.tsx
 │   │   │   ├── ProgressIndicator.tsx
@@ -154,15 +146,13 @@ frontend/
 │   │   ├── useVideoSession.ts
 │   │   └── useWebSocket.ts
 │   ├── lib/
-│   │   ├── ai-utils.ts
+│   │   ├── api-response.ts
 │   │   ├── api.ts
 │   │   ├── auth-utils.ts
-│   │   ├── extractFacts.ts
 │   │   ├── extractPDF.ts
-│   │   ├── factParsing.ts
-│   │   ├── fetchURL.ts
 │   │   ├── logger.ts
 │   │   ├── pdf-image-extractor.ts
+│   │   ├── pdf-upload.ts
 │   │   ├── pdfWorker.ts
 │   │   └── utils.ts
 │   ├── server/
@@ -180,6 +170,7 @@ frontend/
 │   │   │   │   ├── error-reports.ts
 │   │   │   │   ├── final-videos.ts
 │   │   │   │   ├── script.ts
+│   │   │   │   ├── session.ts
 │   │   │   │   └── storage.ts
 │   │   │   └── trpc.ts
 │   │   ├── auth/
@@ -201,9 +192,9 @@ frontend/
 │   │   │   ├── pdf-storage.ts
 │   │   │   └── storage.ts
 │   │   └── utils/
+│   │       ├── generate-script.ts
 │   │       ├── message-utils.ts
-│   │       ├── session-utils.ts
-│   │       └── (other utility files)
+│   │       └── session-utils.ts
 │   ├── stores/
 │   │   ├── agent-create-store.ts
 │   │   └── editorStore.ts
