@@ -5,7 +5,6 @@ async function testAgent() {
   const agent = new NarrativeBuilderAgent();
 
   const input: AgentInput = {
-    sessionId: "test-1",
     data: {
       topic: "Photosynthesis",
       facts: [
@@ -39,4 +38,3 @@ async function testAgent() {
 }
 
 testAgent().catch(console.error);
-
