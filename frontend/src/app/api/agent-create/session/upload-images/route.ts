@@ -58,24 +58,22 @@ export async function POST(req: Request) {
     }
 
     // Update session with image URLs (merge with existing data)
-    const existingMaterials = (sessionData.sourceMaterials as {
-      text?: string;
-      pdfUrl?: string;
-      imageUrls?: string[];
-      filename?: string;
-      extractedAt?: string;
-      numPages?: number;
-    }) || {};
+    const existingMaterials =
+      (sessionData.sourceMaterials as {
+        text?: string;
+        pdfUrl?: string;
+        imageUrls?: string[];
+        filename?: string;
+        extractedAt?: string;
+        numPages?: number;
+      }) || {};
 
     await db
       .update(videoSessions)
       .set({
         sourceMaterials: {
           ...existingMaterials,
-          imageUrls: [
-            ...(existingMaterials.imageUrls || []),
-            ...imageUrls,
-          ],
+          imageUrls: [...(existingMaterials.imageUrls ?? []), ...imageUrls],
           numPages: imageCount > 0 ? imageCount : existingMaterials.numPages,
         },
         updatedAt: new Date(),
@@ -102,4 +100,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

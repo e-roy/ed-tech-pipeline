@@ -1,55 +1,83 @@
-# AI Ad Video Generator - Frontend
+# Ed-Tech Content Creation Platform - Frontend
 
-This is the frontend application for the AI Ad Video Generator, built with the [T3 Stack](https://create.t3.gg/). It provides a user interface for generating AI-powered product advertisement videos through an interactive, multi-stage workflow.
+This is the frontend application for the AI-Powered Educational Content Creation Platform, built with the [T3 Stack](https://create.t3.gg/). It provides an interactive, multi-stage workflow for creating engaging educational content with AI assistance.
 
 ## Overview
 
-The frontend enables users to:
+The frontend enables educators to:
 
-- Generate product images from text prompts
-- Select approved images for video generation
-- Generate video clips from selected images
-- Compose final videos with text overlays and audio
-- Track costs and progress in real-time
+- Extract key facts and concepts from documents (text or PDF uploads)
+- Generate age-appropriate educational narratives with AI
+- Create structured scripts with hooks, concept explanations, and conclusions
+- Build and edit educational videos with an advanced timeline editor
+- Manage content assets and track session history
 
 ## Tech Stack
 
 This project uses the following technologies:
 
-- **[Bun](https://bun.sh)** - Fast JavaScript runtime and package manager
-- **[Next.js 15](https://nextjs.org)** - React framework with App Router
-- **[NextAuth.js v5](https://next-auth.js.org)** - Authentication
+- **[Next.js 16](https://nextjs.org)** - React 19 framework with App Router and Turbo
+- **[React 19](https://react.dev)** - UI library with latest features
+- **[NextAuth.js v5](https://next-auth.js.org)** - Authentication (Google OAuth)
 - **[Drizzle ORM](https://orm.drizzle.team)** - Type-safe database ORM
 - **[tRPC](https://trpc.io)** - End-to-end typesafe APIs
-- **[Tailwind CSS](https://tailwindcss.com)** - Styling
+- **[Vercel AI SDK](https://sdk.vercel.ai)** - AI/LLM integration with OpenAI
+- **[Remotion](https://remotion.dev)** - Programmatic video creation and editing
+- **[React Flow](https://reactflow.dev)** - Node-based workflow diagrams
+- **[Zustand](https://zustand-demo.pmnd.rs)** - State management
+- **[Tailwind CSS v4](https://tailwindcss.com)** - Styling
+- **[shadcn/ui](https://ui.shadcn.com)** - UI components (Radix-based)
+- **[Material UI](https://mui.com)** - Additional UI components
+- **[Motion](https://motion.dev)** - Animations (Framer Motion successor)
+- **[PDF.js](https://mozilla.github.io/pdf.js/)** - PDF document parsing
 - **[TypeScript](https://www.typescriptlang.org)** - Type safety
 
 ## Project Structure
 
 ```
-pipeline/
+frontend/
 ├── src/
-│   ├── app/              # Next.js App Router pages
-│   │   ├── api/          # API routes (auth, tRPC)
-│   │   ├── login/        # Login page
-│   │   └── page.tsx      # Home page
-│   ├── server/           # Server-side code
-│   │   ├── api/          # tRPC router
-│   │   ├── auth/         # NextAuth configuration
-│   │   └── db/           # Database schema and client
-│   ├── trpc/             # tRPC client setup
-│   └── styles/           # Global styles
-├── public/               # Static assets
-└── package.json          # Dependencies
+│   ├── app/                    # Next.js App Router pages
+│   │   ├── api/                # API routes (auth, tRPC)
+│   │   ├── dashboard/          # Protected dashboard routes
+│   │   │   ├── admin/          # Admin interface
+│   │   │   ├── assets/         # Asset gallery/management
+│   │   │   ├── create/         # Main creation workflow
+│   │   │   ├── editing/[id]/   # Video editor
+│   │   │   └── history/        # Session history
+│   │   └── login/              # Authentication page
+│   ├── components/             # React components
+│   │   ├── agent-create/       # Creation workflow UI
+│   │   ├── ai-elements/        # AI chat UI components
+│   │   ├── content/            # Content gallery components
+│   │   ├── video-editor/       # Timeline-based video editor
+│   │   └── ui/                 # shadcn/ui components
+│   ├── hooks/                  # Custom React hooks
+│   ├── lib/                    # Utility functions
+│   ├── server/                 # Server-side code
+│   │   ├── agents/             # AI agents (fact extraction, narrative)
+│   │   ├── api/                # tRPC router and procedures
+│   │   ├── auth/               # NextAuth configuration
+│   │   ├── db/                 # Database schema and client
+│   │   └── services/           # Business logic services
+│   ├── stores/                 # Zustand state stores
+│   ├── styles/                 # Global styles
+│   ├── trpc/                   # tRPC client setup
+│   └── types/                  # TypeScript type definitions
+├── public/                     # Static assets
+├── drizzle/                    # Database migrations
+└── package.json                # Dependencies
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (recommended) or Node.js 18+
-- PostgreSQL database (or use Docker)
-- Environment variables configured
+- [Bun](https://bun.sh) - JavaScript runtime and package manager
+- PostgreSQL database (Neon recommended)
+- Google OAuth credentials
+- OpenAI API key
+- AWS S3 bucket for asset storage
 
 ### Installation
 
@@ -61,32 +89,46 @@ bun install
 
 2. **Set up environment variables:**
 
-Create a `.env` file in the root directory:
+Copy `.env.example` to `.env` and configure:
 
 ```env
-# Database
-DATABASE_URL="postgresql://user:password@localhost:5432/pipeline"
+# Authentication
+AUTH_SECRET=your-auth-secret
 
-# NextAuth
-NEXTAUTH_SECRET="your-secret-key-here"
-NEXTAUTH_URL="http://localhost:3000"
+# Google OAuth
+AUTH_GOOGLE_ID=your-google-client-id
+AUTH_GOOGLE_SECRET=your-google-client-secret
 
-# Backend API
-NEXT_PUBLIC_API_URL="http://localhost:8000"
+# Database (Neon PostgreSQL)
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 
-# Optional: Add other environment variables
+# Replicate (for image/video generation)
+REPLICATE_API_KEY=your-replicate-key
+
+# OpenAI
+OPENAI_API_KEY=your-openai-key
+
+# AWS S3
+AWS_ACCESS_KEY_ID=your-aws-access-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+S3_BUCKET_NAME=your-bucket-name
+AWS_REGION=us-east-2
+
+# Backend API URL
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Webhook Secret
+WEBHOOK_SECRET=your-webhook-secret
 ```
 
 3. **Set up the database:**
 
 ```bash
-# Generate migrations
-bun run db:generate
-
 # Push schema to database
 bun run db:push
 
-# Or use migrations
+# Or generate and run migrations
+bun run db:generate
 bun run db:migrate
 ```
 
@@ -100,114 +142,91 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Available Scripts
 
-- `bun dev` - Start development server
-- `bun run build` - Build for production
-- `bun run start` - Start production server
-- `bun run lint` - Run ESLint
-- `bun run typecheck` - Run TypeScript type checking
-- `bun run db:generate` - Generate Drizzle migrations
-- `bun run db:push` - Push schema changes to database
-- `bun run db:migrate` - Run database migrations
-- `bun run db:studio` - Open Drizzle Studio
-
-> **Note:** This project uses Bun as the package manager and runtime. You can use `npm` or `yarn` as alternatives, but Bun is recommended for optimal performance.
-
-## Integration with Backend Orchestrator
-
-This frontend integrates with the AI Video Generation Orchestrator backend service. The orchestrator handles:
-
-- Job creation and management
-- Microservice coordination (Prompt Parser, Image Gen, Video Gen, Composition)
-- Real-time progress updates
-- Cost tracking
-- Error handling
-
-See the [Architecture Documentation](../ARCHITECTURE.md) and [PRD](../prd.md) for more details about the backend system.
+| Command                | Description                         |
+| ---------------------- | ----------------------------------- |
+| `bun dev`              | Start development server with Turbo |
+| `bun run build`        | Build for production                |
+| `bun run start`        | Start production server             |
+| `bun run check`        | Run lint and typecheck              |
+| `bun run lint`         | Run ESLint                          |
+| `bun run lint:fix`     | Run ESLint with auto-fix            |
+| `bun run typecheck`    | Run TypeScript type checking        |
+| `bun run format:check` | Check code formatting               |
+| `bun run format:write` | Format code with Prettier           |
+| `bun run db:generate`  | Generate Drizzle migrations         |
+| `bun run db:push`      | Push schema changes to database     |
+| `bun run db:migrate`   | Run database migrations             |
+| `bun run db:studio`    | Open Drizzle Studio                 |
+| `bun run preview`      | Build and start for preview         |
 
 ## Features
 
+### AI-Powered Content Creation
+
+- **Fact Extraction**: Upload PDFs or paste text to extract key educational concepts using AI
+- **Narrative Building**: Generate structured educational narratives with hooks, explanations, and conclusions
+- **Age-Appropriate Content**: AI considers target audience age and interests for appropriate content
+
+### Video Editor
+
+- **Timeline-Based Editing**: Drag-and-drop timeline with multiple tracks
+- **Media Library**: Manage images, videos, and audio assets
+- **Real-Time Preview**: Preview video compositions with Remotion
+- **Export**: Generate final video compositions
+
+### Content Management
+
+- **Asset Gallery**: Browse and manage all generated assets
+- **Session History**: Track previous creation sessions
+- **Final Videos**: Access completed video compositions
+
 ### Authentication
 
-- NextAuth.js v5 with database sessions
-- Secure session management
-- Protected routes
-- Token exchange pattern for backend integration (see [Authentication Architecture](#authentication-architecture) below)
+- Google OAuth via NextAuth.js v5
+- Database-backed sessions with Drizzle
+- Protected dashboard routes via middleware
 
 ### Database
 
-- Drizzle ORM for type-safe database queries
+- Drizzle ORM for type-safe queries
 - PostgreSQL for data persistence
-- Automatic migrations
+- Schema includes: users, sessions, video assets, conversations, error reports
 
 ### API Layer
 
 - tRPC for end-to-end type safety
-- Server-side API routes
-- Client-side data fetching with React Query
+- React Query for data fetching and caching
+- Server actions for mutations
 
-## Authentication Architecture
+## Workflow Stages
 
-This frontend uses a **token exchange pattern** to bridge NextAuth.js sessions with the backend's JWT-based authentication system. This approach was chosen for several reasons:
+The content creation workflow progresses through these stages:
 
-### Why Token Exchange?
-
-1. **Backend Independence**: The backend doesn't need to know about NextAuth.js or any specific frontend authentication provider. It maintains its own JWT-based authentication system.
-
-2. **Single Source of Truth**: The backend JWT remains the authoritative authentication mechanism for all backend API calls, ensuring consistent security policies.
-
-3. **OAuth2 Standard**: This pattern follows established OAuth2 token exchange patterns, making it familiar to developers and compatible with industry standards.
-
-4. **Extensibility**: Easy to add other authentication providers (Google, GitHub, etc.) without modifying backend code. The backend only needs to validate that a user exists before issuing a token.
-
-5. **Security**: The backend validates that users exist in its database before issuing tokens, preventing unauthorized access.
-
-### Authentication Flow
-
-1. **User Login**: User logs in via NextAuth.js (Google OAuth, Credentials, etc.)
-2. **Session Creation**: NextAuth.js creates a session and stores it in the database
-3. **Token Exchange**: Frontend calls `/api/auth/exchange` with the user's email from the NextAuth session
-4. **Backend Validation**: Backend validates the user exists in its database by email
-5. **JWT Issuance**: Backend returns a JWT token compatible with its authentication system
-6. **Token Caching**: Frontend caches the JWT token to avoid repeated exchanges
-7. **API Calls**: All backend API calls include the JWT token in the `Authorization: Bearer <token>` header
-8. **Backend Validation**: Backend validates the JWT using its existing middleware
-
-### Implementation Details
-
-- **Token Exchange Endpoint**: `POST /api/auth/exchange` (backend)
-- **Token Management**: `frontend/src/lib/auth-token.ts` handles token exchange and caching
-- **Token Caching**: Tokens are cached in memory with expiration (25 minutes, refreshed 5 minutes before expiry)
-- **tRPC Integration**: tRPC procedures automatically fetch and include backend tokens in API requests
-
-### Alternative Approaches Considered
-
-1. **Direct NextAuth Token Forwarding**: Would require backend to understand NextAuth tokens, coupling the systems
-2. **Backend Accepts NextAuth Sessions**: Would require backend changes every time frontend auth changes
-3. **Shared JWT Secret**: Would create tight coupling between frontend and backend authentication systems
-
-The token exchange pattern provides the best balance of security, maintainability, and flexibility.
-
-### Setup Instructions
-
-1. Ensure the backend API is running and accessible at the URL specified in `NEXT_PUBLIC_API_URL`
-2. Users must exist in both the frontend (NextAuth) database and the backend database
-3. The backend `/api/auth/exchange` endpoint must be accessible from the frontend
+1. **CREATED** - Initial session creation
+2. **IMAGE_GENERATION** - Generate visual assets from scripts
+3. **IMAGE_SELECTION** - User approves generated images
+4. **CLIP_GENERATION** - Generate video clips from selected images
+5. **CLIP_SELECTION** - User approves video clips
+6. **FINAL_COMPOSITION** - Compose final video with overlays and audio
+7. **COMPLETE** - Finished content ready for export
 
 ## Learn More
 
-To learn more about the technologies used in this project:
+To learn more about the technologies used:
 
-- [Next.js Documentation](https://nextjs.org)
-- [NextAuth.js Documentation](https://next-auth.js.org)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [NextAuth.js Documentation](https://authjs.dev)
 - [Drizzle ORM Documentation](https://orm.drizzle.team)
-- [tRPC Documentation](https://trpc.io)
-- [Tailwind CSS Documentation](https://tailwindcss.com)
+- [tRPC Documentation](https://trpc.io/docs)
+- [Remotion Documentation](https://www.remotion.dev/docs)
+- [Vercel AI SDK](https://sdk.vercel.ai/docs)
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+- [shadcn/ui Documentation](https://ui.shadcn.com)
 
 ## Project Documentation
 
-- [Product Requirements Document](../Docs/MVP_PRD.md) - Complete PRD for the AI Ad Video Generator
+- [Product Requirements Document](../Docs/MVP_PRD.md) - Complete PRD
 - [Architecture Document](../ARCHITECTURE.md) - System architecture and design decisions
-- [PRD Summary](../prd.md) - High-level product requirements
 
 ## Deployment
 
@@ -216,23 +235,17 @@ To learn more about the technologies used in this project:
 1. Push your code to GitHub
 2. Import your repository in [Vercel](https://vercel.com)
 3. Configure environment variables
-4. Deploy!
+4. Deploy
 
 ### Other Platforms
 
-This Next.js application can be deployed to any platform that supports Node.js or Bun:
+This Next.js application can be deployed to any platform that supports Node.js:
 
-- [Netlify](https://www.netlify.com)
 - [Railway](https://railway.app)
+- [Render](https://render.com)
 - [Docker](https://www.docker.com)
 
-> **Note:** Most platforms support Bun. Check the platform's documentation for Bun-specific configuration if needed.
-
-See the [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
-
-## Contributing
-
-This project is part of the Gauntlet AI Video Generation Challenge. For contribution guidelines, please refer to the main project documentation.
+See the [Next.js deployment documentation](https://nextjs.org/docs/deployment) for details.
 
 ## License
 

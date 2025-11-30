@@ -2,7 +2,7 @@ import { db } from "@/server/db";
 import { webhookLogs, videoSessions } from "@/server/db/schema";
 import { env } from "@/env";
 import { nanoid } from "nanoid";
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 
@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     let payload: unknown;
     try {
       payload = await req.json();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (parseError) {
       const logId = nanoid();
       await db.insert(webhookLogs).values({

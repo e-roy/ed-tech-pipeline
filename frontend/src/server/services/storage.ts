@@ -12,9 +12,6 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "@/env";
-import { db } from "@/server/db";
-import { videoAssets, videoSessions } from "@/server/db/schema";
-import { eq } from "drizzle-orm";
 
 // Initialize S3 client (only if credentials are provided)
 let s3Client: S3Client | null = null;
@@ -99,7 +96,7 @@ export async function listUserFiles(
   limit: number;
   offset: number;
 }> {
-  const { asset_type, limit = 100, offset = 0 } = options;
+  const { limit = 100, offset = 0 } = options;
 
   if (!env.S3_BUCKET_NAME) {
     throw new Error("S3_BUCKET_NAME not configured");

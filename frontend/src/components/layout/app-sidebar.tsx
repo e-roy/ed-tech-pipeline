@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  ChevronRight,
-  FolderOpen,
-  History,
-  Plus,
-  Scissors,
-  Video,
-} from "lucide-react";
+import { ChevronRight, FolderOpen, History, Plus, Video } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import * as React from "react";
