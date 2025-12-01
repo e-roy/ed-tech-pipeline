@@ -22,8 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Drop the scripts table - script data now stored in video_session.generated_script."""
-    op.drop_index(op.f('ix_scripts_id'), table_name='scripts')
-    op.drop_table('scripts')
+    # Use raw SQL with IF EXISTS to handle cases where table/index don't exist
+    op.execute("DROP INDEX IF EXISTS ix_scripts_id")
+    op.execute("DROP TABLE IF EXISTS scripts")
 
 
 def downgrade() -> None:

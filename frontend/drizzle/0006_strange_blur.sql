@@ -1,0 +1,1 @@
+ALTER TABLE "video_session" ADD COLUMN "final_video_url" text;

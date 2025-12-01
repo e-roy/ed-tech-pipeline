@@ -1,16 +1,18 @@
 """
 Session routes - retrieve session data and cost information.
+
+Sessions track media production workflow (video generation, music, assets, costs).
+Content data (scripts, facts) lives in frontend's video_session table.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
 
 from app.database import get_db
-from app.models.database import Session as SessionModel, Asset, GenerationCost, User
-from app.routes.auth import get_current_user
+from app.models.database import Session as SessionModel, Asset, GenerationCost
+from app.routes.auth import get_current_user, CurrentUser
 
 router = APIRouter()
 
@@ -28,9 +30,9 @@ class AssetInfo(BaseModel):
 class SessionResponse(BaseModel):
     id: str
     status: str
-    prompt: Optional[str]
-    video_prompt: Optional[str]
     final_video_url: Optional[str]
+    music_track_id: Optional[str]
+    music_volume: Optional[float]
     created_at: str
     completed_at: Optional[str]
     assets: List[AssetInfo]
@@ -52,7 +54,7 @@ class CostsResponse(BaseModel):
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -60,7 +62,7 @@ async def get_session(
 
     Returns session metadata, status, and all associated assets.
     """
-    # Query session
+    # Query session - user_id is now a string (auth_user.id UUID)
     session = db.query(SessionModel).filter(
         SessionModel.id == session_id,
         SessionModel.user_id == current_user.id
@@ -88,9 +90,9 @@ async def get_session(
     return SessionResponse(
         id=session.id,
         status=session.status,
-        prompt=session.prompt,
-        video_prompt=session.video_prompt,
         final_video_url=session.final_video_url,
+        music_track_id=session.music_track_id,
+        music_volume=session.music_volume,
         created_at=session.created_at.isoformat() if session.created_at else None,
         completed_at=session.completed_at.isoformat() if session.completed_at else None,
         assets=asset_list
@@ -100,7 +102,7 @@ async def get_session(
 @router.get("/{session_id}/costs", response_model=CostsResponse)
 async def get_session_costs(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -147,7 +149,7 @@ async def get_session_costs(
 
 @router.get("/", response_model=List[SessionResponse])
 async def list_sessions(
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
     limit: int = 10,
     offset: int = 0
@@ -182,9 +184,9 @@ async def list_sessions(
         result.append(SessionResponse(
             id=session.id,
             status=session.status,
-            prompt=session.prompt,
-            video_prompt=session.video_prompt,
             final_video_url=session.final_video_url,
+            music_track_id=session.music_track_id,
+            music_volume=session.music_volume,
             created_at=session.created_at.isoformat() if session.created_at else None,
             completed_at=session.completed_at.isoformat() if session.completed_at else None,
             assets=asset_list

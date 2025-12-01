@@ -280,15 +280,11 @@ class VideoGenerationOrchestrator:
                 session = SessionModel(
                     id=session_id,
                     user_id=user_id,
-                    status="generating_images",
-                    prompt=f"Script-based generation from video_session",
-                    options=options
+                    status="generating_images"
                 )
                 db.add(session)
             else:
                 session.status = "generating_images"
-                session.prompt = f"Script-based generation from video_session"
-                session.options = options
             db.commit()
 
             # Build script object for image generator
@@ -518,8 +514,6 @@ class VideoGenerationOrchestrator:
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session:
                 session.status = "generating_clips"
-                session.video_prompt = video_prompt
-                session.clip_config = clip_config
                 db.commit()
 
             # Get approved images from database
@@ -687,8 +681,6 @@ class VideoGenerationOrchestrator:
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session:
                 session.status = "composing"
-                session.text_config = text_config
-                session.audio_config = audio_config
                 db.commit()
 
             # Get approved clips from database
@@ -940,7 +932,6 @@ class VideoGenerationOrchestrator:
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session:
                 session.status = "generating_audio"
-                session.audio_config = audio_config
                 db.commit()
 
             # Build script object for audio pipeline
@@ -1156,14 +1147,11 @@ class VideoGenerationOrchestrator:
                 session = SessionModel(
                     id=session_id,
                     user_id=user_id,
-                    status="finalizing",
-                    prompt=f"Script-based generation from video_session",
-                    options={"image_options": image_options, "audio_config": audio_config}
+                    status="finalizing"
                 )
                 db.add(session)
             else:
                 session.status = "finalizing"
-                session.options = {"image_options": image_options, "audio_config": audio_config}
 
             db.commit()
 
@@ -1360,8 +1348,18 @@ class VideoGenerationOrchestrator:
 
             logger.info(f"[{session_id}] Extension factor: {extension_factor:.2f}x")
 
-            # Get the script to extract narration text for video prompts
-            script = db.query(Script).filter(Script.id == session.prompt.split(": ")[-1]).first() if session and session.prompt else None
+            # Get the script from video_session.generated_script (scripts are now stored there, not in separate table)
+            script_data = None
+            try:
+                from sqlalchemy import text as sql_text
+                result = db.execute(
+                    sql_text("SELECT generated_script FROM video_session WHERE id = :session_id"),
+                    {"session_id": session_id}
+                ).fetchone()
+                if result and result.generated_script:
+                    script_data = result.generated_script if isinstance(result.generated_script, dict) else json.loads(result.generated_script)
+            except Exception as e:
+                logger.warning(f"[{session_id}] Could not fetch script from video_session: {e}")
 
             for part in parts:
                 # Get ALL approved images for this part (not just the first)
@@ -1372,8 +1370,8 @@ class VideoGenerationOrchestrator:
 
                 # Get script text for this part to use in video prompts
                 script_text = None
-                if script:
-                    part_data = getattr(script, part, None)
+                if script_data:
+                    part_data = script_data.get(part, {})
                     if part_data and isinstance(part_data, dict):
                         script_text = part_data.get("text", "")
 

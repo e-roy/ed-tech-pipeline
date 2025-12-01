@@ -8,8 +8,7 @@ from typing import List, Optional
 import json
 
 from app.database import get_db
-from app.models.database import User
-from app.routes.auth import get_current_user
+from app.routes.auth import get_current_user, CurrentUser
 from app.services.storage import StorageService
 
 router = APIRouter()
@@ -83,7 +82,7 @@ class DirectoryStructureResponse(BaseModel):
 @router.post("/upload-input", response_model=UploadInputResponse)
 async def upload_input_file(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -121,7 +120,7 @@ async def upload_input_file(
 @router.post("/upload-prompt-config")
 async def upload_prompt_config(
     request: UploadPromptConfigRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -152,7 +151,7 @@ async def list_user_files(
     asset_type: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -208,7 +207,7 @@ async def list_user_files(
 async def get_presigned_url(
     file_key: str,
     expires_in: int = 3600,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -244,7 +243,7 @@ async def get_presigned_url(
 @router.delete("/files/{file_key:path}")
 async def delete_user_file(
     file_key: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -279,7 +278,7 @@ async def delete_user_file(
 @router.get("/directory", response_model=DirectoryStructureResponse)
 async def list_directory_structure(
     prefix: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """

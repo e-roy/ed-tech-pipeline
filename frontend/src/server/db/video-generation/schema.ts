@@ -12,6 +12,14 @@ import { users } from "../auth/schema";
  */
 export const createVideoTable = pgTableCreator((name) => `video_${name}`);
 
+/**
+ * Video session table - source of truth for content creation.
+ *
+ * Architecture:
+ * - video_session: Source of truth for content (topic, script, facts, learning objectives)
+ * - backend sessions table: Source of truth for media production (video generation, music, assets)
+ * - Both tables share the same session ID (video_session.id = sessions.id)
+ */
 export const videoSessions = createVideoTable("session", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -26,6 +34,8 @@ export const videoSessions = createVideoTable("session", {
   confirmedFacts: jsonb("confirmed_facts"),
   generatedScript: jsonb("generated_script"),
   sourceMaterials: jsonb("source_materials"), // Stores extracted PDF text separately from conversation
+  // Final video URL from backend (populated by webhook when video is complete)
+  finalVideoUrl: text("final_video_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

@@ -2,6 +2,11 @@
 Database models for Gauntlet Pipeline.
 
 Models based on DATABASE_SCHEMA.md specification.
+
+Architecture:
+- Frontend video_session: Source of truth for content (topic, script, facts, learning objectives)
+- Backend sessions: Source of truth for media production (video generation, music, assets, costs)
+- Auth is handled by frontend's auth_user table (UUID string IDs)
 """
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Float, JSON, ARRAY
 from sqlalchemy.orm import relationship
@@ -9,44 +14,33 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 
-class User(Base):
-    """User model for authentication."""
-
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Relationships
-    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f"<User(id={self.id}, email={self.email})>"
+# User model removed - auth is now handled by frontend's auth_user table
+# See migration: c3d4e5f6g7h8_refactor_sessions_use_auth_user.py
 
 
 class Session(Base):
-    """Session model for video generation workflow."""
+    """
+    Session model for video generation workflow (media production).
+
+    This table tracks the media production pipeline:
+    - Video generation status and progress
+    - Music configuration
+    - Final video output and verification
+    - Associated assets and costs
+
+    Content data (scripts, facts, learning objectives) lives in frontend's video_session table.
+    User authentication is handled by frontend's auth_user table.
+    """
 
     __tablename__ = "sessions"
 
     id = Column(String(255), primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)  # References auth_user.id (UUID string)
     status = Column(String(50), nullable=False, default="pending")
     # Possible statuses: pending, generating_images, images_approved,
     # generating_clips, clips_approved, composing, completed, failed
 
-    # Prompts and configuration
-    prompt = Column(Text, nullable=True)
-    video_prompt = Column(Text, nullable=True)
-    options = Column(JSON, nullable=True)  # Image generation options
-    clip_config = Column(JSON, nullable=True)  # Video clip configuration
-    text_config = Column(JSON, nullable=True)  # Text overlay configuration
-    audio_config = Column(JSON, nullable=True)  # Audio configuration
-
-    # Music configuration
+    # Music configuration (needed for media creation)
     music_track_id = Column(String(255), nullable=True)
     music_s3_url = Column(Text, nullable=True)
     music_volume = Column(Float, nullable=True, default=0.15)
@@ -65,7 +59,6 @@ class Session(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    user = relationship("User", back_populates="sessions")
     assets = relationship("Asset", back_populates="session", cascade="all, delete-orphan")
     costs = relationship("GenerationCost", back_populates="session", cascade="all, delete-orphan")
     websocket_connections = relationship("WebSocketConnection", back_populates="session", cascade="all, delete-orphan")

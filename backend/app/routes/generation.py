@@ -12,8 +12,8 @@ import asyncio
 import json
 
 from app.database import get_db
-from app.models.database import Session as SessionModel, Asset, User
-from app.routes.auth import get_current_user
+from app.models.database import Session as SessionModel, Asset
+from app.routes.auth import get_current_user, CurrentUser
 from app.services.orchestrator import VideoGenerationOrchestrator
 from app.services.websocket_manager import WebSocketManager
 from app.services.storage import StorageService
@@ -127,7 +127,7 @@ class BuildNarrativeResponse(BaseModel):
 @router.post("/generate-images", response_model=GenerateImagesResponse)
 async def generate_images(
     request: GenerateImagesRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -182,7 +182,7 @@ async def generate_images(
 @router.post("/save-approved-images")
 async def save_approved_images(
     request: SaveApprovedImagesRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -229,7 +229,7 @@ async def save_approved_images(
 @router.post("/generate-clips", response_model=GenerateClipsResponse)
 async def generate_clips(
     request: GenerateClipsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -279,7 +279,7 @@ async def generate_clips(
 @router.post("/save-approved-clips")
 async def save_approved_clips(
     request: SaveApprovedClipsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -369,7 +369,7 @@ class ComposeVideoResponse(BaseModel):
 @router.post("/generate-audio", response_model=GenerateAudioResponse)
 async def generate_audio(
     request: GenerateAudioRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -423,7 +423,7 @@ async def generate_audio(
 @router.post("/finalize-script", response_model=FinalizeScriptResponse)
 async def finalize_script(
     request: FinalizeScriptRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -488,7 +488,7 @@ async def finalize_script(
 @router.post("/compose-video", response_model=ComposeVideoResponse)
 async def compose_video(
     request: ComposeVideoRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -548,7 +548,7 @@ async def compose_video(
 @router.post("/compose-final-video", response_model=ComposeFinalVideoResponse)
 async def compose_final_video(
     request: ComposeFinalVideoRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -594,7 +594,7 @@ async def compose_final_video(
 @router.post("/build-narrative", response_model=BuildNarrativeResponse)
 async def build_narrative(
     request: BuildNarrativeRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -708,7 +708,7 @@ class SaveTestScriptResponse(BaseModel):
 @router.post("/test/save-script", response_model=SaveTestScriptResponse)
 async def save_test_script(
     request: SaveTestScriptRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -726,20 +726,9 @@ async def save_test_script(
         if not request.session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
 
-        # Look up the auth_user.id by email (video_session.user_id references auth_user.id, not users.id)
-        auth_user_result = db.execute(
-            sql_text("SELECT id FROM auth_user WHERE email = :email"),
-            {"email": current_user.email}
-        ).fetchone()
-
-        if not auth_user_result:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No auth_user found with email {current_user.email}. Please ensure the user exists in auth_user table."
-            )
-
-        auth_user_id = auth_user_result.id
-        logger.info(f"Found auth_user.id: {auth_user_id} for email: {current_user.email}")
+        # current_user.id now directly contains auth_user.id (UUID string from frontend)
+        auth_user_id = current_user.id
+        logger.info(f"Using auth_user.id: {auth_user_id} for email: {current_user.email}")
 
         # Build the generated_script JSON structure
         generated_script = {
@@ -818,7 +807,7 @@ async def save_test_script(
 @router.get("/scripts/{session_id}")
 async def get_script(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -829,19 +818,8 @@ async def get_script(
     """
     from sqlalchemy import text as sql_text
 
-    # Look up the auth_user.id by email (video_session.user_id references auth_user.id)
-    auth_user_result = db.execute(
-        sql_text("SELECT id FROM auth_user WHERE email = :email"),
-        {"email": current_user.email}
-    ).fetchone()
-
-    if not auth_user_result:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No auth_user found with email {current_user.email}"
-        )
-
-    auth_user_id = auth_user_result.id
+    # current_user.id now directly contains auth_user.id (UUID string from frontend)
+    auth_user_id = current_user.id
 
     # Query script from video_session table
     result = db.execute(
@@ -971,7 +949,7 @@ async def hardcode_upload(
     max_passes: int = Form(5),
     max_verification_passes: int = Form(3),
     fast_mode: bool = Form(False),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1199,7 +1177,7 @@ class ProcessStorySegmentsResponse(BaseModel):
 @router.post("/process-story-segments", response_model=ProcessStorySegmentsResponse)
 async def process_story_segments(
     request: ProcessStorySegmentsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1386,7 +1364,7 @@ class GenerateStoryImagesResponse(BaseModel):
 @router.post("/generate-story-images", response_model=GenerateStoryImagesResponse)
 async def generate_story_images(
     request: GenerateStoryImagesRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1422,19 +1400,8 @@ async def generate_story_images(
         db.refresh(session)
         logger.info(f"Auto-created session {session_id} for user {current_user.id}")
 
-    # Look up the auth_user.id by email (video_session.user_id references auth_user.id)
-    auth_user_result = db.execute(
-        sql_text("SELECT id FROM auth_user WHERE email = :email"),
-        {"email": current_user.email}
-    ).fetchone()
-
-    if not auth_user_result:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No auth_user found with email {current_user.email}"
-        )
-
-    auth_user_id = auth_user_result.id
+    # current_user.id now directly contains auth_user.id (UUID string from frontend)
+    auth_user_id = current_user.id
 
     # Get script from video_session table
     result = db.execute(
@@ -1650,7 +1617,7 @@ class GetStoryImagesResponse(BaseModel):
 @router.get("/story-images/{session_id}", response_model=GetStoryImagesResponse)
 async def get_story_images(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1818,7 +1785,7 @@ class RegenerateSegmentRequest(BaseModel):
 @router.post("/regenerate-segment", response_model=GenerateStoryImagesResponse)
 async def regenerate_segment(
     request: RegenerateSegmentRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1850,19 +1817,8 @@ async def regenerate_segment(
             detail=f"Session {session_id} not found or does not belong to user"
         )
 
-    # Look up the auth_user.id by email (video_session.user_id references auth_user.id)
-    auth_user_result = db.execute(
-        sql_text("SELECT id FROM auth_user WHERE email = :email"),
-        {"email": current_user.email}
-    ).fetchone()
-
-    if not auth_user_result:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No auth_user found with email {current_user.email}"
-        )
-
-    auth_user_id = auth_user_result.id
+    # current_user.id now directly contains auth_user.id (UUID string from frontend)
+    auth_user_id = current_user.id
 
     # Get script from video_session table
     result = db.execute(
@@ -2033,7 +1989,7 @@ class ComposeHardcodeVideoResponse(BaseModel):
 @router.post("/compose-hardcode-video/{session_id}", response_model=ComposeHardcodeVideoResponse)
 async def compose_hardcode_video(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """

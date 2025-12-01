@@ -332,6 +332,11 @@
                 <input type="email" id="user-email" value="test@example.com" placeholder="test@example.com">
             </div>
 
+            <div class="form-group">
+                <label>User ID (from auth_user table)</label>
+                <input type="text" id="user-id" value="b61b3f1f-5120-4ce2-8da6-2b68607699e7" placeholder="UUID from auth_user.id">
+            </div>
+
             <div class="grid">
                 <div class="form-group">
                     <label>Hook Text</label>
@@ -555,6 +560,7 @@
         // Create Script
         async function createScript() {
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
             // session_id is now the main identifier (script is stored in video_session.generated_script)
             currentSessionId = generateId();
 
@@ -597,7 +603,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify(scriptData)
                 });
@@ -642,6 +649,7 @@
             }
 
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
 
             updateStatus('audio-status', 'running', 'Generating...');
             document.getElementById('audio-progress').classList.add('show');
@@ -652,7 +660,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
@@ -695,7 +704,8 @@
             }
 
             const email = document.getElementById('user-email').value;
-            
+            const userId = document.getElementById('user-id').value;
+
             // Get options (you can add UI controls for these later)
             const numImages = 2; // Default
             const maxPasses = 5; // Default
@@ -713,7 +723,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
@@ -761,12 +772,14 @@
             }
 
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
 
             try {
                 const response = await fetch(`${API_BASE}/story-images/${currentSessionId}`, {
                     method: 'GET',
                     headers: {
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     }
                 });
 
@@ -895,7 +908,8 @@
             }
 
             const email = document.getElementById('user-email').value;
-            
+            const userId = document.getElementById('user-id').value;
+
             // Get options (same defaults as generateStoryImages)
             const numImages = 2;
             const maxPasses = 5;
@@ -909,7 +923,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
@@ -947,6 +962,7 @@
             }
 
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
             const model = document.getElementById('image-model').value;
             const imagesPerPart = parseInt(document.getElementById('images-per-part').value);
 
@@ -959,7 +975,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
@@ -1075,6 +1092,7 @@
             }
 
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
             const model = document.getElementById('image-model').value;
             const imagesPerPart = parseInt(document.getElementById('images-per-part').value);
             const voice = selectedVoice;
@@ -1091,7 +1109,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
@@ -1159,10 +1178,12 @@
 
         // Display Created Script
         async function displayCreatedScript(sessionId, email) {
+            const userId = document.getElementById('user-id').value;
             try {
                 const response = await fetch(`${API_BASE}/scripts/${sessionId}`, {
                     headers: {
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     }
                 });
 
@@ -1266,6 +1287,7 @@
             }
 
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-id').value;
 
             updateStatus('video-status', 'running', 'Composing...');
             document.getElementById('video-progress').classList.add('show');
@@ -1281,7 +1303,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Email': email
+                        'X-User-Email': email,
+                        'X-User-Id': userId
                     },
                     body: JSON.stringify({
                         session_id: sessionId,
