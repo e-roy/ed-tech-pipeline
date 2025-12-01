@@ -299,7 +299,7 @@ export function DocumentEditor({ className, ...props }: DocumentEditorProps) {
             ) : (
               <VideoView
                 videoUrl={finalVideo?.presigned_url}
-                isLoading={isVideoGenerating}
+                isLoading={isVideoGenerating && !finalVideo?.presigned_url}
                 sessionId={sessionId ?? undefined}
               />
             )
