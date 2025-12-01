@@ -118,7 +118,7 @@ class MusicProcessingService:
         music_s3_url: str,
         target_duration: float,
         session_id: str,
-        user_id: int,
+        user_id: str,
         fade_in: float = 2.0,
         fade_out: float = 3.0,
         volume: float = 0.15

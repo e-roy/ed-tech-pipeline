@@ -30,10 +30,28 @@ if config.config_file_name is not None:
 # Set target metadata to our Base metadata
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# Tables managed by the frontend (NextAuth/Drizzle) - Alembic should NOT touch these
+FRONTEND_MANAGED_TABLES = {
+    'auth_user',
+    'auth_account',
+    'auth_session',
+    'auth_verification_token',
+    'video_session',
+    'video_asset',
+    'video_conversation_message',
+    'webhook_log',
+    'error_report_report',
+}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """
+    Filter function for Alembic autogenerate.
+    Excludes tables managed by the frontend.
+    """
+    if type_ == "table" and name in FRONTEND_MANAGED_TABLES:
+        return False
+    return True
 
 
 def run_migrations_offline() -> None:
@@ -54,6 +72,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -75,7 +94,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

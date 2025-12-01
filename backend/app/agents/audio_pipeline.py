@@ -514,7 +514,7 @@ class AudioPipelineAgent:
         script: Dict[str, Any],
         total_duration: float,
         session_id: str,
-        user_id: int
+        user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Select background music for the video.

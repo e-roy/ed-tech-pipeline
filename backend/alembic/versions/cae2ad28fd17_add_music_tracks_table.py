@@ -39,18 +39,14 @@ def upgrade() -> None:
         sa.UniqueConstraint('track_id')
     )
 
-    # Add music columns to sessions table
-    op.add_column('sessions', sa.Column('music_track_id', sa.String(length=255), nullable=True))
-    op.add_column('sessions', sa.Column('music_s3_url', sa.Text(), nullable=True))
-    op.add_column('sessions', sa.Column('music_volume', sa.Float(), server_default='0.15', nullable=True))
+    # NOTE: music_volume is now included in initial_schema migration
+    # music_track_id and music_s3_url have been removed from the model (unused)
+    # This section is a no-op for fresh installs
+    pass
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    # Remove music columns from sessions table
-    op.drop_column('sessions', 'music_volume')
-    op.drop_column('sessions', 'music_s3_url')
-    op.drop_column('sessions', 'music_track_id')
-
-    # Drop music_tracks table
+    # NOTE: music columns in sessions table handled by initial_schema
+    # Only drop the music_tracks table
     op.drop_table('music_tracks')

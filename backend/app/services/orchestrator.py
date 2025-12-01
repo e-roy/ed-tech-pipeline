@@ -228,7 +228,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         script_id: str,
         options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -480,7 +480,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         video_prompt: str,
         clip_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -653,7 +653,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         text_config: Optional[Dict[str, Any]] = None,
         audio_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -792,7 +792,7 @@ class VideoGenerationOrchestrator:
     async def build_narrative(
         self,
         db: Session,
-        user_id: int,
+        user_id: str,
         topic: str,
         learning_objective: str,
         key_points: list[str]
@@ -884,7 +884,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         script_id: str,
         audio_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -1084,7 +1084,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         script_id: str,
         image_options: Optional[Dict[str, Any]] = None,
         audio_config: Optional[Dict[str, Any]] = None
@@ -1227,7 +1227,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         desired_duration: float = 60.0
     ) -> Dict[str, Any]:
         """
@@ -1796,7 +1796,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         s3_path: str,
         options: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -2083,7 +2083,7 @@ class VideoGenerationOrchestrator:
         self,
         db: Session,
         session_id: str,
-        user_id: int,
+        user_id: str,
         hook_text: str,
         concept_text: str,
         process_text: str,
@@ -2698,7 +2698,7 @@ class VideoGenerationOrchestrator:
     async def compose_hardcode_video(
         self,
         session_id: str,
-        user_id: int,
+        user_id: str,
         image_result: Any,
         audio_files: List[Dict[str, Any]],
         diagram_s3_key: str,

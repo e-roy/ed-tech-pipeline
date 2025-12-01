@@ -192,7 +192,7 @@ class StorageService:
             logger.error(f"File deletion failed: {e}")
             return False
 
-    def get_user_input_path(self, user_id: int, filename: str) -> str:
+    def get_user_input_path(self, user_id: str, filename: str) -> str:
         """
         Generate S3 key for user input folder.
 
@@ -205,7 +205,7 @@ class StorageService:
         """
         return f"users/{user_id}/input/{filename}"
 
-    def get_session_path(self, user_id: int, session_id: str, asset_type: str, filename: str) -> str:
+    def get_session_path(self, user_id: str, session_id: str, asset_type: str, filename: str) -> str:
         """
         Generate S3 key for session-based storage.
 
@@ -220,7 +220,7 @@ class StorageService:
         """
         return f"users/{user_id}/{session_id}/{asset_type}/{filename}"
 
-    def get_session_prefix(self, user_id: int, session_id: str, asset_type: Optional[str] = None) -> str:
+    def get_session_prefix(self, user_id: str, session_id: str, asset_type: Optional[str] = None) -> str:
         """
         Generate S3 prefix for listing session files.
 
@@ -239,7 +239,7 @@ class StorageService:
 
     def get_nested_session_path(
         self,
-        user_id: int,
+        user_id: str,
         session_id: str,
         asset_type: str,
         subfolders: List[str],
@@ -268,7 +268,7 @@ class StorageService:
             return f"{base}/{subfolder_path}/{filename}"
         return f"{base}/{filename}"
 
-    def get_user_output_path(self, user_id: int, asset_type: str, filename: str) -> str:
+    def get_user_output_path(self, user_id: str, asset_type: str, filename: str) -> str:
         """
         Generate S3 key for user output folder (deprecated - use get_session_path instead).
 
@@ -288,7 +288,7 @@ class StorageService:
         asset_type: str,
         session_id: str,
         asset_id: str,
-        user_id: int,
+        user_id: str,
         use_session_structure: bool = True
     ) -> Dict[str, Any]:
         """
@@ -396,7 +396,7 @@ class StorageService:
 
     def list_user_files(
         self,
-        user_id: int,
+        user_id: str,
         folder: str,
         asset_type: Optional[str] = None,
         limit: int = 100,
@@ -488,7 +488,7 @@ class StorageService:
 
     def upload_user_input(
         self,
-        user_id: int,
+        user_id: str,
         file_content: bytes,
         filename: str,
         content_type: str
@@ -553,7 +553,7 @@ class StorageService:
 
     def upload_prompt_config(
         self,
-        user_id: int,
+        user_id: str,
         config_data: dict,
         session_id: str
     ) -> str:
@@ -608,7 +608,7 @@ class StorageService:
         asset_type: str,
         session_id: str,
         asset_id: str,
-        user_id: int,
+        user_id: str,
         use_session_structure: bool = True
     ) -> Dict[str, Any]:
         """
@@ -712,7 +712,7 @@ class StorageService:
             logger.error(f"Unexpected error in upload_local_file: {e}")
             raise
 
-    def delete_user_file(self, user_id: int, s3_key: str) -> bool:
+    def delete_user_file(self, user_id: str, s3_key: str) -> bool:
         """
         Delete a file from user folders with ownership verification.
 
@@ -864,7 +864,7 @@ class StorageService:
 
     def list_directory_structure(
         self,
-        user_id: int,
+        user_id: str,
         prefix: Optional[str] = None
     ) -> Dict[str, Any]:
         """

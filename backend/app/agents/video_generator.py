@@ -341,7 +341,7 @@ Create scene-specific prompts for each image view."""
         self,
         replicate_url: str,
         session_id: str,
-        user_id: int,
+        user_id: str,
         clip_id: str
     ) -> str:
         """

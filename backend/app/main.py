@@ -58,6 +58,8 @@ cors_origins = [
     frontend_url,
     "http://localhost:3000",  # Local development
     "http://localhost:3001",  # Alternative local port
+    "http://127.0.0.1:8000",  # Local backend serving test_ui.html
+    "null",  # For file:// protocol (local HTML files)
 ]
 
 # Add API Gateway domain if using (optional, for direct API Gateway access)
@@ -539,16 +541,33 @@ async def cancel_processing(request: CancelProcessingRequest, db: Session = Depe
 async def scaffoldtest_ui():
     """
     Serve the scaffold test UI HTML page.
-    
+
     Access at: http://localhost:8000/scaffoldtest or /scaffoldtest_ui.html
     """
     # Get the backend directory (parent of app directory)
     backend_dir = Path(__file__).parent.parent
     html_file = backend_dir / "scaffoldtest_ui.html"
-    
+
     if not html_file.exists():
         raise HTTPException(status_code=404, detail="scaffoldtest_ui.html not found")
-    
+
+    return FileResponse(html_file)
+
+
+@app.get("/test_ui", response_class=HTMLResponse)
+@app.get("/test_ui.html", response_class=HTMLResponse)
+async def test_ui():
+    """
+    Serve the pipeline agent test UI HTML page.
+
+    Access at: http://localhost:8000/test_ui or /test_ui.html
+    """
+    backend_dir = Path(__file__).parent.parent
+    html_file = backend_dir / "test_ui.html"
+
+    if not html_file.exists():
+        raise HTTPException(status_code=404, detail="test_ui.html not found")
+
     return FileResponse(html_file)
 
 

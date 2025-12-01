@@ -3,13 +3,18 @@ Simplified authentication - trusts frontend NextAuth user info from headers.
 
 For MVP/educational content only. Frontend handles authentication via NextAuth,
 backend trusts user ID/email sent in request headers.
+
+Backend reads from the auth_user table managed by the frontend's NextAuth/Drizzle setup.
 """
 from fastapi import Header, HTTPException, status, Depends
 from sqlalchemy.orm import Session
 from typing import Optional
+import logging
 
 from app.database import get_db
 from app.models.database import User
+
+logger = logging.getLogger(__name__)
 
 
 async def get_current_user(
@@ -21,52 +26,52 @@ async def get_current_user(
     Get current user from request headers (sent by authenticated frontend).
 
     Frontend includes these headers after NextAuth authentication:
-    - X-User-Id: User's database ID from NextAuth
+    - X-User-Id: User's database ID (UUID) from NextAuth
     - X-User-Email: User's email from NextAuth session
 
-    This replaces JWT authentication for simplicity in MVP.
-    Assumes frontend is trusted and handles authentication properly.
+    Users are created by NextAuth on the frontend. Backend only reads from auth_user.
 
     Args:
-        x_user_id: User ID from header
+        x_user_id: User ID (UUID string) from header
         x_user_email: User email from header
         db: Database session
 
     Returns:
-        User object
+        User object from auth_user table
 
     Raises:
         HTTPException: If user headers missing or user not found
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
-        if not x_user_email:
-            logger.warning("Missing X-User-Email header")
+        # Prefer looking up by ID if provided (more reliable)
+        if x_user_id:
+            logger.debug(f"Looking up user by ID: {x_user_id}")
+            user = db.query(User).filter(User.id == x_user_id).first()
+            if user:
+                return user
+            logger.warning(f"User not found by ID: {x_user_id}")
+
+        # Fall back to email lookup
+        if x_user_email:
+            logger.debug(f"Looking up user by email: {x_user_email}")
+            user = db.query(User).filter(User.email == x_user_email).first()
+            if user:
+                return user
+            logger.warning(f"User not found by email: {x_user_email}")
+
+        # No valid user found
+        if not x_user_id and not x_user_email:
+            logger.warning("Missing authentication headers")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing user authentication headers. Please ensure you're logged in."
             )
 
-        logger.debug(f"Getting user for email: {x_user_email}")
-        
-        # Find or create user by email
-        user = db.query(User).filter(User.email == x_user_email).first()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found. Please ensure you're logged in on the frontend first."
+        )
 
-        if user is None:
-            logger.info(f"Creating new user for email: {x_user_email}")
-            # Auto-create user for new OAuth users (Google, Discord, etc.)
-            # Set placeholder password since OAuth users don't have passwords
-            import bcrypt
-            placeholder_password = bcrypt.hashpw(f"oauth_{x_user_email}".encode(), bcrypt.gensalt()).decode()
-            user = User(email=x_user_email, hashed_password=placeholder_password)
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            logger.info(f"Created user: {user.id}")
-
-        return user
     except HTTPException:
         raise
     except Exception as e:

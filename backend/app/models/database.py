@@ -10,15 +10,18 @@ from app.database import Base
 
 
 class User(Base):
-    """User model for authentication."""
+    """User model matching frontend auth_user table (NextAuth)."""
 
-    __tablename__ = "users"
+    __tablename__ = "auth_user"
 
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    id = Column(String(255), primary_key=True)  # UUID from NextAuth
+    name = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=False)
+    username = Column(String(255), nullable=True)
+    password = Column(String(255), nullable=True)  # Nullable for OAuth users
+    emailVerified = Column(DateTime(timezone=True), nullable=True)
+    image = Column(String(255), nullable=True)
+    role = Column(String(50), nullable=False, default="user")
 
     # Relationships
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
@@ -33,7 +36,7 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id = Column(String(255), primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(255), ForeignKey("auth_user.id"), nullable=False)
     status = Column(String(50), nullable=False, default="pending")
     # Possible statuses: pending, generating_images, images_approved,
     # generating_clips, clips_approved, composing, completed, failed
@@ -47,17 +50,10 @@ class Session(Base):
     audio_config = Column(JSON, nullable=True)  # Audio configuration
 
     # Music configuration
-    music_track_id = Column(String(255), nullable=True)
-    music_s3_url = Column(Text, nullable=True)
     music_volume = Column(Float, nullable=True, default=0.15)
 
     # Results
     final_video_url = Column(String(500), nullable=True)
-
-    # Final video verification fields
-    final_video_verification_status = Column(String(50), nullable=True)  # 'passed', 'failed', 'warning', 'skipped'
-    final_video_verification_data = Column(JSON, nullable=True)  # Detailed verification check results
-    final_video_verified_at = Column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -68,7 +64,6 @@ class Session(Base):
     user = relationship("User", back_populates="sessions")
     assets = relationship("Asset", back_populates="session", cascade="all, delete-orphan")
     costs = relationship("GenerationCost", back_populates="session", cascade="all, delete-orphan")
-    websocket_connections = relationship("WebSocketConnection", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Session(id={self.id}, status={self.status})>"
@@ -132,7 +127,7 @@ class Script(Base):
     __tablename__ = "scripts"
 
     id = Column(String(255), primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(255), ForeignKey("auth_user.id"), nullable=False)
 
     # Script structure with four parts
     # Each part has: {text: str, duration: str, key_concepts: list[str], visual_guidance: str}
@@ -180,13 +175,10 @@ class WebSocketConnection(Base):
     __tablename__ = "websocket_connections"
 
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String(255), ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(String(255), nullable=False)  # No FK constraint - allows flexibility with different session tables
     connection_id = Column(String(255), unique=True, nullable=False)
     connected_at = Column(DateTime(timezone=True), server_default=func.now())
     disconnected_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Relationships
-    session = relationship("Session", back_populates="websocket_connections")
 
     def __repr__(self):
         return f"<WebSocketConnection(id={self.id}, session_id={self.session_id})>"

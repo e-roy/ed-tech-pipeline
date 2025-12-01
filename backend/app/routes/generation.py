@@ -1168,26 +1168,20 @@ async def process_story_segments(
             detail="Invalid S3 path format. Expected: users/{user_id}/{session_id}/..."
         )
     
-    try:
-        path_user_id = int(path_parts[1])
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid user ID in S3 path"
-        )
-    
+    path_user_id = path_parts[1]  # User ID is a string (UUID)
+
     # Verify session belongs to user
     session = db.query(SessionModel).filter(
         SessionModel.id == session_id,
         SessionModel.user_id == current_user.id
     ).first()
-    
+
     if not session:
         raise HTTPException(
             status_code=404,
             detail=f"Session {session_id} not found or does not belong to user"
         )
-    
+
     # Verify user_id from path matches current user
     if path_user_id != current_user.id:
         raise HTTPException(
