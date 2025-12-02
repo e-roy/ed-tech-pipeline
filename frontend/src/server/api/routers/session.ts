@@ -115,7 +115,6 @@ export const sessionRouter = createTRPCRouter({
           body: JSON.stringify({
             sessionID: sessionId,
             userID: ctx.session.user.id,
-            agent_selection: "Full Test",
           }),
         });
 
@@ -294,10 +293,16 @@ export const sessionRouter = createTRPCRouter({
         confirmedFacts,
       )
         .then((result) => {
-          console.log("[session.verifyNarration] Diagram selection completed:", result);
+          console.log(
+            "[session.verifyNarration] Diagram selection completed:",
+            result,
+          );
         })
         .catch((error) => {
-          console.error("[session.verifyNarration] Diagram selection failed:", error);
+          console.error(
+            "[session.verifyNarration] Diagram selection failed:",
+            error,
+          );
         });
 
       return {

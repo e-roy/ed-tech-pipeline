@@ -20,13 +20,10 @@ export const env = createEnv({
     AWS_ACCESS_KEY_ID: z.string().optional(),
     AWS_SECRET_ACCESS_KEY: z.string().optional(),
     S3_BUCKET_NAME: z.string().optional(),
-    AWS_REGION: z.string().default("us-east-2"),
+    AWS_REGION: z.string().default("us-east-1"),
     OPENAI_API_KEY: z.string().optional(),
     WEBHOOK_SECRET: z.string().optional(), // Optional - webhook route handles missing secret gracefully
-    VIDEO_PROCESSING_API_URL: z
-      .string()
-      .url()
-      .default("https://api.classclipscohort3.com"),
+    VIDEO_PROCESSING_API_URL: z.string().url().optional(),
   },
 
   /**

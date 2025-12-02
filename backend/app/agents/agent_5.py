@@ -20,7 +20,6 @@ import tempfile
 import time
 import httpx
 import logging
-import resource
 import signal
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ from app.services.storage import StorageService
 from app.services.replicate_video import ReplicateVideoService
 from app.services.video_verifier import VideoVerificationService
 from app.config import get_settings
-from app.agents.helpers.dalle_generator import DALLEGenerator
+from app.agents.helpers.replicate_gemini_generator import ReplicateGeminiGenerator
 
 
 async def generate_video_replicate(
@@ -644,8 +643,8 @@ async def agent_5_process(
         }
         await create_status_json("5", "starting", status_data)
 
-        # Scan S3 folders for Agent2 and Agent4 content
-        agent2_prefix = f"users/{user_id}/{session_id}/agent2/"
+        # Scan S3 folders for Agent3 and Agent4 content
+        agent3_prefix = f"users/{user_id}/{session_id}/agent3/"
         agent4_prefix = f"users/{user_id}/{session_id}/agent4/"
         
         script = {}
@@ -654,29 +653,29 @@ async def agent_5_process(
         background_music = {}
         
         # Initialize agent data variables at function scope (needed for nested functions)
-        agent_2_data = {}
+        agent_3_data = {}
         agent_4_data = {}
         
         try:
-            # Scan Agent2 folder for script/data files
-            agent2_files = storage_service.list_files_by_prefix(agent2_prefix, limit=1000)
-            logger.info(f"Found {len(agent2_files)} files in Agent2 folder")
+            # Scan Agent3 folder for script/data files
+            agent3_files = storage_service.list_files_by_prefix(agent3_prefix, limit=1000)
+            logger.info(f"Found {len(agent3_files)} files in Agent3 folder")
 
-            # Look for agent_2_data.json first (most complete source)
-            agent_2_data_key = f"{agent2_prefix}agent_2_data.json"
+            # Look for agent_3_data.json first (most complete source)
+            agent_3_data_key = f"{agent3_prefix}agent_3_data.json"
             try:
                 obj = storage_service.s3_client.get_object(
                     Bucket=storage_service.bucket_name,
-                    Key=agent_2_data_key
+                    Key=agent_3_data_key
                 )
                 content = obj["Body"].read().decode('utf-8')
-                loaded_agent_2_data = json.loads(content)
-                logger.info(f"Agent5 loaded agent_2_data.json from {agent_2_data_key}")
+                loaded_agent_3_data = json.loads(content)
+                logger.info(f"Agent5 loaded agent_3_data.json from {agent_3_data_key}")
 
-                # Extract script and storyboard from agent_2_data
-                if loaded_agent_2_data.get("script"):
-                    script = loaded_agent_2_data["script"]
-                    logger.info("[AGENT5 TRACE] Extracted script from agent_2_data.json")
+                # Extract script and storyboard from agent_3_data
+                if loaded_agent_3_data.get("script"):
+                    script = loaded_agent_3_data["script"]
+                    logger.info("[AGENT5 TRACE] Extracted script from agent_3_data.json")
                     for part_name in ["hook", "concept", "process", "conclusion"]:
                         if part_name in script and isinstance(script[part_name], dict):
                             text_preview = script[part_name].get("text", "")[:100] if script[part_name].get("text") else "(empty)"
@@ -684,20 +683,20 @@ async def agent_5_process(
                             visual_preview = script[part_name].get("visual_guidance", "")[:100] if script[part_name].get("visual_guidance") else "(empty)"
                             logger.info(f"[AGENT5 TRACE] script['{part_name}'] visual_guidance preview: {visual_preview}")
 
-                # Extract storyboard from agent_2_data (replaces storyboard.json)
-                if loaded_agent_2_data.get("storyboard"):
-                    storyboard = loaded_agent_2_data["storyboard"]
-                    logger.info(f"[AGENT5 TRACE] Extracted storyboard from agent_2_data.json with {len(storyboard.get('segments', []))} segments")
+                # Extract storyboard from agent_3_data (replaces storyboard.json)
+                if loaded_agent_3_data.get("storyboard"):
+                    storyboard = loaded_agent_3_data["storyboard"]
+                    logger.info(f"[AGENT5 TRACE] Extracted storyboard from agent_3_data.json with {len(storyboard.get('segments', []))} segments")
 
-                # Store agent_2_data for later use
-                agent_2_data = loaded_agent_2_data
+                # Store agent_3_data for later use
+                agent_3_data = loaded_agent_3_data
 
             except Exception as e:
-                logger.debug(f"Agent5 could not load agent_2_data.json: {e}, will try other sources")
+                logger.debug(f"Agent5 could not load agent_3_data.json: {e}, will try other sources")
 
             # Look for storyboard.json (fallback source)
             if not script:
-                storyboard_key = f"{agent2_prefix}storyboard.json"
+                storyboard_key = f"{agent3_prefix}storyboard.json"
                 try:
                     obj = storage_service.s3_client.get_object(
                         Bucket=storage_service.bucket_name,
@@ -755,7 +754,7 @@ async def agent_5_process(
             
             # Look for script JSON files or status files that might contain script data (fallback)
             if not script:
-                for file_info in agent2_files:
+                for file_info in agent3_files:
                     key = file_info.get("key", file_info.get("Key", ""))
                     if "script" in key.lower() or "finished" in key.lower():
                         # Skip storyboard.json as we already tried it
@@ -855,18 +854,18 @@ async def agent_5_process(
                 
                 # If still no script or audio files, raise error
                 if not script and not audio_files:
-                    raise ValueError(f"No content found in S3 folders or database. Agent2: {len(agent2_files)} files, Agent4: {len(agent4_files)} files")
+                    raise ValueError(f"No content found in S3 folders or database. Agent3: {len(agent3_files)} files, Agent4: {len(agent4_files)} files")
             
             # If pipeline_data is provided, use it (for backwards compatibility)
             if pipeline_data:
-                agent_2_data = pipeline_data.get("agent_2_data", {})
+                agent_3_data = pipeline_data.get("agent_3_data", {})
                 agent_4_data = pipeline_data.get("agent_4_data", {})
-                
-                if agent_2_data or agent_4_data:
-                    script = agent_2_data.get("script", script)
-                    # Use storyboard from agent_2_data if available, otherwise keep what we loaded
-                    if agent_2_data.get("storyboard"):
-                        storyboard = agent_2_data.get("storyboard")
+
+                if agent_3_data or agent_4_data:
+                    script = agent_3_data.get("script", script)
+                    # Use storyboard from agent_3_data if available, otherwise keep what we loaded
+                    if agent_3_data.get("storyboard"):
+                        storyboard = agent_3_data.get("storyboard")
                     audio_files = agent_4_data.get("audio_files", audio_files)
                     background_music = agent_4_data.get("background_music", background_music)
                 else:
@@ -891,7 +890,7 @@ async def agent_5_process(
                 
         except Exception as e:
             logger.error(f"Agent5 failed to scan S3 folders: {e}")
-            raise ValueError(f"Failed to discover Agent2/Agent4 content from S3: {str(e)}")
+            raise ValueError(f"Failed to discover Agent3/Agent4 content from S3: {str(e)}")
 
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
@@ -1025,9 +1024,9 @@ async def agent_5_process(
             logger.info(f"[{session_id}] Using prompt for '{section}': {prompt[:150]}...")
 
             # Extract base_scene parameters if present for consistency
-            # Check both new format (agent_2_data) and old format (root level)
-            if agent_2_data:
-                base_scene = agent_2_data.get("base_scene", {})
+            # Check both new format (agent_3_data) and old format (root level)
+            if agent_3_data:
+                base_scene = agent_3_data.get("base_scene", {})
             elif pipeline_data:
                 base_scene = pipeline_data.get("base_scene", {})
             else:
@@ -1112,12 +1111,12 @@ async def agent_5_process(
             for clip_idx, clip_prompt in enumerate(clip_prompts):
                 async with replicate_semaphore:
                     if clip_idx == 0:
-                        # First clip: Check if we have an Agent 3 (DALL-E) image for this section
+                        # First clip: Check if we have a generated image for this section
                         section_image_url = section_images.get(section)
 
                         if section_image_url:
-                            # Use image-to-video with Agent 3 image (Kling requires start_image)
-                            logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (image-to-video from Agent 3 image)")
+                            # Use image-to-video with generated Gemini image
+                            logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (image-to-video from Gemini image)")
                             try:
                                 service = ReplicateVideoService(replicate_api_key)
                                 clip_url = await service.generate_video_from_image(
@@ -1137,8 +1136,8 @@ async def agent_5_process(
                                     seed=section_seed
                                 )
                         else:
-                            # Fallback: text-to-video (if no Agent 3 image available)
-                            logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (text-to-video - no Agent 3 image)")
+                            # Fallback: text-to-video (if no generated image available)
+                            logger.info(f"[{session_id}] Generating clip {clip_idx+1}/{clips_needed} (text-to-video - no image available)")
                             clip_url = await generate_video_replicate(
                                 clip_prompt,
                                 replicate_api_key,
@@ -1258,7 +1257,7 @@ async def agent_5_process(
 
         # Handle restart mode: download existing clips from S3
         all_clip_paths = []
-        section_images = {}  # Initialize (will be populated with DALL-E images if not in restart mode)
+        section_images = {}  # Initialize (will be populated with Gemini images if not in restart mode)
 
         if restart_from_concat:
             logger.info(f"[{session_id}] Restart mode: Downloading existing clips from S3")
@@ -1319,22 +1318,22 @@ async def agent_5_process(
             total_cost = 0.0  # No cost for restart (clips already generated)
         else:
             # ====================
-            # AGENT 3: IMAGE GENERATION PHASE
+            # IMAGE GENERATION PHASE (Gemini via Replicate)
             # ====================
-            # Generate DALL-E images for all 4 sections using script visual prompts
-            # These images will be used as the starting frame for Kling video generation
+            # Generate images for all 4 sections using script visual prompts
+            # These images will be used as the starting frame for video generation
 
-            logger.info(f"[{session_id}] Starting Agent 3 (DALL-E) image generation for {len(sections)} sections")
+            logger.info(f"[{session_id}] Starting image generation (Gemini) for {len(sections)} sections")
 
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message="Generating images with DALL-E for each section...",
+                message="Generating images with Gemini for each section...",
                 cost=0.0
             )
 
-            # Initialize DALL-E generator
-            dalle_generator = DALLEGenerator(api_key=settings.OPENAI_API_KEY)
+            # Initialize Gemini generator with Replicate API key
+            image_generator = ReplicateGeminiGenerator(api_key=replicate_api_key)
 
             # Store generated images for each section
             section_images = {}
@@ -1342,23 +1341,23 @@ async def agent_5_process(
 
             # Generate images in parallel for all sections
             async def generate_section_image(section: str) -> tuple[str, Optional[str]]:
-                """Generate a DALL-E image for a section with retry logic. Returns (section, image_url)"""
+                """Generate a Gemini image for a section with retry logic. Returns (section, image_url)"""
                 visual_prompt = visual_prompts[section]
 
-                logger.info(f"[{session_id}] Generating image for '{section}' with DALL-E")
+                logger.info(f"[{session_id}] Generating image for '{section}' with Gemini")
                 logger.info(f"[{session_id}] Image prompt for '{section}': {visual_prompt[:150]}...")
 
                 # Retry logic: up to 3 attempts
                 max_retries = 3
                 for attempt in range(1, max_retries + 1):
                     try:
-                        logger.info(f"[{session_id}] DALL-E generation attempt {attempt}/{max_retries} for '{section}'")
+                        logger.info(f"[{session_id}] Gemini generation attempt {attempt}/{max_retries} for '{section}'")
 
-                        # Generate image with DALL-E 3 (standard quality, 16:9 aspect ratio)
-                        result = await dalle_generator.generate_image(
+                        # Generate image with Gemini (standard quality, 16:9 aspect ratio)
+                        result = await image_generator.generate_image(
                             prompt=visual_prompt,
                             style="educational",
-                            quality="standard"  # $0.04 per image
+                            quality="standard"  # ~$0.02 per image
                         )
 
                         if result.get("success"):
@@ -1392,7 +1391,7 @@ async def agent_5_process(
             for section, image_url in image_results:
                 if image_url:
                     section_images[section] = image_url
-                    image_generation_cost += 0.04  # DALL-E 3 standard quality cost
+                    image_generation_cost += 0.02  # Gemini estimated cost per image
                     logger.info(f"[{session_id}] Stored image for '{section}'")
                 else:
                     logger.warning(f"[{session_id}] No image generated for '{section}' - will fall back to text-to-video")
@@ -1402,7 +1401,7 @@ async def agent_5_process(
             await send_status(
                 "Agent5", "processing",
                 supersessionID=supersessionid,
-                message=f"Generated {len(section_images)}/{len(sections)} images with DALL-E. Starting video generation...",
+                message=f"Generated {len(section_images)}/{len(sections)} images with Gemini. Starting video generation...",
                 cost=image_generation_cost
             )
 

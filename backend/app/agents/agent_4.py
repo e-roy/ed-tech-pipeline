@@ -150,9 +150,9 @@ async def agent_4_process(
         else:
             logger.warning(f"[SCRIPT TRACE] Agent4 extract_script_from_generated_script returned None or empty for session {session_id}")
     
-    # If script is still empty, wait for Agent2 to write it (they run in parallel)
+    # If script is still empty, wait for Agent3 to write it (they run in parallel)
     if not script:
-        logger.info(f"Agent4 waiting for Agent2 to generate script for session {session_id}")
+        logger.info(f"Agent4 waiting for Agent3 to generate script for session {session_id}")
         max_retries = 30  # Wait up to 30 seconds
         retry_count = 0
         while not script and retry_count < max_retries:
@@ -185,17 +185,17 @@ async def agent_4_process(
                 except Exception as e:
                     logger.debug(f"Agent4 database query failed while waiting for script: {e}")
             
-            # Try to get script from S3 (Agent2 writes agent_2_data.json to S3)
+            # Try to get script from S3 (Agent3 writes agent_3_data.json to S3)
             if not script and storage_service and storage_service.s3_client:
                 try:
-                    s3_key_agent2 = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
+                    s3_key_agent3 = f"users/{user_id}/{session_id}/agent3/agent_3_data.json"
                     response = storage_service.s3_client.get_object(
                         Bucket=storage_service.bucket_name,
-                        Key=s3_key_agent2
+                        Key=s3_key_agent3
                     )
-                    agent_2_data = json.loads(response['Body'].read().decode('utf-8'))
-                    if agent_2_data.get("script"):
-                        script = agent_2_data["script"]
+                    agent_3_data = json.loads(response['Body'].read().decode('utf-8'))
+                    if agent_3_data.get("script"):
+                        script = agent_3_data["script"]
                         logger.info(f"Agent4 found script from S3 after {retry_count} seconds")
                         break
                 except Exception as e:
@@ -205,7 +205,7 @@ async def agent_4_process(
         if not script:
             raise ValueError(
                 f"Agent4 could not find script after waiting {max_retries} seconds. "
-                f"Agent2 may not have generated the script yet or there was an error. "
+                f"Agent3 may not have generated the script yet or there was an error. "
                 f"Topic: {bool(topic)}, Confirmed Facts: {bool(confirmed_facts)}, Generation Script: {bool(generation_script)}"
             )
 
@@ -361,18 +361,18 @@ async def agent_4_process(
 
         result_data = audio_result.data
 
-        # Read agent_2_data.json from S3
-        agent_2_data = {}
+        # Read agent_3_data.json from S3
+        agent_3_data = {}
         try:
-            s3_key_agent2 = f"users/{user_id}/{session_id}/agent2/agent_2_data.json"
+            s3_key_agent3 = f"users/{user_id}/{session_id}/agent3/agent_3_data.json"
             response = storage_service.s3_client.get_object(
                 Bucket=storage_service.bucket_name,
-                Key=s3_key_agent2
+                Key=s3_key_agent3
             )
-            agent_2_data = json.loads(response['Body'].read().decode('utf-8'))
-            logger.info(f"Agent4 loaded agent_2_data.json from S3: {s3_key_agent2}")
+            agent_3_data = json.loads(response['Body'].read().decode('utf-8'))
+            logger.info(f"Agent4 loaded agent_3_data.json from S3: {s3_key_agent3}")
         except Exception as e:
-            logger.warning(f"Agent4 could not load agent_2_data.json from S3: {e}")
+            logger.warning(f"Agent4 could not load agent_3_data.json from S3: {e}")
 
         # Upload audio files to S3 and build agent_4_data structure
         audio_files_output = []
@@ -423,9 +423,9 @@ async def agent_4_process(
                         except Exception as e:
                             logger.warning(f"Failed to upload audio file to S3: {e}")
 
-        # Create combined output structure with agent_2_data and agent_4_data
+        # Create combined output structure with agent_3_data and agent_4_data
         combined_output = {
-            "agent_2_data": agent_2_data,
+            "agent_3_data": agent_3_data,
             "agent_4_data": {
                 "audio_files": audio_files_output,
                 "background_music": background_music_output if background_music_output else {

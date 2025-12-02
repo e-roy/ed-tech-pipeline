@@ -519,21 +519,9 @@ async def get_video_session(session_id: str, db: Session = Depends(get_db)):
 # =============================================================================
 
 class StartProcessingRequest(BaseModel):
-    """Request model for starting the agent processing pipeline."""
-    agent_selection: Optional[str] = "Full Test"  # "Full Test", "Agent2", "Agent4", "Agent5"
-    video_session_data: Optional[dict] = None  # For Full Test mode
-    # Individual agent fields (optional, required for individual agents)
-    userID: Optional[str] = None
-    sessionID: Optional[str] = None
-    templateID: Optional[str] = None
-    chosenDiagramID: Optional[str] = None
-    scriptID: Optional[str] = None
-    # Agent4 specific fields
-    script: Optional[dict] = None  # For Agent4
-    voice: Optional[str] = None  # For Agent4
-    audio_option: Optional[str] = None  # For Agent4
-    # Agent5 specific fields
-    supersessionid: Optional[str] = None  # For Agent5
+    """Request model for starting the video generation pipeline."""
+    userID: str
+    sessionID: str
 
 
 class StartProcessingResponse(BaseModel):
@@ -549,22 +537,23 @@ async def start_processing(
     background_tasks: BackgroundTasks,
 ) -> StartProcessingResponse:
     """
-    Start the agent processing pipeline.
+    Start the video generation pipeline.
 
     Expected request format:
     {
         "sessionID": "<session-id>",
-        "userID": "<user-id>",
-        "agent_selection": "Full Test"
+        "userID": "<user-id>"
     }
 
-    Supports multiple modes:
-    - Full Test: Requires sessionID, userID
-    - Agent2: Requires userID, sessionID
-    - Agent4: Requires script, voice, audio_option
-    - Agent5: Requires userID, sessionID, supersessionid
+    Runs the full orchestrator pipeline (Agent2 -> Agent4 -> Agent5).
+    For testing individual agents, use the dedicated test endpoints:
+    - /api/agent2/test
+    - /api/agent4/test
+    - /api/agent5/test
     """
-    agent_selection = request.agent_selection or "Full Test"
+    session_id = request.sessionID.strip()
+    user_id = request.userID.strip()
+    logger.info(f"[startprocessing] Received request sessionID='{session_id}', userID='{user_id}'")
 
     # Try to get database connection, but make it optional
     db = None
@@ -581,322 +570,104 @@ async def start_processing(
             except Exception:
                 pass
         db = None
-    
-    # Handle Full Test mode
-    if agent_selection == "Full Test":
-        # Validate required fields
-        if not request.sessionID or not request.userID:
-            raise HTTPException(
-                status_code=400,
-                detail="sessionID and userID are required for Full Test",
-            )
-        
-        session_id = request.sessionID.strip()
-        user_id = request.userID.strip()
 
-        # Use orchestrator to coordinate the Full Test process
-        async def run_orchestrator():
-            """Wrapper to catch and log errors in background task."""
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(
-                "Starting orchestrator for Full Test, session %s, user %s",
+    # Use orchestrator to coordinate the pipeline process
+    async def run_orchestrator():
+        """Wrapper to catch and log errors in background task."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Starting orchestrator for session %s, user %s",
+            session_id,
+            user_id,
+        )
+
+        # Wait for WebSocket connection
+        logger.info(f"Waiting for WebSocket connection for session {session_id}...")
+        connection_ready = await websocket_manager.wait_for_connection(
+            session_id,
+            max_wait=3.0,
+            check_interval=0.1
+        )
+
+        if not connection_ready:
+            logger.warning(
+                "No WebSocket connection found for session %s after waiting. Proceeding anyway.",
                 session_id,
-                user_id,
             )
 
-            # Wait for WebSocket connection
-            logger.info(f"Waiting for WebSocket connection for session {session_id}...")
-            connection_ready = await websocket_manager.wait_for_connection(
-                session_id,
-                max_wait=3.0,
-                check_interval=0.1
-            )
-            
-            if not connection_ready:
-                logger.warning(
-                    "No WebSocket connection found for session %s after waiting. Proceeding anyway.",
-                    session_id,
-                )
-            
-            try:
-                from app.services.orchestrator import VideoGenerationOrchestrator
-                orchestrator = VideoGenerationOrchestrator(websocket_manager)
-                # Orchestrator will query video_session table itself using userId and sessionId
-                await orchestrator.start_full_test_process(
-                    userId=user_id,
-                    sessionId=session_id,
-                    db=db  # Pass db to orchestrator, which will query video_session table
-                )
-                logger.info(f"Orchestrator completed for session {session_id}")
-            except Exception as e:
-                logger.exception(f"Error in orchestrator for session {session_id}: {e}")
-                # Error status will be sent by orchestrator
-        
-        # Verify webhook secret access before starting
-        try:
-            from app.services.orchestrator import _get_webhook_secret
-            webhook_secret = _get_webhook_secret()
-            if webhook_secret:
-                logger.info(f"Webhook secret verified successfully for session {session_id}")
-            else:
-                logger.warning(f"Webhook secret not available for session {session_id} - webhook notifications may fail")
-        except Exception as e:
-            logger.warning(f"Could not verify webhook secret for session {session_id}: {e} - continuing anyway")
-        
-        # Send webhook notification for processing_started
         try:
             from app.services.orchestrator import VideoGenerationOrchestrator
-            temp_orchestrator = VideoGenerationOrchestrator(websocket_manager)
-            await temp_orchestrator._send_webhook_notification(
+            orchestrator = VideoGenerationOrchestrator(websocket_manager)
+            await orchestrator.start_full_test_process(
+                userId=user_id,
                 sessionId=session_id,
-                video_url="",
-                status="processing_started",
-                payload={"userId": user_id, "agent_selection": agent_selection}
+                db=db
             )
-            logger.info(f"Sent processing_started webhook for session {session_id}")
+            logger.info(f"Orchestrator completed for session {session_id}")
         except Exception as e:
-            # Log but don't fail - webhook is non-critical
-            logger.warning(f"Failed to send processing_started webhook for session {session_id}: {e}")
-        
-        # Create task in the current event loop (we're already in an async context)
-        task = asyncio.create_task(run_orchestrator())
-        if not hasattr(app.state, 'background_tasks'):
-            app.state.background_tasks = set()
-        app.state.background_tasks.add(task)
-        
-        # Track active session by user_id and session_id
-        if not hasattr(app.state, 'active_sessions'):
-            app.state.active_sessions = {}
-        if user_id not in app.state.active_sessions:
-            app.state.active_sessions[user_id] = {}
-        app.state.active_sessions[user_id][session_id] = task
-        
-        # Clean up when task completes
-        def cleanup_task(task_ref):
-            try:
-                if hasattr(app.state, 'active_sessions') and user_id in app.state.active_sessions:
-                    if session_id in app.state.active_sessions[user_id]:
-                        # Only delete if it's still the same task (might have been replaced)
-                        if app.state.active_sessions[user_id][session_id] is task_ref:
-                            del app.state.active_sessions[user_id][session_id]
-                    # Clean up empty user dict
-                    if user_id in app.state.active_sessions and not app.state.active_sessions[user_id]:
-                        del app.state.active_sessions[user_id]
-            except (KeyError, AttributeError):
-                # Session or user dict might have been deleted by cancel_processing
-                pass
-            if hasattr(app.state, 'background_tasks'):
-                app.state.background_tasks.discard(task_ref)
-        
-        task.add_done_callback(cleanup_task)
-        
-        return StartProcessingResponse(
-            success=True,
-            message="Full Test processing started successfully",
-            sessionID=session_id
+            logger.exception(f"Error in orchestrator for session {session_id}: {e}")
+
+    # Verify webhook secret access before starting
+    try:
+        from app.services.orchestrator import _get_webhook_secret
+        webhook_secret = _get_webhook_secret()
+        if webhook_secret:
+            logger.info(f"Webhook secret verified successfully for session {session_id}")
+        else:
+            logger.warning(f"Webhook secret not available for session {session_id} - webhook notifications may fail")
+    except Exception as e:
+        logger.warning(f"Could not verify webhook secret for session {session_id}: {e} - continuing anyway")
+
+    # Send webhook notification for processing_started
+    try:
+        from app.services.orchestrator import VideoGenerationOrchestrator
+        temp_orchestrator = VideoGenerationOrchestrator(websocket_manager)
+        await temp_orchestrator._send_webhook_notification(
+            sessionId=session_id,
+            video_url="",
+            status="processing_started",
+            payload={"userId": user_id}
         )
-    
-    # Handle individual agent modes
-    elif agent_selection == "Agent2":
-        if not request.userID or not request.userID.strip():
-            raise HTTPException(status_code=400, detail="userID is required for Agent2")
-        if not request.sessionID or not request.sessionID.strip():
-            raise HTTPException(status_code=400, detail="sessionID is required for Agent2")
-        
-        # Start Agent2 with minimal inputs
-        async def run_agent_2_with_error_handling():
-            logger = logging.getLogger(__name__)
-            logger.info(f"Starting Agent2 for session {request.sessionID}")
-            
-            connection_ready = await websocket_manager.wait_for_connection(
-                request.sessionID,
-                max_wait=3.0,
-                check_interval=0.1
-            )
-            
-            try:
-                await agent_2_process_impl(
-                    websocket_manager=websocket_manager,
-                    user_id=request.userID,
-                    session_id=request.sessionID,
-                    template_id="",  # Stub
-                    chosen_diagram_id="",  # Stub
-                    script_id="",  # Stub
-                    storage_service=storage_service,
-                    video_session_data=None
-                )
-            except Exception as e:
-                logger.exception(f"Error in agent_2_process: {e}")
-                try:
-                    await websocket_manager.send_progress(request.sessionID, {
-                        "agentnumber": "Agent2",
-                        "userID": request.userID,
-                        "sessionID": request.sessionID,
-                        "status": "error",
-                        "error": str(e),
-                        "reason": f"Agent2 failed: {type(e).__name__}"
-                    })
-                except Exception:
-                    pass
-        
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(run_agent_2_with_error_handling())
-        if not hasattr(app.state, 'background_tasks'):
-            app.state.background_tasks = set()
-        app.state.background_tasks.add(task)
-        task.add_done_callback(app.state.background_tasks.discard)
-        
-        return StartProcessingResponse(
-            success=True,
-            message="Agent2 started successfully",
-            sessionID=request.sessionID
-        )
-    
-    elif agent_selection == "Agent4":
-        if not request.userID or not request.userID.strip():
-            raise HTTPException(status_code=400, detail="userID is required for Agent4")
-        if not request.sessionID or not request.sessionID.strip():
-            raise HTTPException(status_code=400, detail="sessionID is required for Agent4")
-        
-        # Query video_session table to get the same data Agent2 uses
-        video_session_data = None
+        logger.info(f"Sent processing_started webhook for session {session_id}")
+    except Exception as e:
+        # Log but don't fail - webhook is non-critical
+        logger.warning(f"Failed to send processing_started webhook for session {session_id}: {e}")
+
+    # Create task in the current event loop (we're already in an async context)
+    task = asyncio.create_task(run_orchestrator())
+    if not hasattr(app.state, 'background_tasks'):
+        app.state.background_tasks = set()
+    app.state.background_tasks.add(task)
+
+    # Track active session by user_id and session_id
+    if not hasattr(app.state, 'active_sessions'):
+        app.state.active_sessions = {}
+    if user_id not in app.state.active_sessions:
+        app.state.active_sessions[user_id] = {}
+    app.state.active_sessions[user_id][session_id] = task
+
+    # Clean up when task completes
+    def cleanup_task(task_ref):
         try:
-            result = db.execute(
-                sql_text(
-                    "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
-                ),
-                {"session_id": request.sessionID, "user_id": request.userID},
-            ).fetchone()
-            
-            if result:
-                # Convert result to dict (same as orchestrator does)
-                if hasattr(result, "_mapping"):
-                    video_session_data = dict(result._mapping)
-                else:
-                    video_session_data = {
-                        "id": getattr(result, "id", None),
-                        "user_id": getattr(result, "user_id", None),
-                        "topic": getattr(result, "topic", None),
-                        "confirmed_facts": getattr(result, "confirmed_facts", None),
-                        "generated_script": getattr(result, "generated_script", None),
-                    }
-                logger.info(f"Loaded video_session data for Agent4 session {request.sessionID}")
-        except Exception as e:
-            logger.warning(f"Could not load video_session data for Agent4: {e}")
-            # Continue anyway - Agent4 can work with just the script parameter
-        
-        # Start Agent4 directly
-        async def run_agent_4_with_error_handling():
-            logger = logging.getLogger(__name__)
-            logger.info(f"Starting Agent4 for session {request.sessionID}")
-            
-            connection_ready = await websocket_manager.wait_for_connection(
-                request.sessionID,
-                max_wait=3.0,
-                check_interval=0.1
-            )
-            
-            try:
-                from app.agents.agent_4 import agent_4_process
-                
-                await agent_4_process(
-                    websocket_manager=websocket_manager,
-                    user_id=request.userID,
-                    session_id=request.sessionID,
-                    script=request.script or {},  # Use provided script or empty dict (will be extracted from DB)
-                    voice=request.voice or "alloy",
-                    audio_option=request.audio_option or "tts",
-                    storage_service=storage_service,
-                    agent2_data=None,  # Deprecated
-                    video_session_data=video_session_data,  # Pass same data as orchestrator
-                    db=db  # Pass database session so Agent4 can query if needed
-                )
-            except Exception as e:
-                logger.exception(f"Error in agent_4_process: {e}")
-                try:
-                    await websocket_manager.send_progress(request.sessionID, {
-                        "agentnumber": "Agent4",
-                        "userID": request.userID,
-                        "sessionID": request.sessionID,
-                        "status": "error",
-                        "error": str(e),
-                        "reason": f"Agent4 failed: {type(e).__name__}"
-                    })
-                except Exception:
-                    pass
-        
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(run_agent_4_with_error_handling())
-        if not hasattr(app.state, 'background_tasks'):
-            app.state.background_tasks = set()
-        app.state.background_tasks.add(task)
-        task.add_done_callback(app.state.background_tasks.discard)
-        
-        return StartProcessingResponse(
-            success=True,
-            message="Agent4 started successfully",
-            sessionID=request.sessionID
-        )
-    
-    elif agent_selection == "Agent5":
-        if not request.userID or not request.userID.strip():
-            raise HTTPException(status_code=400, detail="userID is required for Agent5")
-        if not request.sessionID or not request.sessionID.strip():
-            raise HTTPException(status_code=400, detail="sessionID is required for Agent5")
-        if not request.supersessionid or not request.supersessionid.strip():
-            raise HTTPException(status_code=400, detail="supersessionid is required for Agent5")
-        
-        # Start Agent5 directly
-        async def run_agent_5_with_error_handling():
-            logger = logging.getLogger(__name__)
-            logger.info(f"Starting Agent5 for session {request.sessionID}")
-            
-            connection_ready = await websocket_manager.wait_for_connection(
-                request.sessionID,
-                max_wait=3.0,
-                check_interval=0.1
-            )
-            
-            try:
-                from app.agents.agent_5 import agent_5_process
-                await agent_5_process(
-                    websocket_manager=websocket_manager,
-                    user_id=request.userID,
-                    session_id=request.sessionID,
-                    supersessionid=request.supersessionid,
-                    storage_service=storage_service,
-                    pipeline_data=None  # Optional
-                )
-            except Exception as e:
-                logger.exception(f"Error in agent_5_process: {e}")
-                try:
-                    await websocket_manager.send_progress(request.sessionID, {
-                        "agentnumber": "Agent5",
-                        "userID": request.userID,
-                        "sessionID": request.sessionID,
-                        "status": "error",
-                        "error": str(e),
-                        "reason": f"Agent5 failed: {type(e).__name__}"
-                    })
-                except Exception:
-                    pass
-        
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(run_agent_5_with_error_handling())
-        if not hasattr(app.state, 'background_tasks'):
-            app.state.background_tasks = set()
-        app.state.background_tasks.add(task)
-        task.add_done_callback(app.state.background_tasks.discard)
-        
-        return StartProcessingResponse(
-            success=True,
-            message="Agent5 started successfully",
-            sessionID=request.sessionID
-        )
-    
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid agent_selection: {agent_selection}. Must be 'Full Test', 'Agent2', 'Agent4', or 'Agent5'")
+            if hasattr(app.state, 'active_sessions') and user_id in app.state.active_sessions:
+                if session_id in app.state.active_sessions[user_id]:
+                    if app.state.active_sessions[user_id][session_id] is task_ref:
+                        del app.state.active_sessions[user_id][session_id]
+                if user_id in app.state.active_sessions and not app.state.active_sessions[user_id]:
+                    del app.state.active_sessions[user_id]
+        except (KeyError, AttributeError):
+            pass
+        if hasattr(app.state, 'background_tasks'):
+            app.state.background_tasks.discard(task_ref)
+
+    task.add_done_callback(cleanup_task)
+
+    return StartProcessingResponse(
+        success=True,
+        message="Video generation started successfully",
+        sessionID=session_id
+    )
 
 
 # =============================================================================
