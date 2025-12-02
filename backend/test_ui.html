@@ -1,856 +1,1090 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pipeline Agent Test UI</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
 
-        h1 {
-            color: white;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5rem;
-        }
+      h1 {
+        color: white;
+        text-align: center;
+        margin-bottom: 30px;
+        font-size: 2.5rem;
+      }
 
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
 
-        .card h2 {
-            color: #667eea;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+      .card h2 {
+        color: #667eea;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
 
-        .status {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
+      .status {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: bold;
+      }
 
-        .status.pending { background: #fef3c7; color: #92400e; }
-        .status.running { background: #dbeafe; color: #1e40af; }
-        .status.success { background: #d1fae5; color: #065f46; }
-        .status.error { background: #fee2e2; color: #991b1b; }
+      .status.pending {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .status.running {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+      .status.success {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .status.error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
 
-        .form-group {
-            margin-bottom: 20px;
-        }
+      .form-group {
+        margin-bottom: 20px;
+      }
 
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #374151;
-        }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #374151;
+      }
 
-        input, select, textarea {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e5e7eb;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.3s;
+      }
 
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
 
-        textarea {
-            resize: vertical;
-            min-height: 80px;
-            font-family: inherit;
-        }
+      textarea {
+        resize: vertical;
+        min-height: 80px;
+        font-family: inherit;
+      }
 
-        button {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
+      button {
+        background: #667eea;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
 
-        button:hover {
-            background: #5568d3;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-        }
+      button:hover {
+        background: #5568d3;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+      }
 
-        button:disabled {
-            background: #9ca3af !important;
-            cursor: not-allowed !important;
-            transform: none;
-            opacity: 0.6;
-        }
+      button:disabled {
+        background: #9ca3af !important;
+        cursor: not-allowed !important;
+        transform: none;
+        opacity: 0.6;
+      }
 
-        button:disabled:hover {
-            background: #9ca3af !important;
-            transform: none;
-            box-shadow: none;
-        }
+      button:disabled:hover {
+        background: #9ca3af !important;
+        transform: none;
+        box-shadow: none;
+      }
 
-        .result {
-            background: #f9fafb;
-            border-left: 4px solid #667eea;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 13px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
+      .result {
+        background: #f9fafb;
+        border-left: 4px solid #667eea;
+        padding: 15px;
+        border-radius: 8px;
+        margin-top: 20px;
+        font-family: "Monaco", "Courier New", monospace;
+        font-size: 13px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
 
-        .result pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
+      .result pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
 
-        .audio-player {
-            margin-top: 15px;
-            padding: 15px;
-            background: #f3f4f6;
-            border-radius: 8px;
-        }
+      .audio-player {
+        margin-top: 15px;
+        padding: 15px;
+        background: #f3f4f6;
+        border-radius: 8px;
+      }
 
-        .audio-file {
-            margin-bottom: 15px;
-            padding: 12px;
-            background: white;
-            border-radius: 6px;
-            border: 1px solid #e5e7eb;
-        }
+      .audio-file {
+        margin-bottom: 15px;
+        padding: 12px;
+        background: white;
+        border-radius: 6px;
+        border: 1px solid #e5e7eb;
+      }
 
-        .audio-file h4 {
-            margin-bottom: 8px;
-            color: #667eea;
-        }
+      .audio-file h4 {
+        margin-bottom: 8px;
+        color: #667eea;
+      }
 
-        audio {
-            width: 100%;
-            margin-top: 8px;
-        }
+      audio {
+        width: 100%;
+        margin-top: 8px;
+      }
 
-        .cost-info {
-            display: inline-block;
-            background: #fef3c7;
-            color: #92400e;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            font-weight: 600;
-            margin-left: 10px;
-        }
+      .cost-info {
+        display: inline-block;
+        background: #fef3c7;
+        color: #92400e;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        margin-left: 10px;
+      }
 
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
-        }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 15px;
+      }
 
-        .voice-option {
-            padding: 12px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
+      .voice-option {
+        padding: 12px;
+        border: 2px solid #e5e7eb;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
 
-        .voice-option:hover {
-            border-color: #667eea;
-            background: #f9fafb;
-        }
+      .voice-option:hover {
+        border-color: #667eea;
+        background: #f9fafb;
+      }
 
-        .voice-option.selected {
-            border-color: #667eea;
-            background: #ede9fe;
-        }
+      .voice-option.selected {
+        border-color: #667eea;
+        background: #ede9fe;
+      }
 
-        .voice-option h4 {
-            color: #374151;
-            margin-bottom: 4px;
-        }
+      .voice-option h4 {
+        color: #374151;
+        margin-bottom: 4px;
+      }
 
-        .voice-option p {
-            color: #6b7280;
-            font-size: 0.875rem;
-        }
+      .voice-option p {
+        color: #6b7280;
+        font-size: 0.875rem;
+      }
 
-        .progress {
-            margin-top: 15px;
-            padding: 12px;
-            background: #dbeafe;
-            border-radius: 8px;
-            color: #1e40af;
-            font-weight: 600;
-            display: none;
-        }
+      .progress {
+        margin-top: 15px;
+        padding: 12px;
+        background: #dbeafe;
+        border-radius: 8px;
+        color: #1e40af;
+        font-weight: 600;
+        display: none;
+      }
 
-        .progress.show {
-            display: block;
-        }
+      .progress.show {
+        display: block;
+      }
 
-        .info-box {
-            background: #eff6ff;
-            border-left: 4px solid #3b82f6;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
+      .info-box {
+        background: #eff6ff;
+        border-left: 4px solid #3b82f6;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
 
-        .info-box h3 {
-            color: #1e40af;
-            margin-bottom: 8px;
-        }
+      .info-box h3 {
+        color: #1e40af;
+        margin-bottom: 8px;
+      }
 
-        .info-box p {
-            color: #1e3a8a;
-            line-height: 1.6;
-        }
+      .info-box p {
+        color: #1e3a8a;
+        line-height: 1.6;
+      }
 
-        .image-gallery {
-            margin-top: 15px;
-            padding: 15px;
-            background: #f3f4f6;
-            border-radius: 8px;
-        }
+      .image-gallery {
+        margin-top: 15px;
+        padding: 15px;
+        background: #f3f4f6;
+        border-radius: 8px;
+      }
 
-        .image-section {
-            margin-bottom: 25px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-        }
+      .image-section {
+        margin-bottom: 25px;
+        padding: 15px;
+        background: white;
+        border-radius: 8px;
+      }
 
-        .image-section h4 {
-            color: #667eea;
-            margin-bottom: 12px;
-        }
+      .image-section h4 {
+        color: #667eea;
+        margin-bottom: 12px;
+      }
 
-        .image-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 12px;
-        }
+      .image-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        margin-top: 12px;
+      }
 
-        .image-item {
-            position: relative;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            overflow: hidden;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
+      .image-item {
+        position: relative;
+        border: 2px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        transition: all 0.3s;
+        cursor: pointer;
+      }
 
-        .image-item:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
-        }
+      .image-item:hover {
+        border-color: #667eea;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+      }
 
-        .image-item img {
-            width: 100%;
-            height: 200px;
-            object-fit: cover;
-            display: block;
-        }
+      .image-item img {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+        display: block;
+      }
 
-        .image-item.approved {
-            border-color: #10b981;
-            border-width: 3px;
-        }
+      .image-item.approved {
+        border-color: #10b981;
+        border-width: 3px;
+      }
 
-        .image-item.approved::after {
-            content: '✓';
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: #10b981;
-            color: white;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-        }
+      .image-item.approved::after {
+        content: "✓";
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #10b981;
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="container">
-        <h1>🎬 Pipeline Agent Test UI</h1>
+      <h1>🎬 Pipeline Agent Test UI</h1>
 
-        <!-- Info Box -->
-        <div class="info-box">
-            <h3>ℹ️ Test Interface</h3>
-            <p>This UI tests the audio and image generation agents. Make sure the backend is running on <code>http://127.0.0.1:8000</code></p>
+      <!-- Info Box -->
+      <div class="info-box">
+        <h3>ℹ️ Test Interface</h3>
+        <p>
+          This UI tests the audio and image generation agents. Make sure the
+          backend is running on <code>http://127.0.0.1:8000</code>
+        </p>
+      </div>
+
+      <!-- Step 1: Create Script -->
+      <div class="card">
+        <h2>
+          📝 Step 1: Create Script
+          <span id="script-status" class="status pending">Pending</span>
+        </h2>
+
+        <div class="form-group">
+          <label>User Email</label>
+          <input
+            type="email"
+            id="user-email"
+            value="test@example.com"
+            placeholder="test@example.com"
+          />
         </div>
 
-        <!-- Step 1: Create Script -->
-        <div class="card">
-            <h2>
-                📝 Step 1: Create Script
-                <span id="script-status" class="status pending">Pending</span>
-            </h2>
-
-            <div class="form-group">
-                <label>User Email</label>
-                <input type="email" id="user-email" value="test@example.com" placeholder="test@example.com">
-            </div>
-
-            <div class="form-group">
-                <label>User ID (from auth_user table)</label>
-                <input type="text" id="user-id" value="b61b3f1f-5120-4ce2-8da6-2b68607699e7" placeholder="UUID from auth_user.id">
-            </div>
-
-            <div class="grid">
-                <div class="form-group">
-                    <label>Hook Text</label>
-                    <textarea id="hook-text" placeholder="Have you ever wondered...">Have you ever wondered how plants make their own food?</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Concept Text</label>
-                    <textarea id="concept-text" placeholder="The main concept...">Plants use a process called photosynthesis to convert sunlight, water, and carbon dioxide into glucose and oxygen.</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Process Text</label>
-                    <textarea id="process-text" placeholder="Here's how it works...">Inside plant cells are tiny structures called chloroplasts. They contain chlorophyll that captures sunlight energy. This energy transforms water and carbon dioxide into glucose sugar.</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Conclusion Text</label>
-                    <textarea id="conclusion-text" placeholder="So remember...">So plants are basically solar-powered food factories! They create their own energy while producing the oxygen we breathe.</textarea>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <button onclick="createScript()">Create Script</button>
-                <button onclick="viewCurrentScript()" style="background: #10b981;" disabled id="view-script-btn">View Script</button>
-                <button onclick="generateStoryImages()" style="background: #f59e0b;" disabled id="generate-story-images-btn">🎨 Generate Story Images</button>
-                <button onclick="finalizeScript()" style="background: #7c3aed;" disabled id="finalize-script-btn">🚀 Finalize Script (Images + Audio)</button>
-            </div>
-            <div id="script-progress" class="progress">Creating script...</div>
-            <div id="script-result" class="result" style="display:none;"></div>
-
-            <!-- Display Created Script -->
-            <div id="script-display" class="result" style="display:none; margin-top: 20px; background: #f0fdf4; border-left-color: #10b981;">
-                <h3 style="color: #065f46; margin-bottom: 15px;">📄 Created Script</h3>
-                <div id="script-content"></div>
-            </div>
-
-            <!-- Finalization Progress -->
-            <div id="finalize-progress" class="progress" style="background: #ddd6fe; color: #5b21b6;">Generating images and audio in parallel...</div>
-            <div id="finalize-result" class="result" style="display:none;"></div>
-
-            <!-- Story Images Results -->
-            <div id="story-images-results" style="display:none; margin-top: 30px;">
-                <h3 style="color: #065f46; margin-bottom: 15px;">🎨 Story Image Generation Results</h3>
-                <button onclick="loadStoryImages()" style="background: #10b981; margin-bottom: 15px;">Refresh Results</button>
-                
-                <!-- Report Summary -->
-                <div id="story-report-summary" style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #10b981;">
-                    <h4 style="margin-top: 0;">📊 Generation Report</h4>
-                    <div id="report-content"></div>
-                </div>
-
-                <!-- Segments with Images -->
-                <div id="story-segments-container"></div>
-            </div>
+        <div class="form-group">
+          <label>User ID (from auth_user table)</label>
+          <input
+            type="text"
+            id="user-id"
+            value="b61b3f1f-5120-4ce2-8da6-2b68607699e7"
+            placeholder="UUID from auth_user.id"
+          />
         </div>
 
-        <!-- Step 2: Generate Images -->
-        <div class="card">
-            <h2>
-                🎨 Step 2: Generate Images
-                <span id="image-status" class="status pending">Pending</span>
-            </h2>
-
-            <div class="form-group">
-                <label>Session ID (from Step 1)</label>
-                <input type="text" id="image-session-id" placeholder="Will be filled automatically">
-            </div>
-
-            <div class="form-group">
-                <label>Image Model</label>
-                <select id="image-model">
-                    <option value="flux-schnell" selected>Flux Schnell (Fast, Free)</option>
-                    <option value="flux-dev">Flux Dev (Better Quality)</option>
-                    <option value="flux-pro">Flux Pro (Best Quality)</option>
-                    <option value="sdxl">SDXL (Stable Diffusion XL)</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Images Per Part</label>
-                <input type="number" id="images-per-part" value="2" min="1" max="5">
-                <p style="color: #6b7280; font-size: 0.875rem; margin-top: 4px;">
-                    Generate 1-5 image options for each script part (hook, concept, process, conclusion)
-                </p>
-            </div>
-
-            <button onclick="generateImages()" id="generate-images-btn" disabled>Generate Images</button>
-            <div id="image-progress" class="progress">Generating images with template + DALL-E...</div>
-            <div id="image-result" class="result" style="display:none;"></div>
-            <div id="image-gallery" class="image-gallery" style="display:none;"></div>
+        <div class="grid">
+          <div class="form-group">
+            <label>Hook Text</label>
+            <textarea id="hook-text" placeholder="Have you ever wondered...">
+Have you ever wondered how plants make their own food?</textarea
+            >
+          </div>
+          <div class="form-group">
+            <label>Concept Text</label>
+            <textarea id="concept-text" placeholder="The main concept...">
+Plants use a process called photosynthesis to convert sunlight, water, and carbon dioxide into glucose and oxygen.</textarea
+            >
+          </div>
+          <div class="form-group">
+            <label>Process Text</label>
+            <textarea id="process-text" placeholder="Here's how it works...">
+Inside plant cells are tiny structures called chloroplasts. They contain chlorophyll that captures sunlight energy. This energy transforms water and carbon dioxide into glucose sugar.</textarea
+            >
+          </div>
+          <div class="form-group">
+            <label>Conclusion Text</label>
+            <textarea id="conclusion-text" placeholder="So remember...">
+So plants are basically solar-powered food factories! They create their own energy while producing the oxygen we breathe.</textarea
+            >
+          </div>
         </div>
 
-        <!-- Step 3: Generate Audio -->
-        <div class="card">
-            <h2>
-                🔊 Step 3: Generate Audio
-                <span id="audio-status" class="status pending">Pending</span>
-            </h2>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap">
+          <button onclick="createScript()">Create Script</button>
+          <button
+            onclick="viewCurrentScript()"
+            style="background: #10b981"
+            disabled
+            id="view-script-btn"
+          >
+            View Script
+          </button>
+          <button
+            onclick="generateStoryImages()"
+            style="background: #f59e0b"
+            disabled
+            id="generate-story-images-btn"
+          >
+            🎨 Generate Story Images
+          </button>
+          <button
+            onclick="finalizeScript()"
+            style="background: #7c3aed"
+            disabled
+            id="finalize-script-btn"
+          >
+            🚀 Finalize Script (Images + Audio)
+          </button>
+        </div>
+        <div id="script-progress" class="progress">Creating script...</div>
+        <div id="script-result" class="result" style="display: none"></div>
 
-            <div class="form-group">
-                <label>Session ID (from Step 1)</label>
-                <input type="text" id="session-id" placeholder="Will be filled automatically">
-            </div>
-
-            <div class="form-group">
-                <label>Select Voice</label>
-                <div class="grid" id="voice-grid">
-                    <div class="voice-option selected" data-voice="alloy">
-                        <h4>🎵 Alloy</h4>
-                        <p>Neutral, balanced - Great for education</p>
-                    </div>
-                    <div class="voice-option" data-voice="echo">
-                        <h4>🎙️ Echo</h4>
-                        <p>Male, clear - Authoritative</p>
-                    </div>
-                    <div class="voice-option" data-voice="fable">
-                        <h4>📖 Fable</h4>
-                        <p>British, expressive - Engaging</p>
-                    </div>
-                    <div class="voice-option" data-voice="onyx">
-                        <h4>🎬 Onyx</h4>
-                        <p>Deep, authoritative - Professional</p>
-                    </div>
-                    <div class="voice-option" data-voice="nova">
-                        <h4>⭐ Nova</h4>
-                        <p>Female, energetic - Dynamic</p>
-                    </div>
-                    <div class="voice-option" data-voice="shimmer">
-                        <h4>✨ Shimmer</h4>
-                        <p>Warm, friendly - Conversational</p>
-                    </div>
-                </div>
-            </div>
-
-            <button onclick="generateAudio()" id="generate-audio-btn" disabled>Generate Audio</button>
-            <div id="audio-progress" class="progress">Generating audio with OpenAI TTS...</div>
-            <div id="audio-result" class="result" style="display:none;"></div>
-            <div id="audio-player" class="audio-player" style="display:none;"></div>
+        <!-- Display Created Script -->
+        <div
+          id="script-display"
+          class="result"
+          style="
+            display: none;
+            margin-top: 20px;
+            background: #f0fdf4;
+            border-left-color: #10b981;
+          "
+        >
+          <h3 style="color: #065f46; margin-bottom: 15px">📄 Created Script</h3>
+          <div id="script-content"></div>
         </div>
 
-        <!-- Step 4: Compose Final Video -->
-        <div class="card">
-            <h2>
-                🎬 Step 4: Compose Final Video
-                <span id="video-status" class="status pending">Pending</span>
-            </h2>
-
-            <div class="info-box" style="background: #fef3c7; border-left-color: #f59e0b;">
-                <h3>⚡ Final Composition</h3>
-                <p>This step combines all generated assets (images, audio, music) into a complete educational video using FFmpeg.</p>
-            </div>
-
-            <div class="form-group">
-                <label>Session ID</label>
-                <input type="text" id="compose-session-id" placeholder="Will be filled automatically or paste existing session ID" oninput="checkComposeButton()">
-            </div>
-
-            <div class="form-group">
-                <label>Desired Video Duration (seconds)</label>
-                <input type="number" id="desired-duration" value="60" min="30" max="300" step="5">
-                <small style="color: #6b7280; margin-top: 4px; display: block;">Default: 60 seconds. Video will be extended by showing clips longer and adding intro/outro padding.</small>
-            </div>
-
-            <div style="display: flex; gap: 10px;">
-                <button onclick="composeVideo()" id="compose-video-btn" disabled>🎬 Compose Final Video</button>
-            </div>
-            <div id="video-progress" class="progress" style="background: #fef3c7; color: #92400e;">Composing video with FFmpeg...</div>
-            <div id="video-result" class="result" style="display:none;"></div>
-
-            <!-- Video Player -->
-            <div id="video-player" class="audio-player" style="display:none;">
-                <h3>🎉 Final Video</h3>
-                <video controls style="width: 100%; border-radius: 8px; margin-top: 10px;">
-                    <source id="video-source" type="video/mp4">
-                    Your browser does not support the video element.
-                </video>
-                <div style="margin-top: 15px; padding: 12px; background: #d1fae5; border-radius: 8px;">
-                    <p id="video-info" style="margin: 0; color: #065f46; font-weight: 600;"></p>
-                </div>
-            </div>
+        <!-- Finalization Progress -->
+        <div
+          id="finalize-progress"
+          class="progress"
+          style="background: #ddd6fe; color: #5b21b6"
+        >
+          Generating images and audio in parallel...
         </div>
+        <div id="finalize-result" class="result" style="display: none"></div>
+
+        <!-- Story Images Results -->
+        <div id="story-images-results" style="display: none; margin-top: 30px">
+          <h3 style="color: #065f46; margin-bottom: 15px">
+            🎨 Story Image Generation Results
+          </h3>
+          <button
+            onclick="loadStoryImages()"
+            style="background: #10b981; margin-bottom: 15px"
+          >
+            Refresh Results
+          </button>
+
+          <!-- Report Summary -->
+          <div
+            id="story-report-summary"
+            style="
+              background: #f0fdf4;
+              padding: 15px;
+              border-radius: 8px;
+              margin-bottom: 20px;
+              border-left: 4px solid #10b981;
+            "
+          >
+            <h4 style="margin-top: 0">📊 Generation Report</h4>
+            <div id="report-content"></div>
+          </div>
+
+          <!-- Segments with Images -->
+          <div id="story-segments-container"></div>
+        </div>
+      </div>
+
+      <!-- Step 2: Generate Images -->
+      <div class="card">
+        <h2>
+          🎨 Step 2: Generate Images
+          <span id="image-status" class="status pending">Pending</span>
+        </h2>
+
+        <div class="form-group">
+          <label>Session ID (from Step 1)</label>
+          <input
+            type="text"
+            id="image-session-id"
+            placeholder="Will be filled automatically"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Image Model</label>
+          <select id="image-model">
+            <option value="flux-schnell" selected>
+              Flux Schnell (Fast, Free)
+            </option>
+            <option value="flux-dev">Flux Dev (Better Quality)</option>
+            <option value="flux-pro">Flux Pro (Best Quality)</option>
+            <option value="sdxl">SDXL (Stable Diffusion XL)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Images Per Part</label>
+          <input type="number" id="images-per-part" value="2" min="1" max="5" />
+          <p style="color: #6b7280; font-size: 0.875rem; margin-top: 4px">
+            Generate 1-5 image options for each script part (hook, concept,
+            process, conclusion)
+          </p>
+        </div>
+
+        <button onclick="generateImages()" id="generate-images-btn" disabled>
+          Generate Images
+        </button>
+        <div id="image-progress" class="progress">
+          Generating images with template + DALL-E...
+        </div>
+        <div id="image-result" class="result" style="display: none"></div>
+        <div
+          id="image-gallery"
+          class="image-gallery"
+          style="display: none"
+        ></div>
+      </div>
+
+      <!-- Step 3: Generate Audio -->
+      <div class="card">
+        <h2>
+          🔊 Step 3: Generate Audio
+          <span id="audio-status" class="status pending">Pending</span>
+        </h2>
+
+        <div class="form-group">
+          <label>Session ID (from Step 1)</label>
+          <input
+            type="text"
+            id="session-id"
+            placeholder="Will be filled automatically"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Select Voice</label>
+          <div class="grid" id="voice-grid">
+            <div class="voice-option selected" data-voice="alloy">
+              <h4>🎵 Alloy</h4>
+              <p>Neutral, balanced - Great for education</p>
+            </div>
+            <div class="voice-option" data-voice="echo">
+              <h4>🎙️ Echo</h4>
+              <p>Male, clear - Authoritative</p>
+            </div>
+            <div class="voice-option" data-voice="fable">
+              <h4>📖 Fable</h4>
+              <p>British, expressive - Engaging</p>
+            </div>
+            <div class="voice-option" data-voice="onyx">
+              <h4>🎬 Onyx</h4>
+              <p>Deep, authoritative - Professional</p>
+            </div>
+            <div class="voice-option" data-voice="nova">
+              <h4>⭐ Nova</h4>
+              <p>Female, energetic - Dynamic</p>
+            </div>
+            <div class="voice-option" data-voice="shimmer">
+              <h4>✨ Shimmer</h4>
+              <p>Warm, friendly - Conversational</p>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="generateAudio()" id="generate-audio-btn" disabled>
+          Generate Audio
+        </button>
+        <div id="audio-progress" class="progress">
+          Generating audio with OpenAI TTS...
+        </div>
+        <div id="audio-result" class="result" style="display: none"></div>
+        <div id="audio-player" class="audio-player" style="display: none"></div>
+      </div>
+
+      <!-- Step 4: Compose Final Video -->
+      <div class="card">
+        <h2>
+          🎬 Step 4: Compose Final Video
+          <span id="video-status" class="status pending">Pending</span>
+        </h2>
+
+        <div
+          class="info-box"
+          style="background: #fef3c7; border-left-color: #f59e0b"
+        >
+          <h3>⚡ Final Composition</h3>
+          <p>
+            This step combines all generated assets (images, audio, music) into
+            a complete educational video using FFmpeg.
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label>Session ID</label>
+          <input
+            type="text"
+            id="compose-session-id"
+            placeholder="Will be filled automatically or paste existing session ID"
+            oninput="checkComposeButton()"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Desired Video Duration (seconds)</label>
+          <input
+            type="number"
+            id="desired-duration"
+            value="60"
+            min="30"
+            max="300"
+            step="5"
+          />
+          <small style="color: #6b7280; margin-top: 4px; display: block"
+            >Default: 60 seconds. Video will be extended by showing clips longer
+            and adding intro/outro padding.</small
+          >
+        </div>
+
+        <div style="display: flex; gap: 10px">
+          <button onclick="composeVideo()" id="compose-video-btn" disabled>
+            🎬 Compose Final Video
+          </button>
+        </div>
+        <div
+          id="video-progress"
+          class="progress"
+          style="background: #fef3c7; color: #92400e"
+        >
+          Composing video with FFmpeg...
+        </div>
+        <div id="video-result" class="result" style="display: none"></div>
+
+        <!-- Video Player -->
+        <div id="video-player" class="audio-player" style="display: none">
+          <h3>🎉 Final Video</h3>
+          <video
+            controls
+            style="width: 100%; border-radius: 8px; margin-top: 10px"
+          >
+            <source id="video-source" type="video/mp4" />
+            Your browser does not support the video element.
+          </video>
+          <div
+            style="
+              margin-top: 15px;
+              padding: 12px;
+              background: #d1fae5;
+              border-radius: 8px;
+            "
+          >
+            <p
+              id="video-info"
+              style="margin: 0; color: #065f46; font-weight: 600"
+            ></p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-        const API_BASE = 'http://127.0.0.1:8000/api';
-        let selectedVoice = 'alloy';
-        // currentScriptId removed - now using session_id flow with video_session.generated_script
-        let currentSessionId = null;
+      const API_BASE = "http://127.0.0.1:8000/api";
+      let selectedVoice = "alloy";
+      // currentScriptId removed - now using session_id flow with video_session.generated_script
+      let currentSessionId = null;
 
-        // Voice selection
-        document.querySelectorAll('.voice-option').forEach(option => {
-            option.addEventListener('click', () => {
-                document.querySelectorAll('.voice-option').forEach(o => o.classList.remove('selected'));
-                option.classList.add('selected');
-                selectedVoice = option.dataset.voice;
-            });
+      // Voice selection
+      document.querySelectorAll(".voice-option").forEach((option) => {
+        option.addEventListener("click", () => {
+          document
+            .querySelectorAll(".voice-option")
+            .forEach((o) => o.classList.remove("selected"));
+          option.classList.add("selected");
+          selectedVoice = option.dataset.voice;
         });
+      });
 
-        // Generate random IDs
-        function generateId() {
-            return 'test_' + Math.random().toString(36).substr(2, 9);
+      // Generate random IDs
+      function generateId() {
+        return "test_" + Math.random().toString(36).substr(2, 9);
+      }
+
+      // Update status
+      function updateStatus(elementId, status, text) {
+        const el = document.getElementById(elementId);
+        el.className = "status " + status;
+        el.textContent =
+          text || status.charAt(0).toUpperCase() + status.slice(1);
+      }
+
+      // Show result
+      function showResult(elementId, data, isError = false) {
+        const el = document.getElementById(elementId);
+        el.style.display = "block";
+        el.innerHTML = "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
+        if (isError) {
+          el.style.borderLeftColor = "#ef4444";
+        } else {
+          el.style.borderLeftColor = "#667eea";
+        }
+      }
+
+      // Create Script
+      async function createScript() {
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
+        // session_id is now the main identifier (script is stored in video_session.generated_script)
+        currentSessionId = generateId();
+
+        document.getElementById("session-id").value = currentSessionId;
+
+        updateStatus("script-status", "running", "Creating...");
+        document.getElementById("script-progress").classList.add("show");
+
+        const scriptData = {
+          session_id: currentSessionId, // Now uses session_id instead of script_id
+          hook: {
+            text: document.getElementById("hook-text").value,
+            duration: "10",
+            key_concepts: ["introduction"],
+            visual_guidance: "Engaging opening visual",
+          },
+          concept: {
+            text: document.getElementById("concept-text").value,
+            duration: "15",
+            key_concepts: ["main concept"],
+            visual_guidance: "Concept illustration",
+          },
+          process: {
+            text: document.getElementById("process-text").value,
+            duration: "20",
+            key_concepts: ["process steps"],
+            visual_guidance: "Process diagram",
+          },
+          conclusion: {
+            text: document.getElementById("conclusion-text").value,
+            duration: "10",
+            key_concepts: ["summary"],
+            visual_guidance: "Concluding visual",
+          },
+        };
+
+        try {
+          // Save script to database via test endpoint
+          const response = await fetch(`${API_BASE}/test/save-script`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify(scriptData),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(
+              data.detail || data.message || "Script creation failed"
+            );
+          }
+
+          updateStatus("script-status", "success", "Created");
+          showResult("script-result", data);
+
+          // Enable audio and image generation
+          document.getElementById("generate-audio-btn").disabled = false;
+          document.getElementById("generate-images-btn").disabled = false;
+          document.getElementById("generate-story-images-btn").disabled = false;
+          document.getElementById("view-script-btn").disabled = false;
+          document.getElementById("finalize-script-btn").disabled = false;
+
+          // Auto-fill session ID in all forms
+          document.getElementById("image-session-id").value = currentSessionId;
+          document.getElementById("session-id").value = currentSessionId;
+          document.getElementById("compose-session-id").value =
+            currentSessionId;
+
+          // Fetch and display the created script
+          await displayCreatedScript(currentSessionId, email);
+        } catch (error) {
+          updateStatus("script-status", "error", "Failed");
+          showResult("script-result", { error: error.message }, true);
+        } finally {
+          document.getElementById("script-progress").classList.remove("show");
+        }
+      }
+
+      // Generate Audio
+      async function generateAudio() {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
         }
 
-        // Update status
-        function updateStatus(elementId, status, text) {
-            const el = document.getElementById(elementId);
-            el.className = 'status ' + status;
-            el.textContent = text || status.charAt(0).toUpperCase() + status.slice(1);
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
+
+        updateStatus("audio-status", "running", "Generating...");
+        document.getElementById("audio-progress").classList.add("show");
+        document.getElementById("generate-audio-btn").disabled = true;
+
+        try {
+          // Fetch the current script to send to the test endpoint
+          const scriptResponse = await fetch(
+            `${API_BASE}/scripts/${currentSessionId}`,
+            {
+              headers: {
+                "X-User-Email": email,
+                "X-User-Id": userId,
+              },
+            }
+          );
+
+          if (!scriptResponse.ok) {
+            throw new Error("Failed to fetch script");
+          }
+
+          const scriptData = await scriptResponse.json();
+
+          // Build script object for test endpoint
+          const script = {
+            hook: scriptData.hook,
+            concept: scriptData.concept,
+            process: scriptData.process,
+            conclusion: scriptData.conclusion,
+          };
+
+          // Call agent4/test endpoint (tests full Agent 4 pipeline)
+          const response = await fetch(`${API_BASE}/agent4/test`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              script: script,
+              voice: selectedVoice,
+              audio_option: "tts",
+            }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok && data.success) {
+            updateStatus("audio-status", "success", "Generated");
+            showResult("audio-result", data);
+
+            // Extract audio files from data.data
+            const audioFiles = data.data.audio_files || [];
+            const totalCost = data.data.total_cost || 0.0;
+            const totalDuration = data.data.total_duration || 0.0;
+
+            // Show audio player
+            displayAudioPlayer(audioFiles, totalCost, totalDuration);
+
+            // Enable compose button if images are also ready
+            checkAndEnableCompose();
+          } else {
+            throw new Error(data.error || "Audio generation failed");
+          }
+        } catch (error) {
+          updateStatus("audio-status", "error", "Failed");
+          showResult("audio-result", { error: error.message }, true);
+        } finally {
+          document.getElementById("audio-progress").classList.remove("show");
+          document.getElementById("generate-audio-btn").disabled = false;
+        }
+      }
+
+      // Generate Story Images (using StoryImageGeneratorAgent)
+      async function generateStoryImages() {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
         }
 
-        // Show result
-        function showResult(elementId, data, isError = false) {
-            const el = document.getElementById(elementId);
-            el.style.display = 'block';
-            el.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            if (isError) {
-                el.style.borderLeftColor = '#ef4444';
-            } else {
-                el.style.borderLeftColor = '#667eea';
-            }
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
+
+        // Get options (you can add UI controls for these later)
+        const numImages = 2; // Default
+        const maxPasses = 5; // Default
+        const maxVerificationPasses = 3; // Default
+        const fastMode = false; // Default
+        const templateTitle =
+          prompt(
+            "Enter template title (or leave blank for default):",
+            "Educational Video"
+          ) || "Educational Video";
+        const diagramS3Path =
+          prompt(
+            "Enter diagram S3 path (optional, leave blank to skip):",
+            ""
+          ) || null;
+
+        updateStatus("script-status", "running", "Generating story images...");
+        document.getElementById("script-progress").classList.add("show");
+        document.getElementById("generate-story-images-btn").disabled = true;
+
+        try {
+          const response = await fetch(`${API_BASE}/generate-story-images`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              // script_id removed - now reads from video_session.generated_script
+              template_title: templateTitle,
+              num_images: numImages,
+              max_passes: maxPasses,
+              max_verification_passes: maxVerificationPasses,
+              fast_mode: fastMode,
+              diagram_s3_path: diagramS3Path,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            updateStatus(
+              "script-status",
+              "success",
+              "Story images generating!"
+            );
+            showResult("script-result", {
+              message: data.message,
+              status: data.status,
+              note: "Check WebSocket for real-time progress. Images will be saved to S3.",
+            });
+
+            // Show results section and start polling
+            document.getElementById("story-images-results").style.display =
+              "block";
+            setTimeout(() => loadStoryImages(), 3000); // Wait 3 seconds then check
+          } else {
+            throw new Error(
+              data.detail || data.message || "Story image generation failed"
+            );
+          }
+        } catch (error) {
+          updateStatus("script-status", "error", "Failed");
+          showResult("script-result", { error: error.message }, true);
+        } finally {
+          document.getElementById("script-progress").classList.remove("show");
+          document.getElementById("generate-story-images-btn").disabled = false;
+        }
+      }
+
+      // Load and display story images results
+      async function loadStoryImages() {
+        if (!currentSessionId) {
+          alert("No session ID available");
+          return;
         }
 
-        // Create Script
-        async function createScript() {
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-            // session_id is now the main identifier (script is stored in video_session.generated_script)
-            currentSessionId = generateId();
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
 
-            document.getElementById('session-id').value = currentSessionId;
-
-            updateStatus('script-status', 'running', 'Creating...');
-            document.getElementById('script-progress').classList.add('show');
-
-            const scriptData = {
-                session_id: currentSessionId,  // Now uses session_id instead of script_id
-                hook: {
-                    text: document.getElementById('hook-text').value,
-                    duration: '10',
-                    key_concepts: ['introduction'],
-                    visual_guidance: 'Engaging opening visual'
-                },
-                concept: {
-                    text: document.getElementById('concept-text').value,
-                    duration: '15',
-                    key_concepts: ['main concept'],
-                    visual_guidance: 'Concept illustration'
-                },
-                process: {
-                    text: document.getElementById('process-text').value,
-                    duration: '20',
-                    key_concepts: ['process steps'],
-                    visual_guidance: 'Process diagram'
-                },
-                conclusion: {
-                    text: document.getElementById('conclusion-text').value,
-                    duration: '10',
-                    key_concepts: ['summary'],
-                    visual_guidance: 'Concluding visual'
-                }
-            };
-
-            try {
-                // Save script to database via test endpoint
-                const response = await fetch(`${API_BASE}/test/save-script`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify(scriptData)
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.detail || data.message || 'Script creation failed');
-                }
-
-                updateStatus('script-status', 'success', 'Created');
-                showResult('script-result', data);
-
-                // Enable audio and image generation
-                document.getElementById('generate-audio-btn').disabled = false;
-                document.getElementById('generate-images-btn').disabled = false;
-                document.getElementById('generate-story-images-btn').disabled = false;
-                document.getElementById('view-script-btn').disabled = false;
-                document.getElementById('finalize-script-btn').disabled = false;
-
-                // Auto-fill session ID in all forms
-                document.getElementById('image-session-id').value = currentSessionId;
-                document.getElementById('session-id').value = currentSessionId;
-                document.getElementById('compose-session-id').value = currentSessionId;
-
-                // Fetch and display the created script
-                await displayCreatedScript(currentSessionId, email);
-
-            } catch (error) {
-                updateStatus('script-status', 'error', 'Failed');
-                showResult('script-result', { error: error.message }, true);
-            } finally {
-                document.getElementById('script-progress').classList.remove('show');
+        try {
+          const response = await fetch(
+            `${API_BASE}/story-images/${currentSessionId}`,
+            {
+              method: "GET",
+              headers: {
+                "X-User-Email": email,
+                "X-User-Id": userId,
+              },
             }
-        }
+          );
 
-        // Generate Audio
-        async function generateAudio() {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
+          if (!response.ok) {
+            if (response.status === 404) {
+              document.getElementById("report-content").innerHTML =
+                '<p style="color: #6b7280;">Generation not started or still in progress. Check back in a moment.</p>';
+              return;
             }
+            throw new Error("Failed to load story images");
+          }
 
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
+          const data = await response.json();
 
-            updateStatus('audio-status', 'running', 'Generating...');
-            document.getElementById('audio-progress').classList.add('show');
-            document.getElementById('generate-audio-btn').disabled = true;
-
-            try {
-                const response = await fetch(`${API_BASE}/generate-audio`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        // script_id removed - now reads from video_session.generated_script
-                        voice: selectedVoice,
-                        audio_option: 'tts'
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    updateStatus('audio-status', 'success', 'Generated');
-                    showResult('audio-result', data);
-
-                    // Show audio player
-                    displayAudioPlayer(data.audio_files, data.total_cost, data.total_duration);
-
-                    // Enable compose button if images are also ready
-                    checkAndEnableCompose();
-
-                } else {
-                    throw new Error(data.detail || data.message || 'Audio generation failed');
-                }
-
-            } catch (error) {
-                updateStatus('audio-status', 'error', 'Failed');
-                showResult('audio-result', { error: error.message }, true);
-            } finally {
-                document.getElementById('audio-progress').classList.remove('show');
-                document.getElementById('generate-audio-btn').disabled = false;
-            }
-        }
-
-        // Generate Story Images (using StoryImageGeneratorAgent)
-        async function generateStoryImages() {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
-            }
-
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-
-            // Get options (you can add UI controls for these later)
-            const numImages = 2; // Default
-            const maxPasses = 5; // Default
-            const maxVerificationPasses = 3; // Default
-            const fastMode = false; // Default
-            const templateTitle = prompt('Enter template title (or leave blank for default):', 'Educational Video') || 'Educational Video';
-            const diagramS3Path = prompt('Enter diagram S3 path (optional, leave blank to skip):', '') || null;
-
-            updateStatus('script-status', 'running', 'Generating story images...');
-            document.getElementById('script-progress').classList.add('show');
-            document.getElementById('generate-story-images-btn').disabled = true;
-
-            try {
-                const response = await fetch(`${API_BASE}/generate-story-images`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        // script_id removed - now reads from video_session.generated_script
-                        template_title: templateTitle,
-                        num_images: numImages,
-                        max_passes: maxPasses,
-                        max_verification_passes: maxVerificationPasses,
-                        fast_mode: fastMode,
-                        diagram_s3_path: diagramS3Path
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    updateStatus('script-status', 'success', 'Story images generating!');
-                    showResult('script-result', {
-                        message: data.message,
-                        status: data.status,
-                        note: 'Check WebSocket for real-time progress. Images will be saved to S3.'
-                    });
-                    
-                    // Show results section and start polling
-                    document.getElementById('story-images-results').style.display = 'block';
-                    setTimeout(() => loadStoryImages(), 3000); // Wait 3 seconds then check
-                } else {
-                    throw new Error(data.detail || data.message || 'Story image generation failed');
-                }
-
-            } catch (error) {
-                updateStatus('script-status', 'error', 'Failed');
-                showResult('script-result', { error: error.message }, true);
-            } finally {
-                document.getElementById('script-progress').classList.remove('show');
-                document.getElementById('generate-story-images-btn').disabled = false;
-            }
-        }
-
-        // Load and display story images results
-        async function loadStoryImages() {
-            if (!currentSessionId) {
-                alert('No session ID available');
-                return;
-            }
-
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-
-            try {
-                const response = await fetch(`${API_BASE}/story-images/${currentSessionId}`, {
-                    method: 'GET',
-                    headers: {
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    }
-                });
-
-                if (!response.ok) {
-                    if (response.status === 404) {
-                        document.getElementById('report-content').innerHTML = 
-                            '<p style="color: #6b7280;">Generation not started or still in progress. Check back in a moment.</p>';
-                        return;
-                    }
-                    throw new Error('Failed to load story images');
-                }
-
-                const data = await response.json();
-
-                // Display report summary
-                const reportHtml = `
+          // Display report summary
+          const reportHtml = `
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div>
-                            <strong>Status:</strong> <span style="color: ${data.status === 'completed' ? '#10b981' : '#f59e0b'}">${data.status}</span>
+                            <strong>Status:</strong> <span style="color: ${
+                              data.status === "completed"
+                                ? "#10b981"
+                                : "#f59e0b"
+                            }">${data.status}</span>
                         </div>
                         <div>
-                            <strong>Template:</strong> ${data.template_title || 'N/A'}
+                            <strong>Template:</strong> ${
+                              data.template_title || "N/A"
+                            }
                         </div>
                         <div>
-                            <strong>Segments:</strong> ${data.segments_succeeded}/${data.segments_total} succeeded
+                            <strong>Segments:</strong> ${
+                              data.segments_succeeded
+                            }/${data.segments_total} succeeded
                         </div>
                         <div>
-                            <strong>Total Images:</strong> ${data.total_images_generated}
+                            <strong>Total Images:</strong> ${
+                              data.total_images_generated
+                            }
                         </div>
                         <div>
-                            <strong>Total Cost:</strong> $${data.total_cost_usd.toFixed(4)}
+                            <strong>Total Cost:</strong> $${data.total_cost_usd.toFixed(
+                              4
+                            )}
                         </div>
                         <div>
-                            <strong>Total Time:</strong> ${data.total_time_seconds.toFixed(1)}s
+                            <strong>Total Time:</strong> ${data.total_time_seconds.toFixed(
+                              1
+                            )}s
                         </div>
                     </div>
                 `;
-                document.getElementById('report-content').innerHTML = reportHtml;
+          document.getElementById("report-content").innerHTML = reportHtml;
 
-                // Display segments with images
-                const segmentsContainer = document.getElementById('story-segments-container');
-                segmentsContainer.innerHTML = '';
+          // Display segments with images
+          const segmentsContainer = document.getElementById(
+            "story-segments-container"
+          );
+          segmentsContainer.innerHTML = "";
 
-                if (data.segments && data.segments.length > 0) {
-                    data.segments.forEach(segment => {
-                        const segmentDiv = document.createElement('div');
-                        segmentDiv.style.cssText = 'margin-bottom: 30px; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;';
-                        
-                        const segmentHeader = `
+          if (data.segments && data.segments.length > 0) {
+            data.segments.forEach((segment) => {
+              const segmentDiv = document.createElement("div");
+              segmentDiv.style.cssText =
+                "margin-bottom: 30px; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;";
+
+              const segmentHeader = `
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                 <h4 style="margin: 0;">
-                                    Segment ${segment.segment_number}: ${segment.segment_title}
-                                    <span style="color: ${segment.status === 'success' ? '#10b981' : '#ef4444'}; font-size: 0.875rem; margin-left: 10px;">
+                                    Segment ${segment.segment_number}: ${
+                segment.segment_title
+              }
+                                    <span style="color: ${
+                                      segment.status === "success"
+                                        ? "#10b981"
+                                        : "#ef4444"
+                                    }; font-size: 0.875rem; margin-left: 10px;">
                                         (${segment.status})
                                     </span>
                                 </h4>
-                                <button onclick="regenerateSegment(${segment.segment_number})" 
+                                <button onclick="regenerateSegment(${
+                                  segment.segment_number
+                                })" 
                                         style="background: #f59e0b; padding: 8px 16px; border: none; border-radius: 6px; color: white; cursor: pointer;">
                                     🔄 Regenerate
                                 </button>
                             </div>
                             <div style="color: #6b7280; font-size: 0.875rem; margin-bottom: 15px;">
-                                Cost: $${segment.cost.toFixed(4)} | Time: ${segment.time_seconds.toFixed(1)}s | Images: ${segment.images.length}
+                                Cost: $${segment.cost.toFixed(
+                                  4
+                                )} | Time: ${segment.time_seconds.toFixed(
+                1
+              )}s | Images: ${segment.images.length}
                             </div>
                         `;
-                        
-                        // Image grid
-                        let imagesHtml = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">';
-                        if (segment.images && segment.images.length > 0) {
-                            segment.images.forEach(img => {
-                                imagesHtml += `
+
+              // Image grid
+              let imagesHtml =
+                '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">';
+              if (segment.images && segment.images.length > 0) {
+                segment.images.forEach((img) => {
+                  imagesHtml += `
                                     <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
                                         <img src="${img.presigned_url}" 
                                              alt="Image ${img.image_number}" 
@@ -862,168 +1096,191 @@
                                         </div>
                                     </div>
                                 `;
-                            });
-                        } else {
-                            imagesHtml += '<div style="grid-column: 1 / -1; color: #6b7280; padding: 20px; text-align: center;">No images generated for this segment</div>';
-                        }
-                        imagesHtml += '</div>';
-                        
-                        segmentDiv.innerHTML = segmentHeader + imagesHtml;
-                        segmentsContainer.appendChild(segmentDiv);
-                    });
-                }
+                });
+              } else {
+                imagesHtml +=
+                  '<div style="grid-column: 1 / -1; color: #6b7280; padding: 20px; text-align: center;">No images generated for this segment</div>';
+              }
+              imagesHtml += "</div>";
 
-                // Show failed segments if any
-                if (data.failed_segments && data.failed_segments.length > 0) {
-                    const failedDiv = document.createElement('div');
-                    failedDiv.style.cssText = 'margin-top: 20px; padding: 15px; background: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;';
-                    failedDiv.innerHTML = `
+              segmentDiv.innerHTML = segmentHeader + imagesHtml;
+              segmentsContainer.appendChild(segmentDiv);
+            });
+          }
+
+          // Show failed segments if any
+          if (data.failed_segments && data.failed_segments.length > 0) {
+            const failedDiv = document.createElement("div");
+            failedDiv.style.cssText =
+              "margin-top: 20px; padding: 15px; background: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;";
+            failedDiv.innerHTML = `
                         <h4 style="margin-top: 0; color: #991b1b;">❌ Failed Segments</h4>
-                        ${data.failed_segments.map(seg => `
+                        ${data.failed_segments
+                          .map(
+                            (seg) => `
                             <div style="margin-bottom: 10px;">
-                                <strong>Segment ${seg.segment_number}: ${seg.segment_title || 'Unknown'}</strong>
-                                <div style="color: #991b1b; font-size: 0.875rem;">${seg.error || 'Unknown error'}</div>
+                                <strong>Segment ${seg.segment_number}: ${
+                              seg.segment_title || "Unknown"
+                            }</strong>
+                                <div style="color: #991b1b; font-size: 0.875rem;">${
+                                  seg.error || "Unknown error"
+                                }</div>
                             </div>
-                        `).join('')}
+                        `
+                          )
+                          .join("")}
                     `;
-                    segmentsContainer.appendChild(failedDiv);
-                }
+            segmentsContainer.appendChild(failedDiv);
+          }
+        } catch (error) {
+          console.error("Error loading story images:", error);
+          document.getElementById(
+            "report-content"
+          ).innerHTML = `<p style="color: #ef4444;">Error loading results: ${error.message}</p>`;
+        }
+      }
 
-            } catch (error) {
-                console.error('Error loading story images:', error);
-                document.getElementById('report-content').innerHTML = 
-                    `<p style="color: #ef4444;">Error loading results: ${error.message}</p>`;
-            }
+      // Regenerate a specific segment
+      async function regenerateSegment(segmentNumber) {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
         }
 
-        // Regenerate a specific segment
-        async function regenerateSegment(segmentNumber) {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
-            }
-
-            if (!confirm(`Regenerate images for Segment ${segmentNumber}?`)) {
-                return;
-            }
-
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-
-            // Get options (same defaults as generateStoryImages)
-            const numImages = 2;
-            const maxPasses = 5;
-            const maxVerificationPasses = 3;
-            const fastMode = false;
-            const templateTitle = prompt('Enter template title (or leave blank for default):', 'Educational Video') || 'Educational Video';
-            const diagramS3Path = prompt('Enter diagram S3 path (optional, leave blank to skip):', '') || null;
-
-            try {
-                const response = await fetch(`${API_BASE}/regenerate-segment`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        // script_id removed - now reads from video_session.generated_script
-                        segment_number: segmentNumber,
-                        template_title: templateTitle,
-                        num_images: numImages,
-                        max_passes: maxPasses,
-                        max_verification_passes: maxVerificationPasses,
-                        fast_mode: fastMode,
-                        diagram_s3_path: diagramS3Path
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    alert(`Segment ${segmentNumber} regeneration started! Check back in a moment.`);
-                    // Refresh results after a delay
-                    setTimeout(() => loadStoryImages(), 5000);
-                } else {
-                    throw new Error(data.detail || data.message || 'Segment regeneration failed');
-                }
-
-            } catch (error) {
-                alert(`Error: ${error.message}`);
-            }
+        if (!confirm(`Regenerate images for Segment ${segmentNumber}?`)) {
+          return;
         }
 
-        // Generate Images
-        async function generateImages() {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
-            }
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
 
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-            const model = document.getElementById('image-model').value;
-            const imagesPerPart = parseInt(document.getElementById('images-per-part').value);
+        // Get options (same defaults as generateStoryImages)
+        const numImages = 2;
+        const maxPasses = 5;
+        const maxVerificationPasses = 3;
+        const fastMode = false;
+        const templateTitle =
+          prompt(
+            "Enter template title (or leave blank for default):",
+            "Educational Video"
+          ) || "Educational Video";
+        const diagramS3Path =
+          prompt(
+            "Enter diagram S3 path (optional, leave blank to skip):",
+            ""
+          ) || null;
 
-            updateStatus('image-status', 'running', 'Generating...');
-            document.getElementById('image-progress').classList.add('show');
-            document.getElementById('generate-images-btn').disabled = true;
+        try {
+          const response = await fetch(`${API_BASE}/regenerate-segment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              // script_id removed - now reads from video_session.generated_script
+              segment_number: segmentNumber,
+              template_title: templateTitle,
+              num_images: numImages,
+              max_passes: maxPasses,
+              max_verification_passes: maxVerificationPasses,
+              fast_mode: fastMode,
+              diagram_s3_path: diagramS3Path,
+            }),
+          });
 
-            try {
-                const response = await fetch(`${API_BASE}/generate-images`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        // script_id removed - now reads from video_session.generated_script
-                        model: model,
-                        images_per_part: imagesPerPart
-                    })
-                });
+          const data = await response.json();
 
-                const data = await response.json();
+          if (response.ok) {
+            alert(
+              `Segment ${segmentNumber} regeneration started! Check back in a moment.`
+            );
+            // Refresh results after a delay
+            setTimeout(() => loadStoryImages(), 5000);
+          } else {
+            throw new Error(
+              data.detail || data.message || "Segment regeneration failed"
+            );
+          }
+        } catch (error) {
+          alert(`Error: ${error.message}`);
+        }
+      }
 
-                if (response.ok) {
-                    updateStatus('image-status', 'success', 'Generated');
-                    showResult('image-result', data);
-
-                    // Show image gallery
-                    displayImageGallery(data.micro_scenes);
-
-                    // Enable compose button if audio is also ready
-                    checkAndEnableCompose();
-
-                } else {
-                    throw new Error(data.detail || data.message || 'Image generation failed');
-                }
-
-            } catch (error) {
-                updateStatus('image-status', 'error', 'Failed');
-                showResult('image-result', { error: error.message }, true);
-            } finally {
-                document.getElementById('image-progress').classList.remove('show');
-                document.getElementById('generate-images-btn').disabled = false;
-            }
+      // Generate Images
+      async function generateImages() {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
         }
 
-        // Display Image Gallery
-        function displayImageGallery(microScenes) {
-            const gallery = document.getElementById('image-gallery');
-            gallery.style.display = 'block';
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
+        const model = document.getElementById("image-model").value;
+        const imagesPerPart = parseInt(
+          document.getElementById("images-per-part").value
+        );
 
-            let html = `<h3>Generated Images <span class="cost-info">Total Cost: ${microScenes.cost}</span></h3>`;
+        updateStatus("image-status", "running", "Generating...");
+        document.getElementById("image-progress").classList.add("show");
+        document.getElementById("generate-images-btn").disabled = true;
 
-            const parts = ['hook', 'concept', 'process', 'conclusion'];
-            parts.forEach(part => {
-                const partData = microScenes[part];
-                if (!partData || !partData.images) return;
+        try {
+          const response = await fetch(`${API_BASE}/generate-images`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              // script_id removed - now reads from video_session.generated_script
+              model: model,
+              images_per_part: imagesPerPart,
+            }),
+          });
 
-                html += `
+          const data = await response.json();
+
+          if (response.ok) {
+            updateStatus("image-status", "success", "Generated");
+            showResult("image-result", data);
+
+            // Show image gallery
+            displayImageGallery(data.micro_scenes);
+
+            // Enable compose button if audio is also ready
+            checkAndEnableCompose();
+          } else {
+            throw new Error(
+              data.detail || data.message || "Image generation failed"
+            );
+          }
+        } catch (error) {
+          updateStatus("image-status", "error", "Failed");
+          showResult("image-result", { error: error.message }, true);
+        } finally {
+          document.getElementById("image-progress").classList.remove("show");
+          document.getElementById("generate-images-btn").disabled = false;
+        }
+      }
+
+      // Display Image Gallery
+      function displayImageGallery(microScenes) {
+        const gallery = document.getElementById("image-gallery");
+        gallery.style.display = "block";
+
+        let html = `<h3>Generated Images <span class="cost-info">Total Cost: ${microScenes.cost}</span></h3>`;
+
+        const parts = ["hook", "concept", "process", "conclusion"];
+        parts.forEach((part) => {
+          const partData = microScenes[part];
+          if (!partData || !partData.images) return;
+
+          html += `
                     <div class="image-section">
                         <h4>${part.charAt(0).toUpperCase() + part.slice(1)}</h4>
                         <p style="color: #6b7280; font-size: 0.875rem;">
@@ -1032,334 +1289,384 @@
                         <div class="image-grid">
                 `;
 
-                partData.images.forEach((image, index) => {
-                    const approvedClass = image.approved ? 'approved' : '';
-                    const imageUrl = image.image || image.url; // Support both field names
-                    html += `
+          partData.images.forEach((image, index) => {
+            const approvedClass = image.approved ? "approved" : "";
+            const imageUrl = image.image || image.url; // Support both field names
+            html += `
                         <div class="image-item ${approvedClass}">
-                            <img src="${imageUrl}" alt="${part} image ${index + 1}" />
+                            <img src="${imageUrl}" alt="${part} image ${
+              index + 1
+            }" />
                         </div>
                     `;
-                });
+          });
 
-                html += `
+          html += `
                         </div>
                     </div>
                 `;
-            });
+        });
 
-            gallery.innerHTML = html;
-        }
+        gallery.innerHTML = html;
+      }
 
-        // Display Audio Player
-        function displayAudioPlayer(audioFiles, totalCost, totalDuration) {
-            const player = document.getElementById('audio-player');
-            player.style.display = 'block';
+      // Display Audio Player
+      function displayAudioPlayer(audioFiles, totalCost, totalDuration) {
+        const player = document.getElementById("audio-player");
+        player.style.display = "block";
 
-            let html = `<h3>Generated Audio <span class="cost-info">Cost: $${totalCost.toFixed(4)} | Duration: ${totalDuration}s</span></h3>`;
+        let html = `<h3>Generated Audio <span class="cost-info">Cost: $${totalCost.toFixed(
+          4
+        )} | Duration: ${totalDuration}s</span></h3>`;
 
-            audioFiles.forEach(file => {
-                html += `
+        audioFiles.forEach((file) => {
+          html += `
                     <div class="audio-file">
-                        <h4>${file.part.charAt(0).toUpperCase() + file.part.slice(1)}</h4>
-                        <p>Duration: ${file.duration}s | Cost: $${file.cost.toFixed(4)}</p>
+                        <h4>${
+                          file.part.charAt(0).toUpperCase() + file.part.slice(1)
+                        }</h4>
+                        <p>Duration: ${
+                          file.duration
+                        }s | Cost: $${file.cost.toFixed(4)}</p>
                         <audio controls src="${file.url}">
                             Your browser does not support the audio element.
                         </audio>
                     </div>
                 `;
+        });
+
+        player.innerHTML = html;
+      }
+
+      // View Current Script (manual trigger)
+      async function viewCurrentScript() {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
+        }
+
+        const email = document.getElementById("user-email").value;
+        await displayCreatedScript(currentSessionId, email);
+      }
+
+      // Finalize Script (Generate Images + Audio in Parallel)
+      async function finalizeScript() {
+        if (!currentSessionId) {
+          alert("Please create a script first!");
+          return;
+        }
+
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
+        const model = document.getElementById("image-model").value;
+        const imagesPerPart = parseInt(
+          document.getElementById("images-per-part").value
+        );
+        const voice = selectedVoice;
+
+        // Disable button during generation
+        document.getElementById("finalize-script-btn").disabled = true;
+        document.getElementById("finalize-progress").classList.add("show");
+
+        console.log("🚀 Starting parallel generation...");
+        const startTime = Date.now();
+
+        try {
+          const response = await fetch(`${API_BASE}/finalize-script`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              // script_id removed - now reads from video_session.generated_script
+              model: model,
+              images_per_part: imagesPerPart,
+              voice: voice,
+              audio_option: "tts",
+            }),
+          });
+
+          const data = await response.json();
+          const endTime = Date.now();
+          const totalTime = ((endTime - startTime) / 1000).toFixed(1);
+
+          if (response.ok) {
+            console.log(`✅ Parallel generation complete in ${totalTime}s`);
+
+            // Update status badges
+            updateStatus("image-status", "success", "Generated");
+            updateStatus("audio-status", "success", "Generated");
+
+            // Show success result
+            showResult("finalize-result", {
+              ...data,
+              generation_time: `${totalTime}s`,
+              message: `Successfully generated ${
+                data.micro_scenes.hook.images.length * 4
+              } images and ${data.audio_files.length} audio files in parallel!`,
             });
 
-            player.innerHTML = html;
-        }
-
-        // View Current Script (manual trigger)
-        async function viewCurrentScript() {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
+            // Display images
+            if (data.micro_scenes) {
+              displayImageGallery(data.micro_scenes);
             }
 
-            const email = document.getElementById('user-email').value;
-            await displayCreatedScript(currentSessionId, email);
-        }
-
-        // Finalize Script (Generate Images + Audio in Parallel)
-        async function finalizeScript() {
-            if (!currentSessionId) {
-                alert('Please create a script first!');
-                return;
+            // Display audio
+            if (data.audio_files && data.audio_files.length > 0) {
+              displayAudioPlayer(
+                data.audio_files,
+                data.total_cost,
+                data.total_duration
+              );
             }
 
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-            const model = document.getElementById('image-model').value;
-            const imagesPerPart = parseInt(document.getElementById('images-per-part').value);
-            const voice = selectedVoice;
+            // Enable compose button since both are done
+            document.getElementById("compose-video-btn").disabled = false;
+            console.log("✅ Finalize complete - Compose button enabled");
 
-            // Disable button during generation
-            document.getElementById('finalize-script-btn').disabled = true;
-            document.getElementById('finalize-progress').classList.add('show');
-
-            console.log('🚀 Starting parallel generation...');
-            const startTime = Date.now();
-
-            try {
-                const response = await fetch(`${API_BASE}/finalize-script`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        // script_id removed - now reads from video_session.generated_script
-                        model: model,
-                        images_per_part: imagesPerPart,
-                        voice: voice,
-                        audio_option: 'tts'
-                    })
-                });
-
-                const data = await response.json();
-                const endTime = Date.now();
-                const totalTime = ((endTime - startTime) / 1000).toFixed(1);
-
-                if (response.ok) {
-                    console.log(`✅ Parallel generation complete in ${totalTime}s`);
-
-                    // Update status badges
-                    updateStatus('image-status', 'success', 'Generated');
-                    updateStatus('audio-status', 'success', 'Generated');
-
-                    // Show success result
-                    showResult('finalize-result', {
-                        ...data,
-                        generation_time: `${totalTime}s`,
-                        message: `Successfully generated ${data.micro_scenes.hook.images.length * 4} images and ${data.audio_files.length} audio files in parallel!`
-                    });
-
-                    // Display images
-                    if (data.micro_scenes) {
-                        displayImageGallery(data.micro_scenes);
-                    }
-
-                    // Display audio
-                    if (data.audio_files && data.audio_files.length > 0) {
-                        displayAudioPlayer(data.audio_files, data.total_cost, data.total_duration);
-                    }
-
-                    // Enable compose button since both are done
-                    document.getElementById('compose-video-btn').disabled = false;
-                    console.log('✅ Finalize complete - Compose button enabled');
-
-                    // Show summary
-                    alert(`✅ Script Finalized!\n\n` +
-                          `Images: Generated ${data.micro_scenes.hook.images.length * 4} images\n` +
-                          `Audio: ${data.audio_files.length} files (${data.total_duration}s)\n` +
-                          `Total Cost: $${data.total_cost.toFixed(4)}\n` +
-                          `Time: ${totalTime}s (parallel execution)\n\n` +
-                          `You can now compose the final video!`);
-
-                } else {
-                    throw new Error(data.detail || data.message || 'Finalization failed');
-                }
-
-            } catch (error) {
-                console.error('❌ Finalization failed:', error);
-                showResult('finalize-result', { error: error.message }, true);
-                alert(`Failed to finalize script: ${error.message}`);
-            } finally {
-                document.getElementById('finalize-progress').classList.remove('show');
-                document.getElementById('finalize-script-btn').disabled = false;
-            }
+            // Show summary
+            alert(
+              `✅ Script Finalized!\n\n` +
+                `Images: Generated ${
+                  data.micro_scenes.hook.images.length * 4
+                } images\n` +
+                `Audio: ${data.audio_files.length} files (${data.total_duration}s)\n` +
+                `Total Cost: $${data.total_cost.toFixed(4)}\n` +
+                `Time: ${totalTime}s (parallel execution)\n\n` +
+                `You can now compose the final video!`
+            );
+          } else {
+            throw new Error(
+              data.detail || data.message || "Finalization failed"
+            );
+          }
+        } catch (error) {
+          console.error("❌ Finalization failed:", error);
+          showResult("finalize-result", { error: error.message }, true);
+          alert(`Failed to finalize script: ${error.message}`);
+        } finally {
+          document.getElementById("finalize-progress").classList.remove("show");
+          document.getElementById("finalize-script-btn").disabled = false;
         }
+      }
 
-        // Display Created Script
-        async function displayCreatedScript(sessionId, email) {
-            const userId = document.getElementById('user-id').value;
-            try {
-                const response = await fetch(`${API_BASE}/scripts/${sessionId}`, {
-                    headers: {
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    }
-                });
+      // Display Created Script
+      async function displayCreatedScript(sessionId, email) {
+        const userId = document.getElementById("user-id").value;
+        try {
+          const response = await fetch(`${API_BASE}/scripts/${sessionId}`, {
+            headers: {
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+          });
 
-                if (!response.ok) {
-                    throw new Error('Failed to fetch script');
-                }
+          if (!response.ok) {
+            throw new Error("Failed to fetch script");
+          }
 
-                const script = await response.json();
+          const script = await response.json();
 
-                // Display the script in a nice format
-                const scriptDisplay = document.getElementById('script-display');
-                const scriptContent = document.getElementById('script-content');
+          // Display the script in a nice format
+          const scriptDisplay = document.getElementById("script-display");
+          const scriptContent = document.getElementById("script-content");
 
-                let html = `
+          let html = `
                     <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border: 1px solid #d1fae5;">
                         <p style="margin: 0; color: #6b7280; font-size: 0.875rem;">
-                            <strong>Session ID:</strong> ${script.session_id}<br>
-                            <strong>Created:</strong> ${new Date(script.created_at).toLocaleString()}
+                            <strong>Session ID:</strong> ${
+                              script.session_id
+                            }<br>
+                            <strong>Created:</strong> ${new Date(
+                              script.created_at
+                            ).toLocaleString()}
                         </p>
                     </div>
                 `;
 
-                const parts = [
-                    { name: 'Hook', data: script.hook, emoji: '🎣' },
-                    { name: 'Concept', data: script.concept, emoji: '💡' },
-                    { name: 'Process', data: script.process, emoji: '⚙️' },
-                    { name: 'Conclusion', data: script.conclusion, emoji: '🎯' }
-                ];
+          const parts = [
+            { name: "Hook", data: script.hook, emoji: "🎣" },
+            { name: "Concept", data: script.concept, emoji: "💡" },
+            { name: "Process", data: script.process, emoji: "⚙️" },
+            { name: "Conclusion", data: script.conclusion, emoji: "🎯" },
+          ];
 
-                parts.forEach(part => {
-                    html += `
+          parts.forEach((part) => {
+            html += `
                         <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #10b981;">
                             <h4 style="color: #065f46; margin: 0 0 10px 0; display: flex; align-items: center; gap: 8px;">
                                 <span>${part.emoji}</span>
                                 <span>${part.name}</span>
-                                <span style="font-size: 0.75rem; color: #6b7280; font-weight: normal;">(${part.data.duration}s)</span>
+                                <span style="font-size: 0.75rem; color: #6b7280; font-weight: normal;">(${
+                                  part.data.duration
+                                }s)</span>
                             </h4>
                             <p style="margin: 0 0 10px 0; color: #374151; line-height: 1.6;">
                                 ${part.data.text}
                             </p>
-                            ${part.data.key_concepts ? `
+                            ${
+                              part.data.key_concepts
+                                ? `
                                 <p style="margin: 0; color: #6b7280; font-size: 0.875rem;">
-                                    <strong>Key Concepts:</strong> ${part.data.key_concepts.join(', ')}
+                                    <strong>Key Concepts:</strong> ${part.data.key_concepts.join(
+                                      ", "
+                                    )}
                                 </p>
-                            ` : ''}
-                            ${part.data.visual_guidance ? `
+                            `
+                                : ""
+                            }
+                            ${
+                              part.data.visual_guidance
+                                ? `
                                 <p style="margin: 8px 0 0 0; color: #6b7280; font-size: 0.875rem; font-style: italic;">
                                     📸 Visual: ${part.data.visual_guidance}
                                 </p>
-                            ` : ''}
+                            `
+                                : ""
+                            }
                         </div>
                     `;
-                });
+          });
 
-                // Calculate total duration
-                const totalDuration = parts.reduce((sum, part) => sum + parseInt(part.data.duration), 0);
-                html += `
+          // Calculate total duration
+          const totalDuration = parts.reduce(
+            (sum, part) => sum + parseInt(part.data.duration),
+            0
+          );
+          html += `
                     <div style="padding: 12px; background: #eff6ff; border-radius: 8px; text-align: center;">
                         <strong style="color: #1e40af;">Total Duration: ${totalDuration} seconds</strong>
                     </div>
                 `;
 
-                scriptContent.innerHTML = html;
-                scriptDisplay.style.display = 'block';
+          scriptContent.innerHTML = html;
+          scriptDisplay.style.display = "block";
+        } catch (error) {
+          console.error("Error displaying script:", error);
+        }
+      }
 
-            } catch (error) {
-                console.error('Error displaying script:', error);
-            }
+      // Check if both audio and images are ready, then enable compose button
+      function checkAndEnableCompose() {
+        const audioSuccess =
+          document.getElementById("audio-status").textContent === "Generated";
+        const imageSuccess =
+          document.getElementById("image-status").textContent === "Generated";
+
+        if (audioSuccess && imageSuccess) {
+          document.getElementById("compose-video-btn").disabled = false;
+          console.log(
+            "✅ Both audio and images ready - Compose button enabled"
+          );
+        }
+      }
+
+      // Check if compose button should be enabled
+      function checkComposeButton() {
+        const sessionId = document.getElementById("compose-session-id").value;
+        const composeBtn = document.getElementById("compose-video-btn");
+
+        if (sessionId && sessionId.trim() !== "") {
+          composeBtn.disabled = false;
+        } else {
+          composeBtn.disabled = true;
+        }
+      }
+
+      // Compose Final Video
+      async function composeVideo() {
+        const sessionId = document.getElementById("compose-session-id").value;
+
+        if (!sessionId) {
+          alert(
+            "Please create a script and generate images and audio first, or paste a session ID!"
+          );
+          return;
         }
 
-        // Check if both audio and images are ready, then enable compose button
-        function checkAndEnableCompose() {
-            const audioSuccess = document.getElementById('audio-status').textContent === 'Generated';
-            const imageSuccess = document.getElementById('image-status').textContent === 'Generated';
+        const email = document.getElementById("user-email").value;
+        const userId = document.getElementById("user-id").value;
 
-            if (audioSuccess && imageSuccess) {
-                document.getElementById('compose-video-btn').disabled = false;
-                console.log('✅ Both audio and images ready - Compose button enabled');
-            }
+        updateStatus("video-status", "running", "Composing...");
+        document.getElementById("video-progress").classList.add("show");
+        document.getElementById("compose-video-btn").disabled = true;
+
+        console.log("🎬 Starting video composition...");
+        const startTime = Date.now();
+
+        try {
+          const desiredDuration =
+            parseFloat(document.getElementById("desired-duration").value) ||
+            60.0;
+
+          const response = await fetch(`${API_BASE}/compose-video`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Email": email,
+              "X-User-Id": userId,
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              desired_duration: desiredDuration,
+            }),
+          });
+
+          const data = await response.json();
+          const endTime = Date.now();
+          const totalTime = ((endTime - startTime) / 1000).toFixed(1);
+
+          if (response.ok) {
+            console.log(`✅ Video composition complete in ${totalTime}s`);
+
+            updateStatus("video-status", "success", "Complete");
+            showResult("video-result", {
+              ...data,
+              composition_time: `${totalTime}s`,
+            });
+
+            // Display video player
+            const player = document.getElementById("video-player");
+            const videoSource = document.getElementById("video-source");
+            const videoInfo = document.getElementById("video-info");
+
+            videoSource.src = data.video_url;
+            videoInfo.textContent = `Duration: ${data.duration}s | Segments: ${
+              data.segments_count || 4
+            }`;
+
+            player.style.display = "block";
+
+            // Load the video
+            const video = player.querySelector("video");
+            video.load();
+
+            alert(
+              `✅ Video Composition Complete!\n\nDuration: ${data.duration}s\nTime: ${totalTime}s\n\nThe video is ready to play below.`
+            );
+          } else {
+            throw new Error(
+              data.detail || data.message || "Video composition failed"
+            );
+          }
+        } catch (error) {
+          console.error("❌ Video composition failed:", error);
+          updateStatus("video-status", "error", "Failed");
+          showResult("video-result", { error: error.message }, true);
+          alert(`Failed to compose video: ${error.message}`);
+        } finally {
+          document.getElementById("video-progress").classList.remove("show");
+          document.getElementById("compose-video-btn").disabled = false;
         }
+      }
 
-        // Check if compose button should be enabled
-        function checkComposeButton() {
-            const sessionId = document.getElementById('compose-session-id').value;
-            const composeBtn = document.getElementById('compose-video-btn');
-
-            if (sessionId && sessionId.trim() !== '') {
-                composeBtn.disabled = false;
-            } else {
-                composeBtn.disabled = true;
-            }
-        }
-
-        // Compose Final Video
-        async function composeVideo() {
-            const sessionId = document.getElementById('compose-session-id').value;
-
-            if (!sessionId) {
-                alert('Please create a script and generate images and audio first, or paste a session ID!');
-                return;
-            }
-
-            const email = document.getElementById('user-email').value;
-            const userId = document.getElementById('user-id').value;
-
-            updateStatus('video-status', 'running', 'Composing...');
-            document.getElementById('video-progress').classList.add('show');
-            document.getElementById('compose-video-btn').disabled = true;
-
-            console.log('🎬 Starting video composition...');
-            const startTime = Date.now();
-
-            try {
-                const desiredDuration = parseFloat(document.getElementById('desired-duration').value) || 60.0;
-
-                const response = await fetch(`${API_BASE}/compose-video`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Email': email,
-                        'X-User-Id': userId
-                    },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        desired_duration: desiredDuration
-                    })
-                });
-
-                const data = await response.json();
-                const endTime = Date.now();
-                const totalTime = ((endTime - startTime) / 1000).toFixed(1);
-
-                if (response.ok) {
-                    console.log(`✅ Video composition complete in ${totalTime}s`);
-
-                    updateStatus('video-status', 'success', 'Complete');
-                    showResult('video-result', {
-                        ...data,
-                        composition_time: `${totalTime}s`
-                    });
-
-                    // Display video player
-                    const player = document.getElementById('video-player');
-                    const videoSource = document.getElementById('video-source');
-                    const videoInfo = document.getElementById('video-info');
-
-                    videoSource.src = data.video_url;
-                    videoInfo.textContent = `Duration: ${data.duration}s | Segments: ${data.segments_count || 4}`;
-
-                    player.style.display = 'block';
-
-                    // Load the video
-                    const video = player.querySelector('video');
-                    video.load();
-
-                    alert(`✅ Video Composition Complete!\n\nDuration: ${data.duration}s\nTime: ${totalTime}s\n\nThe video is ready to play below.`);
-
-                } else {
-                    throw new Error(data.detail || data.message || 'Video composition failed');
-                }
-
-            } catch (error) {
-                console.error('❌ Video composition failed:', error);
-                updateStatus('video-status', 'error', 'Failed');
-                showResult('video-result', { error: error.message }, true);
-                alert(`Failed to compose video: ${error.message}`);
-            } finally {
-                document.getElementById('video-progress').classList.remove('show');
-                document.getElementById('compose-video-btn').disabled = false;
-            }
-        }
-
-        // Auto-fill session ID on load
-        window.addEventListener('load', () => {
-            document.getElementById('session-id').value = generateId();
-        });
+      // Auto-fill session ID on load
+      window.addEventListener("load", () => {
+        document.getElementById("session-id").value = generateId();
+      });
     </script>
-</body>
+  </body>
 </html>

@@ -115,21 +115,6 @@ async def generate_images(
     }
 
 
-class GenerateAudioRequest(BaseModel):
-    session_id: str
-    # script_id removed - now reads from video_session.generated_script
-    voice: Optional[str] = "alloy"  # Default: alloy (OpenAI voices: alloy, echo, fable, onyx, nova, shimmer)
-    audio_option: Optional[str] = "tts"  # tts, upload, none, instrumental
-
-
-class GenerateAudioResponse(BaseModel):
-    session_id: str
-    status: str
-    audio_files: List[Dict[str, Any]]
-    total_duration: float
-    total_cost: float
-
-
 class FinalizeScriptRequest(BaseModel):
     session_id: str
     # script_id removed - now reads from video_session.generated_script
@@ -161,60 +146,6 @@ class ComposeVideoResponse(BaseModel):
     video_url: str
     duration: float
     segments_count: int
-
-
-@router.post("/generate-audio", response_model=GenerateAudioResponse)
-async def generate_audio(
-    request: GenerateAudioRequest,
-    current_user: CurrentUser = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Generate audio narration from script using OpenAI TTS.
-
-    **Authentication Required:** Include X-User-Email header.
-
-    Reads script from video_session.generated_script and generates TTS audio for each part
-    (hook, concept, process, conclusion). Audio files are stored in S3 and tracked in the database.
-
-    **Required Headers:**
-    - `X-User-Email` (string): User's email from NextAuth session
-
-    **Required Parameters:**
-    - `session_id` (string): Session ID (script is read from video_session.generated_script)
-
-    **Optional Parameters:**
-    - `voice` (string): OpenAI voice - "alloy", "echo", "fable", "onyx", "nova", "shimmer" (default: "alloy")
-    - `audio_option` (string): Audio option - "tts", "upload", "none", "instrumental" (default: "tts")
-
-    **Returns:**
-    - `session_id`: Session ID for tracking
-    - `status`: Generation status
-    - `audio_files`: List of generated audio files with URLs and metadata
-    - `total_duration`: Total audio duration in seconds
-    - `total_cost`: Total generation cost in USD
-    """
-    # Call orchestrator to generate audio from script (now uses session_id to find script)
-    result = await orchestrator.generate_audio(
-        db=db,
-        session_id=request.session_id,
-        user_id=current_user.id,
-        audio_config={
-            "voice": request.voice,
-            "audio_option": request.audio_option
-        }
-    )
-
-    if result["status"] == "error":
-        raise HTTPException(status_code=500, detail=result["message"])
-
-    return {
-        "session_id": request.session_id,
-        "status": result["status"],
-        "audio_files": result.get("audio_files", []),
-        "total_duration": result.get("total_duration", 0.0),
-        "total_cost": result.get("total_cost", 0.0)
-    }
 
 
 @router.post("/finalize-script", response_model=FinalizeScriptResponse)

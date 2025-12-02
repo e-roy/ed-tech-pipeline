@@ -949,65 +949,80 @@ class Agent4TestRequest(BaseModel):
 
 
 @app.post("/api/agent4/test", response_model=AgentTestResponse)
-async def test_agent4_audio(request: Agent4TestRequest) -> AgentTestResponse:
+async def test_agent4_audio(
+    request: Agent4TestRequest,
+    db: Session = Depends(get_db)
+) -> AgentTestResponse:
     """
-    Test Agent 4 (Audio Pipeline) directly with custom script input.
+    Test Agent 4 (Audio Pipeline) using agent_4_process.
 
-    This endpoint allows direct testing of the audio generation functionality
-    without going through the full pipeline.
+    This endpoint properly tests Agent 4 by calling agent_4_process (like the orchestrator does),
+    which includes database integration, script normalization, status updates, and S3 operations.
     """
     start_time = time.time()
 
     try:
-        # Import and instantiate the AudioPipelineAgent
-        from app.agents.audio_pipeline import AudioPipelineAgent
-        from app.agents.base import AgentInput
+        from app.agents.agent_4 import agent_4_process
 
-        # Create agent instance
-        audio_agent = AudioPipelineAgent(
-            db=None,  # No DB for direct testing
-            storage_service=storage_service,
-            websocket_manager=websocket_manager
-        )
+        # Query the existing video_session to get the actual user_id
+        result_query = db.execute(
+            sql_text("SELECT user_id FROM video_session WHERE id = :session_id"),
+            {"session_id": request.session_id}
+        ).fetchone()
 
-        # Create agent input
-        agent_input = AgentInput(
-            session_id=request.session_id,
-            data={
-                "script": request.script,
-                "voice": request.voice,
-                "audio_option": request.audio_option
+        if not result_query:
+            raise ValueError(f"Video session {request.session_id} not found. Create a script first using the test UI.")
+
+        user_id = result_query.user_id
+
+        # Update the script in the existing video_session
+        db.execute(
+            sql_text("""
+                UPDATE video_session
+                SET generated_script = :script, updated_at = NOW()
+                WHERE id = :session_id
+            """),
+            {
+                "session_id": request.session_id,
+                "script": json.dumps(request.script)
             }
         )
+        db.commit()
 
-        # Process audio generation
-        result = await audio_agent.process(agent_input)
+        # Call agent_4_process (full Agent 4 pipeline like orchestrator does)
+        result = await agent_4_process(
+            websocket_manager=websocket_manager,
+            user_id=user_id,
+            session_id=request.session_id,
+            script=None,  # Force extraction from database
+            voice=request.voice,
+            audio_option=request.audio_option,
+            storage_service=storage_service,
+            video_session_data=None,  # Force DB query
+            db=db,
+            status_callback=None
+        )
 
-        # Build pipeline_data structure like agent_4 does for agent_5
-        pipeline_data = {
-            "agent2_data": request.agent2_data or {
-                "template_id": "test-template",
-                "chosen_diagram_id": "test-diagram",
-                "script_id": "test-script",
-                "supersessionid": f"{request.session_id}_test"
-            },
-            "script": request.script,
-            "voice": request.voice,
-            "audio_option": request.audio_option,
-            "audio_data": result.data
-        }
+        # Calculate cost from result
+        total_cost = result.get("total_cost", 0.0)
 
         return AgentTestResponse(
-            success=result.success,
-            data=pipeline_data,
-            cost=result.cost,
-            duration=result.duration,
-            error=result.error
+            success=result.get("status") == "success",
+            data={
+                "audio_files": result.get("audio_files", []),
+                "total_duration": result.get("total_duration", 0.0),
+                "total_cost": total_cost,
+                "session_id": request.session_id
+            },
+            cost=total_cost,
+            duration=time.time() - start_time,
+            error=None
         )
 
     except Exception as e:
         import traceback
         logger.error(f"Agent 4 test failed: {e}\n{traceback.format_exc()}")
+        db.rollback()
         return AgentTestResponse(
             success=False,
             data={},
