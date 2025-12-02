@@ -1,4 +1,4 @@
-import type { Session, TextOverlay, AudioConfig } from "@/types";
+import type { Session } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -71,84 +71,6 @@ export class ApiClient {
     return this.request<Session>(`/api/sessions/${sessionId}`);
   }
 
-  // Image Generation
-  async generateImages(
-    sessionId: string,
-    productPrompt: string,
-    numImages = 6,
-    styleKeywords: string[] = [],
-  ) {
-    return this.request("/api/generate-images", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        product_prompt: productPrompt,
-        num_images: numImages,
-        style_keywords: styleKeywords,
-      }),
-    });
-  }
-
-  async saveApprovedImages(sessionId: string, imageIds: string[]) {
-    return this.request("/api/save-approved-images", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        approved_image_ids: imageIds,
-      }),
-    });
-  }
-
-  // Video Generation
-  async generateClips(
-    sessionId: string,
-    videoPrompt: string,
-    clipDuration = 3.0,
-  ) {
-    return this.request("/api/generate-clips", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        video_prompt: videoPrompt,
-        clip_duration: clipDuration,
-      }),
-    });
-  }
-
-  async saveApprovedClips(
-    sessionId: string,
-    clipIds: string[],
-    clipOrder: string[],
-  ) {
-    return this.request("/api/save-approved-clips", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        approved_clip_ids: clipIds,
-        clip_order: clipOrder,
-      }),
-    });
-  }
-
-  // Final Composition
-  async composeFinalVideo(
-    sessionId: string,
-    textOverlay: TextOverlay,
-    audio: AudioConfig,
-    introDuration = 1.0,
-    outroDuration = 1.0,
-  ) {
-    return this.request("/api/compose-final-video", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        text_overlay: textOverlay,
-        audio,
-        intro_duration: introDuration,
-        outro_duration: outroDuration,
-      }),
-    });
-  }
 }
 
 export const apiClient = new ApiClient();
