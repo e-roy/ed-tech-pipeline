@@ -139,7 +139,7 @@ export const scriptRouter = createTRPCRouter({
       }
 
       try {
-        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/test-webhook`;
+        const apiUrl = `${env.VIDEO_PROCESSING_API_URL}/api/test/webhook`;
         const response = await fetch(apiUrl, {
           method: "POST",
           headers: {
@@ -162,9 +162,12 @@ export const scriptRouter = createTRPCRouter({
           success: boolean;
           message: string;
           webhook_url: string;
-          status_sent: string;
-          response_status_code?: number;
-          response_body?: Record<string, unknown>;
+          test_results?: Array<{
+            status: string;
+            success: boolean;
+            response_status_code?: number;
+            error?: string;
+          }>;
           error?: string;
         };
 
