@@ -49,7 +49,11 @@ def get_audio_duration(filepath: str) -> float:
 
 class AudioPipelineAgent:
     """
-    Audio Pipeline Agent that generates TTS audio using OpenAI.
+    Audio Pipeline Agent that generates TTS audio using OpenAI's gpt-4o-mini-tts model.
+
+    The gpt-4o-mini-tts model provides voice instructions capabilities, allowing for
+    customized delivery styles. Configured to present content like a teacher giving
+    lessons to middle school students with clear, engaging, and encouraging tone.
 
     Input format:
         {
@@ -86,14 +90,20 @@ class AudioPipelineAgent:
     # Default voice: alloy (neutral, balanced)
     DEFAULT_VOICE = "alloy"
 
-    # Available voices
+    # Available voices for gpt-4o-mini-tts model
+    # Includes original voices plus new additions: ash, ballad, coral, sage, verse
     AVAILABLE_VOICES = {
         "alloy": "Neutral, balanced",
+        "ash": "Clear, articulate",
+        "ballad": "Expressive, storytelling",
+        "coral": "Warm, conversational",
         "echo": "Male, clear",
         "fable": "British, expressive",
         "onyx": "Deep, authoritative",
         "nova": "Female, energetic",
-        "shimmer": "Warm, friendly"
+        "sage": "Professional, measured",
+        "shimmer": "Warm, friendly",
+        "verse": "Poetic, dynamic"
     }
 
     def __init__(
@@ -191,7 +201,8 @@ class AudioPipelineAgent:
         session_id: str,
         cumulative_items: list,
         part_idx: int,
-        total_parts: int
+        total_parts: int,
+        voice_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate audio for a single script part."""
         try:
@@ -228,13 +239,33 @@ class AudioPipelineAgent:
                 except (ValueError, TypeError):
                     logger.warning(f"[{session_id}] Invalid duration value for '{part_name}': {part_data.get('duration')}")
 
-            # Generate TTS audio using OpenAI (normal speed initially)
-            response = self.client.audio.speech.create(
-                model="tts-1",  # Use tts-1 (faster, cheaper) or tts-1-hd (higher quality)
-                voice=voice,
-                input=text,
-                response_format="mp3"
-            )
+            # Generate TTS audio using OpenAI with gpt-4o-mini-tts model
+            # This model supports voice instructions for better control over delivery style
+            # Default instructions: teacher presenting to middle school students
+            default_instructions = "Present the content like a teacher giving a lesson to middle school students. Use a clear, engaging, and encouraging tone that makes the material easy to understand and interesting."
+            instructions = voice_instructions if voice_instructions else default_instructions
+
+            # Try using gpt-4o-mini-tts with instructions, fall back to tts-1 if not supported
+            try:
+                response = self.client.audio.speech.create(
+                    model="gpt-4o-mini-tts",
+                    voice=voice,
+                    input=text,
+                    instructions=instructions,
+                    response_format="mp3"
+                )
+            except TypeError as e:
+                # SDK doesn't support instructions parameter - fall back to tts-1
+                logger.warning(
+                    f"[{session_id}] gpt-4o-mini-tts with instructions not supported (SDK too old). "
+                    f"Falling back to tts-1 model. Update openai package to >=1.70.0 for full support. Error: {e}"
+                )
+                response = self.client.audio.speech.create(
+                    model="tts-1",
+                    voice=voice,
+                    input=text,
+                    response_format="mp3"
+                )
 
             # Save to temporary file (cross-platform)
             temp_dir = tempfile.gettempdir()
@@ -273,13 +304,28 @@ class AudioPipelineAgent:
                 # Regenerate with speed adjustment
                 logger.info(f"[{session_id}] Regenerating '{part_name}' at {required_speed:.2f}x speed to fit {target_duration}s")
 
-                response = self.client.audio.speech.create(
-                    model="tts-1",
-                    voice=voice,
-                    input=text,
-                    response_format="mp3",
-                    speed=required_speed
-                )
+                try:
+                    response = self.client.audio.speech.create(
+                        model="gpt-4o-mini-tts",
+                        voice=voice,
+                        input=text,
+                        instructions=instructions,
+                        response_format="mp3",
+                        speed=required_speed
+                    )
+                except TypeError as e:
+                    # SDK doesn't support instructions parameter - fall back to tts-1
+                    logger.warning(
+                        f"[{session_id}] gpt-4o-mini-tts with instructions not supported. "
+                        f"Using tts-1 with speed adjustment. Error: {e}"
+                    )
+                    response = self.client.audio.speech.create(
+                        model="tts-1",
+                        voice=voice,
+                        input=text,
+                        response_format="mp3",
+                        speed=required_speed
+                    )
 
                 # Overwrite the file with sped-up version
                 with open(filepath, "wb") as f:
@@ -367,6 +413,7 @@ class AudioPipelineAgent:
             # Extract input data
             script = input.data.get("script", {})
             voice = input.data.get("voice", self.DEFAULT_VOICE)
+            voice_instructions = input.data.get("voice_instructions")
             audio_option = input.data.get("audio_option", "tts")
             cumulative_items = input.data.get("cumulative_items", [])
 
@@ -406,7 +453,8 @@ class AudioPipelineAgent:
                     session_id=input.session_id,
                     cumulative_items=cumulative_items,
                     part_idx=idx + 1,
-                    total_parts=total_parts
+                    total_parts=total_parts,
+                    voice_instructions=voice_instructions
                 )
                 for idx, part_name in enumerate(required_parts)
                 if script[part_name].get("text", "")  # Only generate if text exists

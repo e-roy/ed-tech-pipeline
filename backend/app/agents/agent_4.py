@@ -152,7 +152,10 @@ async def create_timed_narration_track(audio_file_paths: list[str], output_path:
     # Mix all delayed audio tracks together, then pad to exact total_duration
     mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
     # Use apad to pad the mixed audio to exactly total_duration (60s)
-    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0,apad=whole_dur={total_duration}[mixed]"
+    # Set weights to 1 1 1 1 to prevent auto-normalization (keeps voice clips at full volume)
+    # Add alimiter to prevent clipping/distortion - instant attack (0.1ms) for no fade-in
+    weights = ' '.join(['1'] * num_segments)
+    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0:weights={weights},alimiter=limit=0.98:attack=0.1:release=50,apad=whole_dur={total_duration}[mixed]"
 
     # Build ffmpeg command with direct MP3 inputs
     cmd = ["ffmpeg", "-y"]
@@ -196,12 +199,14 @@ async def mix_audio_with_background(narration_path: str, background_music_path: 
     import subprocess
 
     # Mix narration with background music
-    # - Narration at 2.0x volume (boost to be prominent)
-    # - Background music at specified volume (default 0.3 = 30%)
+    # - Narration at 1.0x volume (full volume, preserved from timed narration track)
+    # - Background music at specified volume (default 0.05 = 5%)
     # - Loop music if needed with -stream_loop -1
     # - amix with dropout_transition=0 to prevent volume ducking
+    # - weights=1 1 prevents auto-normalization/compression (keeps volumes as-is)
+    # - alimiter prevents clipping/distortion - instant attack (0.1ms) for no fade-in
     # - Explicitly set output duration to match narration (60s)
-    filter_complex = f"[0:a]volume=2.0[narration];[1:a]volume={music_volume}[music];[narration][music]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+    filter_complex = f"[0:a]volume=1.0[narration];[1:a]volume={music_volume}[music];[narration][music]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,alimiter=limit=0.98:attack=0.1:release=50[aout]"
 
     cmd = [
         "ffmpeg", "-y",
@@ -227,10 +232,10 @@ async def agent_4_process(
     user_id: str,
     session_id: str,
     script: Dict[str, Any],
-    voice: str = "nova",
+    voice: str = "sage",
+    voice_instructions: Optional[str] = None,
     audio_option: str = "tts",
     storage_service: Optional[StorageService] = None,
-    agent2_data: Optional[Dict[str, Any]] = None,
     video_session_data: Optional[dict] = None,
     db: Optional[Session] = None,
     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
@@ -243,10 +248,10 @@ async def agent_4_process(
         user_id: User identifier
         session_id: Session identifier
         script: Script with hook, concept, process, conclusion parts
-        voice: TTS voice to use (default: nova)
+        voice: TTS voice to use (default: sage)
+        voice_instructions: Optional voice instructions for gpt-4o-mini-tts model
         audio_option: Audio generation option (tts, upload, none, instrumental)
         storage_service: Storage service for S3 operations
-        agent2_data: Data passed from Agent2 (deprecated, unused)
         video_session_data: Optional dict with video_session row data (for Full Test mode)
         db: Database session for querying video_session table
         status_callback: Callback function for sending status updates to orchestrator
@@ -388,6 +393,7 @@ async def agent_4_process(
             data={
                 "script": normalized_script,
                 "voice": voice,
+                "voice_instructions": voice_instructions,
                 "audio_option": audio_option,
                 "user_id": user_id
             }
@@ -506,9 +512,9 @@ async def agent_4_process(
                     timed_narration_path,
                     background_music_file,
                     final_audio_path,
-                    music_volume=0.05  # 30% volume for music bed
+                    music_volume=0.03  # 5% volume for music bed (very low to keep focus on narration)
                 )
-                logger.info(f"Agent4 mixed narration with background music at 30% volume")
+                logger.info(f"Agent4 mixed narration with background music at 5% volume")
             else:
                 # No background music, use timed narration as final audio
                 import shutil

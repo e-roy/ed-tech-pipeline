@@ -553,29 +553,57 @@ So plants are basically solar-powered food factories! They create their own ener
           <div class="grid" id="voice-grid">
             <div class="voice-option selected" data-voice="alloy">
               <h4>🎵 Alloy</h4>
-              <p>Neutral, balanced - Great for education</p>
+              <p>Neutral, balanced</p>
+            </div>
+            <div class="voice-option" data-voice="ash">
+              <h4>🎤 Ash</h4>
+              <p>Clear, articulate</p>
+            </div>
+            <div class="voice-option" data-voice="ballad">
+              <h4>🎭 Ballad</h4>
+              <p>Expressive, storytelling</p>
+            </div>
+            <div class="voice-option" data-voice="coral">
+              <h4>🌊 Coral</h4>
+              <p>Warm, conversational</p>
             </div>
             <div class="voice-option" data-voice="echo">
               <h4>🎙️ Echo</h4>
-              <p>Male, clear - Authoritative</p>
+              <p>Male, clear</p>
             </div>
             <div class="voice-option" data-voice="fable">
               <h4>📖 Fable</h4>
-              <p>British, expressive - Engaging</p>
+              <p>British, expressive</p>
             </div>
             <div class="voice-option" data-voice="onyx">
               <h4>🎬 Onyx</h4>
-              <p>Deep, authoritative - Professional</p>
+              <p>Deep, authoritative</p>
             </div>
             <div class="voice-option" data-voice="nova">
               <h4>⭐ Nova</h4>
-              <p>Female, energetic - Dynamic</p>
+              <p>Female, energetic</p>
+            </div>
+            <div class="voice-option" data-voice="sage">
+              <h4>🧙 Sage</h4>
+              <p>Professional, measured</p>
             </div>
             <div class="voice-option" data-voice="shimmer">
               <h4>✨ Shimmer</h4>
-              <p>Warm, friendly - Conversational</p>
+              <p>Warm, friendly</p>
+            </div>
+            <div class="voice-option" data-voice="verse">
+              <h4>📜 Verse</h4>
+              <p>Poetic, dynamic</p>
             </div>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label>Voice Instructions (for gpt-4o-mini-tts)</label>
+          <textarea id="voice-instructions" placeholder="Instructions for how the voice should sound...">Present the content like a teacher giving a lesson to middle school students. Use a clear, engaging, and encouraging tone that makes the material easy to understand and interesting.</textarea>
+          <p style="color: #6b7280; font-size: 0.875rem; margin-top: 4px">
+            Customize how the AI voice delivers the content. Examples: "Speak enthusiastically", "Use a calm, soothing tone", "Present like a documentary narrator"
+          </p>
         </div>
 
         <button onclick="generateAudio()" id="generate-audio-btn" disabled>
@@ -810,6 +838,7 @@ So plants are basically solar-powered food factories! They create their own ener
 
         const email = document.getElementById("user-email").value;
         const userId = document.getElementById("user-id").value;
+        const voiceInstructions = document.getElementById("voice-instructions").value;
 
         updateStatus("audio-status", "running", "Generating...");
         document.getElementById("audio-progress").classList.add("show");
@@ -851,6 +880,7 @@ So plants are basically solar-powered food factories! They create their own ener
               session_id: currentSessionId,
               script: script,
               voice: selectedVoice,
+              voice_instructions: voiceInstructions,
               audio_option: "tts",
             }),
           });
@@ -1411,6 +1441,7 @@ So plants are basically solar-powered food factories! They create their own ener
           document.getElementById("images-per-part").value
         );
         const voice = selectedVoice;
+        const voiceInstructions = document.getElementById("voice-instructions").value;
 
         // Disable button during generation
         document.getElementById("finalize-script-btn").disabled = true;
@@ -1433,6 +1464,7 @@ So plants are basically solar-powered food factories! They create their own ener
               model: model,
               images_per_part: imagesPerPart,
               voice: voice,
+              voice_instructions: voiceInstructions,
               audio_option: "tts",
             }),
           });

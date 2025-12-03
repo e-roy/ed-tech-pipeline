@@ -17,7 +17,7 @@ pydantic-settings==2.1.0
 # External Services
 replicate==0.22.0
 httpx==0.26.0
-openai==1.54.0
+openai>=1.70.0  # Required for gpt-4o-mini-tts with instructions parameter
 
 # Image Processing
 pillow==10.4.0

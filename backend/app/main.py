@@ -944,6 +944,7 @@ class Agent4TestRequest(BaseModel):
     session_id: str
     script: Dict[str, Any]
     voice: str = "alloy"
+    voice_instructions: Optional[str] = None  # Voice instructions for gpt-4o-mini-tts
     audio_option: str = "tts"
     agent2_data: Optional[Dict[str, Any]] = None  # Optional data from Agent2
 
@@ -996,6 +997,7 @@ async def test_agent4_audio(
             session_id=request.session_id,
             script=None,  # Force extraction from database
             voice=request.voice,
+            voice_instructions=request.voice_instructions,
             audio_option=request.audio_option,
             storage_service=storage_service,
             video_session_data=None,  # Force DB query
