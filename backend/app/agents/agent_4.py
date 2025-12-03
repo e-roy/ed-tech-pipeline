@@ -119,104 +119,121 @@ async def get_audio_duration(file_path: str) -> float:
         return 60.0  # Default fallback
 
 
-async def create_timed_narration_track(audio_file_paths: list[str], output_path: str, total_duration: float = 60.0) -> str:
+async def create_final_audio(
+    audio_file_paths: list[str],
+    output_path: str,
+    background_music_path: str | None = None,
+    total_duration: float = 60.0,
+    music_volume: float = 0.3,
+    narration_volume: float = 3.0
+) -> str:
     """
-    Create a timed narration track by placing audio files at calculated intervals across the total duration.
-    Each narration plays at the beginning of its segment, with silence/space between narrations.
+    Create final audio track in a single ffmpeg call - concatenates narration clips
+    with silence padding and optionally mixes with background music.
+
+    This combines what was previously two separate ffmpeg calls (create_timed_narration_track
+    and mix_audio_with_background) into one for better performance.
 
     Args:
         audio_file_paths: List of paths to audio files in order (hook, concept, process, conclusion)
-        output_path: Path for output timed audio file
+        output_path: Path for output audio file
+        background_music_path: Optional path to background music file
         total_duration: Total duration in seconds for the final track (default 60s)
+        music_volume: Volume level for background music (0.0-1.0), default 0.3
+        narration_volume: Volume boost for narration (default 3.0)
 
     Returns:
-        Path to timed audio file
+        Path to final audio file
     """
     import subprocess
 
     num_segments = len(audio_file_paths)
     segment_duration = total_duration / num_segments  # e.g., 60s / 4 = 15s per segment
 
-    # Build ffmpeg filter_complex to place each audio at its segment start time using adelay
+    # Build filter: pad each clip to segment_duration, then concatenate
     filter_parts = []
     for i in range(num_segments):
-        # Calculate delay for this segment (in milliseconds)
-        start_time_seconds = i * segment_duration
-        delay_ms = int(start_time_seconds * 1000)
+        filter_parts.append(f"[{i}:a]atrim=0:{segment_duration},apad=whole_dur={segment_duration},aresample=44100[a{i}]")
 
-        # Add atrim to limit audio to segment_duration, then adelay to position at correct time
-        # This prevents narration overlap between segments
-        # adelay takes stereo input, so we delay both channels
-        filter_parts.append(f"[{i}:a]atrim=0:{segment_duration},adelay={delay_ms}|{delay_ms}[a{i}]")
+    concat_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
 
-    # Mix all delayed audio tracks together, then pad to exact total_duration
-    mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
-    # Use apad to pad the mixed audio to exactly total_duration (60s)
-    # Set weights to 1 1 1 1 to prevent auto-normalization (keeps voice clips at full volume)
-    # Add alimiter to prevent clipping/distortion - instant attack (0.1ms) for no fade-in
-    weights = ' '.join(['1'] * num_segments)
-    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0:weights={weights},alimiter=limit=0.98:attack=0.1:release=50,apad=whole_dur={total_duration}[mixed]"
+    if background_music_path:
+        # Combined filter: concat narration -> boost volume -> mix with music -> limit
+        music_input_idx = num_segments  # Music is the last input
+        filter_complex = (
+            ';'.join(filter_parts) +
+            f";{concat_inputs}concat=n={num_segments}:v=0:a=1,volume={narration_volume}[narration];"
+            f"[{music_input_idx}:a]volume={music_volume}[music];"
+            f"[narration][music]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,"
+            f"volume=2,alimiter=limit=0.98:attack=0.1:release=50[aout]"
+        )
+        output_label = "[aout]"
+    else:
+        # No music - just concat and boost volume
+        filter_complex = (
+            ';'.join(filter_parts) +
+            f";{concat_inputs}concat=n={num_segments}:v=0:a=1,volume={narration_volume},"
+            f"alimiter=limit=0.98:attack=0.1:release=50[aout]"
+        )
+        output_label = "[aout]"
 
-    # Build ffmpeg command with direct MP3 inputs
+    # Build ffmpeg command
     cmd = ["ffmpeg", "-y"]
 
-    # Add all audio inputs (MP3 files work directly with adelay filter)
+    # Add narration inputs
     for audio_path in audio_file_paths:
         cmd.extend(["-i", audio_path])
 
-    # Add filter complex and output options
+    # Add music input (looped) if provided
+    if background_music_path:
+        cmd.extend(["-stream_loop", "-1", "-i", background_music_path])
+
+    # Add filter and output options
     cmd.extend([
         "-filter_complex", filter_complex,
-        "-map", "[mixed]",
-        "-ac", "2",  # Stereo
-        "-ar", "44100",  # Sample rate
-        "-c:a", "libmp3lame",  # MP3 codec
-        "-b:a", "128k",  # Bitrate
+        "-map", output_label,
+        "-ac", "2",
+        "-ar", "44100",
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
         output_path
     ])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg timed narration creation failed: {result.stderr}")
+        raise RuntimeError(f"FFmpeg final audio creation failed: {result.stderr}")
 
-    logger.info(f"Created timed narration track: {num_segments} narrations across {total_duration}s")
+    logger.info(f"Created final audio: {num_segments} narrations + {'music' if background_music_path else 'no music'} in single ffmpeg call")
     return output_path
 
 
+# Keep old functions for backward compatibility but mark as deprecated
+async def create_timed_narration_track(audio_file_paths: list[str], output_path: str, total_duration: float = 60.0) -> str:
+    """DEPRECATED: Use create_final_audio instead. Creates timed narration track."""
+    return await create_final_audio(audio_file_paths, output_path, None, total_duration, 0, 1.0)
+
+
 async def mix_audio_with_background(narration_path: str, background_music_path: str, output_path: str, music_volume: float = 0.3) -> str:
-    """
-    Mix narration audio with background music.
-
-    Args:
-        narration_path: Path to concatenated narration audio
-        background_music_path: Path to background music file
-        output_path: Path for output mixed audio file
-        music_volume: Volume level for background music (0.0-1.0), default 0.3 (30%)
-
-    Returns:
-        Path to mixed audio file
-    """
+    """DEPRECATED: Use create_final_audio instead. Mixes narration with background music."""
     import subprocess
 
-    # Mix narration with background music
-    # - Narration at 1.0x volume (full volume, preserved from timed narration track)
-    # - Background music at specified volume (default 0.05 = 5%)
-    # - Loop music if needed with -stream_loop -1
-    # - amix with dropout_transition=0 to prevent volume ducking
-    # - weights=1 1 prevents auto-normalization/compression (keeps volumes as-is)
-    # - alimiter prevents clipping/distortion - instant attack (0.1ms) for no fade-in
-    # - Explicitly set output duration to match narration (60s)
-    filter_complex = f"[0:a]volume=1.0[narration];[1:a]volume={music_volume}[music];[narration][music]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,alimiter=limit=0.98:attack=0.1:release=50[aout]"
+    # Keep for backward compatibility only
+    filter_complex = (
+        f"[0:a]volume=3[narration];"
+        f"[1:a]volume={music_volume}[music];"
+        f"[narration][music]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,"
+        f"volume=2,alimiter=limit=0.98:attack=0.1:release=50[aout]"
+    )
 
     cmd = [
         "ffmpeg", "-y",
         "-i", narration_path,
-        "-stream_loop", "-1",  # Loop background music
+        "-stream_loop", "-1",
         "-i", background_music_path,
         "-filter_complex", filter_complex,
         "-map", "[aout]",
-        "-c:a", "libmp3lame",  # Use MP3 codec for consistency
-        "-b:a", "128k",
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
         output_path
     ]
 
@@ -500,30 +517,20 @@ async def agent_4_process(
             if not background_music_file:
                 logger.warning(f"Agent4 NO BACKGROUND MUSIC FOUND - will create narration-only final audio")
 
-            # Step 1: Create timed narration track (60s with spacing)
-            timed_narration_path = os.path.join(temp_dir, "timed_narration.mp3")
-            await create_timed_narration_track(narration_file_paths, timed_narration_path, total_duration=60.0)
-            logger.info(f"Agent4 created timed narration track: {len(narration_file_paths)} clips across 60s")
-
-            # Step 2: Mix narration with background music (if available)
+            # Create final audio in single ffmpeg call (concat + mix in one step)
             final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
-            if background_music_file:
-                await mix_audio_with_background(
-                    timed_narration_path,
-                    background_music_file,
-                    final_audio_path,
-                    music_volume=0.03  # 5% volume for music bed (very low to keep focus on narration)
-                )
-                logger.info(f"Agent4 mixed narration with background music at 5% volume")
-            else:
-                # No background music, use timed narration as final audio
-                import shutil
-                shutil.copy(timed_narration_path, final_audio_path)
-                logger.info(f"Agent4 using timed narration only (no background music)")
+            await create_final_audio(
+                audio_file_paths=narration_file_paths,
+                output_path=final_audio_path,
+                background_music_path=background_music_file,  # None if no music
+                total_duration=60.0,
+                music_volume=0.08,  # 5% volume for music bed
+                narration_volume=2.0  # Boost narration 2x
+            )
+            logger.info(f"Agent4 created final audio: {len(narration_file_paths)} clips + {'music' if background_music_file else 'no music'}")
 
-            # Step 3: Get actual duration of final audio
-            actual_duration = await get_audio_duration(final_audio_path)
-            logger.info(f"Agent4 final audio actual duration: {actual_duration:.2f}s")
+            # Duration is known (60s) - skip ffprobe call for speed
+            actual_duration = 60.0
 
             # Step 4: Upload final_audio.mp3 to S3
             final_audio_s3_key = f"users/{user_id}/{session_id}/agent4/final_audio.mp3"

@@ -21,6 +21,8 @@ class ReplicateVideoService:
         "kling": "kwaivgi/kling-v1.5-pro",  # Higher quality ~$0.15/5s
         "luma": "luma/dream-machine",  # High quality ~$0.20/5s
         "veo3": "google/veo-3",  # Google Veo 3 - High quality ~$1.20/6s (without audio)
+        "wan-i2v": "wan-video/wan-2.2-i2v-fast",  # Fast I2V ~$0.02/5s at 480p
+        "wan-video/wan-2.2-i2v-fast": "wan-video/wan-2.2-i2v-fast",  # Direct model ID also works
     }
 
     def __init__(self, api_key: Optional[str] = None):
@@ -125,6 +127,12 @@ class ReplicateVideoService:
             }
             if seed is not None:
                 input_data["seed"] = seed
+        elif "wan-video" in model_id or "wan-2" in model_id:
+            # WAN models are image-to-video only, not text-to-video
+            raise RuntimeError(
+                f"Model '{model_id}' is an image-to-video model and does not support text-to-video generation. "
+                f"Use 'minimax' or another text-to-video model instead, or provide a source image."
+            )
         else:
             input_data = {
                 "prompt": prompt,
@@ -285,6 +293,18 @@ class ReplicateVideoService:
                 "aspect_ratio": "16:9",
                 "resolution": "1080p",
                 "generate_audio": False,  # Disable audio to save cost
+            }
+            if seed is not None:
+                input_data["seed"] = seed
+        elif "wan-video" in model_id or "wan-2" in model_id:
+            # WAN 2.2 I2V Fast - optimized image-to-video model
+            input_data = {
+                "prompt": prompt,
+                "image": image_url,
+                "num_frames": 81,  # 81 frames = ~5 seconds at 16fps (best quality)
+                "resolution": "720p",  # Higher quality than default 480p
+                "frames_per_second": 16,
+                "go_fast": True,
             }
             if seed is not None:
                 input_data["seed"] = seed

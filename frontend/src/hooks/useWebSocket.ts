@@ -43,7 +43,7 @@ export function useWebSocket(sessionId: string | null) {
   const maxReconnectAttempts = 5;
 
   const connect = useCallback(() => {
-    if (!sessionId) {
+    if (!sessionId || process.env.NEXT_PUBLIC_DISABLE_WEBSOCKET === "true") {
       return;
     }
 

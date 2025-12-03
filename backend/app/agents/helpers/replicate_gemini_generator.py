@@ -4,6 +4,7 @@ Replicate Gemini Image Generator
 Generates educational images using Google's Gemini model (nano-banana-pro)
 via the Replicate API.
 """
+import json
 import replicate
 import os
 import time
@@ -53,19 +54,22 @@ class ReplicateGeminiGenerator:
 
     async def generate_image(
         self,
-        prompt: str,
-        style: str = "educational",
-        quality: str = "standard",
-        session_id: str = None
+        visual_scene: Dict[str, Any],
+        quality: str = "standard"
     ) -> Dict[str, Any]:
         """
         Generate image using Gemini via Replicate.
 
         Args:
-            prompt: Description of image to generate
-            style: Style hint ("educational", "realistic", "illustration")
+            visual_scene: Structured scene object from Agent 3 containing:
+                - description: Main scene description
+                - composition: How elements are arranged
+                - lighting: Lighting style
+                - camera_angle: Camera perspective
+                - key_elements: List of must-have objects
+                - mood: Emotional tone
+                - color_palette: Colors to use
             quality: Quality setting ("standard" = 2K, "hd" = 4K)
-            session_id: Optional session ID (not used, kept for API compatibility)
 
         Returns:
             {
@@ -83,10 +87,10 @@ class ReplicateGeminiGenerator:
             if not self.client:
                 raise ValueError("REPLICATE_API_KEY not configured")
 
-            # Build enhanced prompt for educational content
-            enhanced_prompt = self._enhance_prompt(prompt, style)
+            # Use visual_scene object as prompt (stringified JSON)
+            prompt = json.dumps(visual_scene)
 
-            logger.info(f"Generating Gemini image via Replicate: {enhanced_prompt[:100]}...")
+            logger.info(f"Generating Gemini image via Replicate: {prompt[:100]}...")
 
             # Map quality to resolution
             resolution = "4K" if quality == "hd" else "2K"
@@ -95,7 +99,7 @@ class ReplicateGeminiGenerator:
             output = self.client.run(
                 self.model,
                 input={
-                    "prompt": enhanced_prompt,
+                    "prompt": prompt,
                     "resolution": resolution,
                     "aspect_ratio": "16:9",  # Landscape for video
                     "output_format": "png",
@@ -120,7 +124,7 @@ class ReplicateGeminiGenerator:
                 "url": image_url,
                 "cost": self.estimated_cost_per_image,
                 "duration": duration,
-                "prompt_used": enhanced_prompt,
+                "prompt_used": prompt,
                 "quality": quality,
                 "model": self.model
             }
@@ -136,46 +140,3 @@ class ReplicateGeminiGenerator:
                 "duration": duration,
                 "error": str(e)
             }
-
-    def _enhance_prompt(self, base_prompt: str, style: str) -> str:
-        """
-        Add style guidelines to prompt for consistent educational visuals.
-
-        Args:
-            base_prompt: Original prompt
-            style: Style hint
-
-        Returns:
-            Enhanced prompt with style guidance
-        """
-        style_guides = {
-            "educational": (
-                "Educational diagram style, clean and clear, bright colors, "
-                "labeled components, appropriate for middle school students "
-                "(grades 6-7), scientific accuracy, professional quality, "
-                "no text in image"
-            ),
-            "realistic": (
-                "Photorealistic style, high detail, natural lighting, "
-                "scientific accuracy, professional photography quality"
-            ),
-            "illustration": (
-                "Hand-drawn illustration style, colorful, engaging for students, "
-                "clear visual hierarchy, educational diagram quality"
-            ),
-            "diagram": (
-                "Technical diagram style, clean lines, clear labels, "
-                "educational infographic quality, bright colors on white background"
-            )
-        }
-
-        guide = style_guides.get(style, style_guides["educational"])
-
-        # Combine prompt with style guide
-        enhanced = f"{base_prompt}. {guide}"
-
-        # Cap prompt length
-        if len(enhanced) > 4000:
-            enhanced = enhanced[:3997] + "..."
-
-        return enhanced

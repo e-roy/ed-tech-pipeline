@@ -303,47 +303,6 @@ async def combine_video_and_audio(video_path: str, audio_path: str, output_path:
     return output_path
 
 
-def sanitize_video_prompt(prompt: str) -> str:
-    """
-    Sanitize video prompt to prevent text, numbers, equations, and math from appearing.
-
-    Best practices for video generation:
-    - Remove mentions of text, equations, formulas, numbers, labels
-    - Focus on visual, physical elements only
-    - Keep prompts concise and action-focused
-
-    Args:
-        prompt: Original visual prompt
-
-    Returns:
-        Sanitized prompt focused on pure visual elements
-    """
-    import re
-
-    # Keywords that might trigger text/math generation
-    text_keywords = [
-        r'\btext\b', r'\blabel\b', r'\bequation\b', r'\bformula\b', r'\bnumber\b',
-        r'\bwriting\b', r'\bwritten\b', r'\bdiagram\b', r'\bchart\b', r'\bgraph\b',
-        r'\bmath\b', r'\bcalculation\b', r'\bsymbol\b', r'\bnotation\b',
-        r'\boverlay\b', r'\bcaption\b', r'\btitle\b', r'\bsubtitle\b',
-        r'\bword\b', r'\bletter\b', r'\bcharacter\b', r'\bfigure\b'
-    ]
-
-    # Remove text-triggering keywords (case-insensitive)
-    sanitized = prompt
-    for keyword in text_keywords:
-        sanitized = re.sub(keyword, '', sanitized, flags=re.IGNORECASE)
-
-    # Clean up extra whitespace
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-
-    # Add anti-text prefix if not already present
-    if 'NO TEXT' not in sanitized.upper() and 'CLEAN VISUAL' not in sanitized.upper():
-        sanitized = f"CLEAN VISUAL ANIMATION, NO TEXT, NO NUMBERS: {sanitized}"
-
-    return sanitized
-
-
 async def _download_with_fallback(
     primary_url: str,
     s3_key: str,
@@ -418,7 +377,7 @@ async def agent_5_process(
     db: Optional[Session] = None,
     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None,
     restart_from_concat: bool = False,  # Skip generation, reuse existing clips from S3
-    model: str = "kling"  # Video generation model: "veo3", "kling", "minimax", "luma"
+    model: str = "wan-video/wan-2.2-i2v-fast"  # Video generation model: "veo3", "kling", "minimax", "luma", "wan-video/wan-2.2-i2v-fast" 
 ) -> Optional[str]:
     """
     Agent5: Video generation agent using FFmpeg.
@@ -437,7 +396,7 @@ async def agent_5_process(
         supersessionid: Super session identifier
         storage_service: Storage service for S3 operations
         pipeline_data: Pipeline data including:
-            - script: Script with visual_prompt for each section
+            - storyboard: Storyboard with segments containing narration, visual_scene, etc.
             - audio_data: Audio files and background music
         generation_mode: Deprecated - always uses AI video generation
         db: Database session for querying video_session table
@@ -555,22 +514,17 @@ async def agent_5_process(
         # Scan S3 folders for Agent3 and Agent4 content
         agent3_prefix = f"users/{user_id}/{session_id}/agent3/"
         agent4_prefix = f"users/{user_id}/{session_id}/agent4/"
-        
-        script = {}
+
         storyboard = {}
         audio_files = []
         background_music = {}
-        
+
         # Initialize agent data variables at function scope (needed for nested functions)
         agent_3_data = {}
         agent_4_data = {}
-        
-        try:
-            # Scan Agent3 folder for script/data files
-            agent3_files = storage_service.list_files_by_prefix(agent3_prefix, limit=1000)
-            logger.info(f"Found {len(agent3_files)} files in Agent3 folder")
 
-            # Look for agent_3_data.json first (most complete source)
+        try:
+            # Load agent_3_data.json (storyboard is the single source of truth)
             agent_3_data_key = f"{agent3_prefix}agent_3_data.json"
             try:
                 obj = storage_service.s3_client.get_object(
@@ -578,117 +532,49 @@ async def agent_5_process(
                     Key=agent_3_data_key
                 )
                 content = obj["Body"].read().decode('utf-8')
-                loaded_agent_3_data = json.loads(content)
+                agent_3_data = json.loads(content)
                 logger.info(f"Agent5 loaded agent_3_data.json from {agent_3_data_key}")
 
-                # Extract script and storyboard from agent_3_data
-                if loaded_agent_3_data.get("script"):
-                    script = loaded_agent_3_data["script"]
-                    logger.info("[AGENT5 TRACE] Extracted script from agent_3_data.json")
-                    for part_name in ["hook", "concept", "process", "conclusion"]:
-                        if part_name in script and isinstance(script[part_name], dict):
-                            text_preview = script[part_name].get("text", "")[:100] if script[part_name].get("text") else "(empty)"
-                            logger.info(f"[AGENT5 TRACE] script['{part_name}'] text preview: {text_preview}")
-                            visual_preview = script[part_name].get("visual_guidance", "")[:100] if script[part_name].get("visual_guidance") else "(empty)"
-                            logger.info(f"[AGENT5 TRACE] script['{part_name}'] visual_guidance preview: {visual_preview}")
+                # Extract storyboard (contains all script data in segments)
+                if agent_3_data.get("storyboard"):
+                    storyboard = agent_3_data["storyboard"]
+                    logger.info(f"Agent5 loaded storyboard with {len(storyboard.get('segments', []))} segments")
 
-                # Extract storyboard from agent_3_data (replaces storyboard.json)
-                if loaded_agent_3_data.get("storyboard"):
-                    storyboard = loaded_agent_3_data["storyboard"]
-                    logger.info(f"[AGENT5 TRACE] Extracted storyboard from agent_3_data.json with {len(storyboard.get('segments', []))} segments")
-
-                # Store agent_3_data for later use
-                agent_3_data = loaded_agent_3_data
+                    # Log segment info for debugging
+                    for seg in storyboard.get("segments", []):
+                        seg_type = seg.get("type", "unknown")
+                        narration_preview = seg.get("narration", "")[:100] if seg.get("narration") else "(empty)"
+                        logger.debug(f"[AGENT5] Segment '{seg_type}': {narration_preview}...")
 
             except Exception as e:
-                logger.debug(f"Agent5 could not load agent_3_data.json: {e}, will try other sources")
+                logger.warning(f"Agent5 could not load agent_3_data.json: {e}")
 
-            # Look for storyboard.json (fallback source)
-            if not script:
-                storyboard_key = f"{agent3_prefix}storyboard.json"
-                try:
-                    obj = storage_service.s3_client.get_object(
-                        Bucket=storage_service.bucket_name,
-                        Key=storyboard_key
-                    )
-                    content = obj["Body"].read().decode('utf-8')
-                    storyboard = json.loads(content)
-                    logger.info(f"Agent5 loaded storyboard.json from {storyboard_key}")
+            # If pipeline_data is provided, use it (for backwards compatibility)
+            if pipeline_data:
+                agent_3_data = pipeline_data.get("agent_3_data", agent_3_data)
+                agent_4_data = pipeline_data.get("agent_4_data", {})
 
-                    # Extract script from storyboard segments if available
-                    if storyboard.get("segments"):
-                        # Convert storyboard segments to script format for compatibility
-                        script_parts = {}
-                        for segment in storyboard["segments"]:
-                            segment_type = segment.get("type", "")
-                            if segment_type == "hook":
-                                script_parts["hook"] = {
-                                    "text": segment.get("narration", ""),
-                                    "duration": str(segment.get("duration", 0)),
-                                    "key_concepts": segment.get("key_concepts", []),
-                                    "visual_guidance": segment.get("visual_guidance", "")
-                                }
-                            elif segment_type == "concept_introduction":
-                                script_parts["concept"] = {
-                                    "text": segment.get("narration", ""),
-                                    "duration": str(segment.get("duration", 0)),
-                                    "key_concepts": segment.get("key_concepts", []),
-                                    "visual_guidance": segment.get("visual_guidance", "")
-                                }
-                            elif segment_type == "process_explanation":
-                                script_parts["process"] = {
-                                    "text": segment.get("narration", ""),
-                                    "duration": str(segment.get("duration", 0)),
-                                    "key_concepts": segment.get("key_concepts", []),
-                                    "visual_guidance": segment.get("visual_guidance", "")
-                                }
-                            elif segment_type == "conclusion":
-                                script_parts["conclusion"] = {
-                                    "text": segment.get("narration", ""),
-                                    "duration": str(segment.get("duration", 0)),
-                                    "key_concepts": segment.get("key_concepts", []),
-                                    "visual_guidance": segment.get("visual_guidance", "")
-                                }
-                        if script_parts:
-                            script = script_parts
-                            logger.info("[AGENT5 TRACE] Extracted script from storyboard.json")
-                            for part_name in ["hook", "concept", "process", "conclusion"]:
-                                if part_name in script:
-                                    text_preview = script[part_name].get("text", "")[:100] if script[part_name].get("text") else "(empty)"
-                                    logger.info(f"[AGENT5 TRACE] script['{part_name}'] text preview: {text_preview}")
-                                    visual_preview = script[part_name].get("visual_guidance", "")[:100] if script[part_name].get("visual_guidance") else "(empty)"
-                                    logger.info(f"[AGENT5 TRACE] script['{part_name}'] visual_guidance preview: {visual_preview}")
-                except Exception as e:
-                    logger.debug(f"Agent5 could not load storyboard.json: {e}, will try other sources")
-            
-            # Look for script JSON files or status files that might contain script data (fallback)
-            if not script:
-                for file_info in agent3_files:
-                    key = file_info.get("key", file_info.get("Key", ""))
-                    if "script" in key.lower() or "finished" in key.lower():
-                        # Skip storyboard.json as we already tried it
-                        if "storyboard.json" in key:
-                            continue
-                        # Try to download and parse
-                        try:
-                            obj = storage_service.s3_client.get_object(
-                                Bucket=storage_service.bucket_name,
-                                Key=key
-                            )
-                            content = obj["Body"].read().decode('utf-8')
-                            data = json.loads(content)
-                            if "generation_script" in data:
-                                script = data["generation_script"]
-                            elif "script" in data:
-                                script = data["script"]
-                        except Exception as e:
-                            logger.debug(f"Failed to parse file {key}: {e}")
-                            pass
-            
+                if agent_3_data.get("storyboard"):
+                    storyboard = agent_3_data["storyboard"]
+                elif pipeline_data.get("storyboard"):
+                    storyboard = pipeline_data["storyboard"]
+
+                audio_files = agent_4_data.get("audio_files", audio_files)
+                background_music = agent_4_data.get("background_music", background_music)
+
+                if not audio_files:
+                    audio_data = pipeline_data.get("audio_data", {})
+                    audio_files = audio_data.get("audio_files", audio_files)
+                    background_music = audio_data.get("background_music", background_music)
+
+            # Validate storyboard
+            if not storyboard or not storyboard.get("segments"):
+                raise ValueError("No storyboard data found in S3 or pipeline_data")
+
             # Scan Agent4 folder for audio files
             agent4_files = storage_service.list_files_by_prefix(agent4_prefix, limit=1000)
             logger.info(f"Found {len(agent4_files)} files in Agent4 folder")
-            
+
             for file_info in agent4_files:
                 key = file_info.get("key", file_info.get("Key", ""))
                 if key.endswith(".mp3"):
@@ -706,15 +592,13 @@ async def agent_5_process(
                             audio_files.append({
                                 "part": part,
                                 "url": audio_url,
-                                "s3_key": key,  # Store S3 key for error handling
-                                "duration": 5.0  # Default duration, could be extracted from metadata
+                                "s3_key": key,
+                                "duration": 5.0
                             })
                             logger.debug(f"Added audio file for part '{part}': {key}")
                         except Exception as e:
                             logger.warning(f"Failed to verify/generate URL for audio file {key}: {e}")
-                            # Continue with other files
                 elif "background_music" in key.lower() or "music" in key.lower():
-                    # Verify object exists before generating presigned URL
                     try:
                         storage_service.s3_client.head_object(
                             Bucket=storage_service.bucket_name,
@@ -723,45 +607,16 @@ async def agent_5_process(
                         background_music_url = storage_service.generate_presigned_url(key, expires_in=86400)
                         background_music = {
                             "url": background_music_url,
-                            "s3_key": key,  # Store S3 key for error handling
-                            "duration": 60  # Default duration
+                            "s3_key": key,
+                            "duration": 60
                         }
                         logger.debug(f"Added background music: {key}")
                     except Exception as e:
                         logger.warning(f"Failed to verify/generate URL for background music {key}: {e}")
-                        # Continue without background music
-            # If pipeline_data is provided, use it (for backwards compatibility)
-            if pipeline_data:
-                agent_3_data = pipeline_data.get("agent_3_data", {})
-                agent_4_data = pipeline_data.get("agent_4_data", {})
 
-                if agent_3_data or agent_4_data:
-                    script = agent_3_data.get("script", script)
-                    # Use storyboard from agent_3_data if available, otherwise keep what we loaded
-                    if agent_3_data.get("storyboard"):
-                        storyboard = agent_3_data.get("storyboard")
-                    audio_files = agent_4_data.get("audio_files", audio_files)
-                    background_music = agent_4_data.get("background_music", background_music)
-                else:
-                    script = pipeline_data.get("script", script)
-                    # Use storyboard from pipeline_data if available
-                    if pipeline_data.get("storyboard"):
-                        storyboard = pipeline_data.get("storyboard")
-                    audio_data = pipeline_data.get("audio_data", {})
-                    audio_files = audio_data.get("audio_files", audio_files)
-                    background_music = audio_data.get("background_music", background_music)
-            
-            if not script:
-                raise ValueError("No script data found in S3 or pipeline_data")
             if not audio_files:
                 raise ValueError("No audio files found in S3 or pipeline_data")
-            
-            # Log storyboard status
-            if storyboard:
-                logger.info(f"Agent5 loaded storyboard with {len(storyboard.get('segments', []))} segments")
-            else:
-                logger.info("Agent5 did not find storyboard, using script data only")
-                
+
         except Exception as e:
             logger.error(f"Agent5 failed to scan S3 folders: {e}")
             raise ValueError(f"Failed to discover Agent3/Agent4 content from S3: {str(e)}")
@@ -769,72 +624,67 @@ async def agent_5_process(
         # Create temp directory for assets
         temp_dir = tempfile.mkdtemp(prefix="agent5_")
 
-        # Build visual prompts and segment durations for each section
+        # Build visual scenes and segment durations for each section from storyboard
         sections = ["hook", "concept", "process", "conclusion"]
-        visual_prompts = {}  # Store prompts for parallel generation
-        video_descriptions = {}  # Store video descriptions for clip generation
+        visual_scenes = {}  # Store visual_scene objects for image generation
         section_seeds = {}  # Store seeds for consistency
         segment_durations = {}  # Store segment durations (in seconds)
 
+        # Map section keys to storyboard segment types
+        segment_type_map = {
+            "hook": "hook",
+            "concept": "concept_introduction",
+            "process": "process_explanation",
+            "conclusion": "conclusion"
+        }
+
+        # Build lookup dict from storyboard segments
+        segments_by_type = {}
+        for seg in storyboard.get("segments", []):
+            segments_by_type[seg.get("type")] = seg
+
         for part in sections:
-            # Get section data and visual prompt
-            section_data = script.get(part, {})
-            # Check for visual_guidance (primary, from Agent 3) or visual_prompt (legacy fallback)
-            visual_prompt = section_data.get("visual_guidance", "") or section_data.get("visual_prompt", "")
-            video_description = section_data.get("video_description", "")
-            seed = section_data.get("seed")
+            segment_type = segment_type_map.get(part)
+            segment = segments_by_type.get(segment_type, {})
 
-            # If storyboard is available, try to get enhanced data from it
-            if storyboard and storyboard.get("segments"):
-                # Map part to storyboard segment type
-                segment_type_map = {
-                    "hook": "hook",
-                    "concept": "concept_introduction",
-                    "process": "process_explanation",
-                    "conclusion": "conclusion"
+            # Get seed from segment (if available)
+            section_seeds[part] = segment.get("seed")
+
+            # Get visual_scene from storyboard segment
+            visual_scene = segment.get("visual_scene")
+
+            # Fallback: create basic visual_scene from visual_guidance or narration
+            if not visual_scene:
+                visual_guidance = segment.get("visual_guidance", "")
+                if not visual_guidance:
+                    narration = segment.get("narration", "")
+                    visual_guidance = f"Educational scene about {narration[:100]}"
+
+                visual_scene = {
+                    "description": visual_guidance,
+                    "composition": "centered subject with educational context",
+                    "lighting": "warm, inviting studio lighting",
+                    "camera_angle": "eye level medium shot",
+                    "key_elements": segment.get("key_concepts", [])[:5],
+                    "mood": "engaging and educational",
+                    "color_palette": ["blue", "green", "warm yellow"]
                 }
-                segment_type = segment_type_map.get(part)
 
-                # Find matching segment in storyboard
-                if segment_type:
-                    storyboard_segment = next(
-                        (seg for seg in storyboard["segments"] if seg.get("type") == segment_type),
-                        None
-                    )
-                    if storyboard_segment:
-                        # Use visual_guidance from storyboard if available
-                        storyboard_visual = storyboard_segment.get("visual_guidance", "")
-                        if storyboard_visual and not visual_prompt:
-                            visual_prompt = storyboard_visual
-                        # Use key_concepts from storyboard if available
-                        if storyboard_segment.get("key_concepts") and not section_data.get("key_concepts"):
-                            section_data["key_concepts"] = storyboard_segment.get("key_concepts")
-                        # Use duration from storyboard if available
-                        if storyboard_segment.get("duration") and not section_data.get("duration"):
-                            section_data["duration"] = str(storyboard_segment.get("duration"))
+            visual_scenes[part] = visual_scene
 
-            if not visual_prompt:
-                # Fallback: generate prompt from text
-                text = section_data.get("text", "")
-                visual_prompt = f"Cinematic scene representing: {text[:200]}"
-
-            visual_prompts[part] = visual_prompt
-            video_descriptions[part] = video_description
-            section_seeds[part] = seed
-
-            # Store segment duration (from storyboard or script, with defaults)
-            duration_str = section_data.get("duration")
+            # Get duration from storyboard segment with defaults
             default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
-            if duration_str:
+            duration = segment.get("duration")
+            if duration:
                 try:
-                    segment_durations[part] = float(duration_str)
+                    segment_durations[part] = float(duration)
                 except (ValueError, TypeError):
                     segment_durations[part] = default_durations.get(part, 15.0)
             else:
                 segment_durations[part] = default_durations.get(part, 15.0)
 
-            # Log the final visual prompt and duration
-            logger.info(f"[{session_id}] Section '{part}': {segment_durations[part]}s, prompt: {visual_prompt[:100]}...")
+            # Log the visual scene info
+            logger.info(f"[{session_id}] Section '{part}': {segment_durations[part]}s, visual_scene: {visual_scene.get('description', '')[:100]}...")
 
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
@@ -845,9 +695,11 @@ async def agent_5_process(
             "veo3": 1.20,      # Google Veo 3: ~$1.20 per 6s
             "kling": 0.18,     # Kling v1.5 Pro: ~$0.15/5s = $0.18/6s
             "minimax": 0.042,  # Minimax: ~$0.035/5s = $0.042/6s
-            "luma": 0.24       # Luma: ~$0.20/5s = $0.24/6s
+            "luma": 0.24,      # Luma: ~$0.20/5s = $0.24/6s
+            "wan-i2v": 0.025,  # WAN 2.2 I2V Fast: ~$0.02/5s at 720p
+            "wan-video/wan-2.2-i2v-fast": 0.025,  # Direct model ID
         }
-        COST_PER_CLIP = model_costs.get(model, 1.20)  # USD per clip (6 seconds)
+        COST_PER_CLIP = model_costs.get(model, 0.025)  # USD per clip (default to wan-i2v cost)
         # Note: total_cost and cost_per_section are already initialized at function start (line 453-454)
 
         # Constants for video generation
@@ -860,7 +712,7 @@ async def agent_5_process(
         # Calculate clips needed per section based on segment durations
         clips_per_section = {}
         for section in sections:
-            # Use segment duration (from storyboard/script or defaults)
+            # Use segment duration (from storyboard or defaults)
             segment_duration = segment_durations[section]
             clips_needed = max(1, math.ceil(segment_duration / CLIP_DURATION))
             clips_per_section[section] = clips_needed
@@ -873,13 +725,15 @@ async def agent_5_process(
             """Generate multiple video clips for a section and return (section, list_of_clip_paths)"""
             import httpx
 
-            prompt = visual_prompts[section]
+            # Get visual_scene description for video prompt
+            visual_scene = visual_scenes[section]
+            scene_description = visual_scene.get("description", "")
             clips_needed = clips_per_section[section]
 
             logger.info(f"[{session_id}] Generating {clips_needed} clips for section '{section}'")
-            logger.info(f"[{session_id}] Using prompt for '{section}': {prompt[:150]}...")
+            logger.info(f"[{session_id}] Using scene description for '{section}': {scene_description[:150]}...")
 
-            # Extract base_scene parameters if present for consistency
+            # Get base_scene for visual consistency across all clips
             # Check both new format (agent_3_data) and old format (root level)
             if agent_3_data:
                 base_scene = agent_3_data.get("base_scene", {})
@@ -887,75 +741,48 @@ async def agent_5_process(
                 base_scene = pipeline_data.get("base_scene", {})
             else:
                 base_scene = {}
-            # Extract base_scene fields, converting dicts to strings if needed
+
+            # Build base_scene context string for video prompts
             def to_string(val):
                 if isinstance(val, dict):
                     return " ".join(str(v) for v in val.values() if v)
                 return str(val) if val else ""
 
-            style = to_string(base_scene.get("style", ""))
-            setting = to_string(base_scene.get("setting", ""))
-            teacher_desc = to_string(base_scene.get("teacher", ""))
-            students_desc = to_string(base_scene.get("students", ""))
+            base_scene_parts = []
+            if base_scene.get("style"):
+                base_scene_parts.append(f"Style: {to_string(base_scene['style'])}")
+            if base_scene.get("setting"):
+                setting_str = to_string(base_scene["setting"])
+                # Limit setting length
+                setting_words = setting_str.split()[:30]
+                base_scene_parts.append(f"Setting: {' '.join(setting_words)}")
+            if base_scene.get("teacher"):
+                teacher_str = to_string(base_scene["teacher"])
+                teacher_words = teacher_str.split()[:20]
+                base_scene_parts.append(f"Teacher: {' '.join(teacher_words)}")
+            if base_scene.get("students"):
+                students_str = to_string(base_scene["students"])
+                students_words = students_str.split()[:20]
+                base_scene_parts.append(f"Students: {' '.join(students_words)}")
 
-            # Sanitize the base prompt to remove text-triggering keywords
-            prompt_sanitized = sanitize_video_prompt(prompt)
-            logger.info(f"[{session_id}] Original prompt for '{section}': {prompt[:150]}")
-            logger.info(f"[{session_id}] Sanitized prompt for '{section}': {prompt_sanitized[:150]}")
-
-            # Build consistency anchor (keep visual-only elements)
-            consistency_anchor = ""
-            if style or setting or teacher_desc or students_desc:
-                consistency_parts = []
-                if style:
-                    # Sanitize style to remove any text references
-                    style_sanitized = sanitize_video_prompt(style)
-                    consistency_parts.append(style_sanitized)
-                if setting:
-                    # Sanitize setting
-                    setting_sanitized = sanitize_video_prompt(setting)
-                    # Limit setting length to avoid overly long prompts
-                    setting_words = setting_sanitized.split()[:30]  # Max 30 words for setting
-                    consistency_parts.append(f"Setting: {' '.join(setting_words)}")
-                if teacher_desc:
-                    # Keep teacher description concise and visual-only
-                    teacher_words = teacher_desc.split()[:20]  # Max 20 words
-                    consistency_parts.append(f"Teacher: {' '.join(teacher_words)}")
-                if students_desc:
-                    # Keep students description concise
-                    students_words = students_desc.split()[:20]  # Max 20 words
-                    consistency_parts.append(f"Students: {' '.join(students_words)}")
-                consistency_anchor = " | ".join(consistency_parts) + " | "
-
-            # Get video description from script (camera movement, style, lighting)
-            video_desc = video_descriptions.get(section, "")
-            video_desc_clean = sanitize_video_prompt(video_desc) if video_desc else ""
+            base_scene_context = " | ".join(base_scene_parts) + " | " if base_scene_parts else ""
 
             # Generate progressive prompts for each clip position
-            # Keep prompts concise - Veo 3 works best with shorter, focused prompts
             clip_prompts = []
             for i in range(clips_needed):
                 # Create clip-specific temporal and action cues based on position
                 if clips_needed == 1:
-                    # Single clip: use sanitized prompt with visual-only modifiers
-                    base_prompt = f"{consistency_anchor}{prompt_sanitized}"
-                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, smooth cinematic movement, clean animation"
+                    clip_prompt = f"{base_scene_context}{scene_description}, smooth cinematic movement"
                 elif i == 0:
-                    # First clip: Opening/beginning of action (keep concise)
-                    base_prompt = f"{consistency_anchor}OPENING SHOT: {prompt_sanitized}"
-                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera slowly pushes in, characters beginning action, clean visual composition"
+                    clip_prompt = f"{base_scene_context}OPENING SHOT: {scene_description}, camera slowly pushes in, beginning of action"
                 elif i == clips_needed - 1:
-                    # Final clip: Conclusion of action (keep concise)
-                    base_prompt = f"{consistency_anchor}FINAL SHOT: {prompt_sanitized}"
-                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera holds steady, characters completing action, same composition as previous clip"
+                    clip_prompt = f"{base_scene_context}FINAL SHOT: {scene_description}, camera holds steady, completing action"
                 else:
-                    # Middle clips: Progression of action (keep concise)
-                    base_prompt = f"{consistency_anchor}SHOT {i+1}: {prompt_sanitized}"
-                    clip_prompt = f"{base_prompt}, {video_desc_clean}" if video_desc_clean else f"{base_prompt}, camera maintains angle, characters mid-action, continuous motion"
+                    clip_prompt = f"{base_scene_context}SHOT {i+1}: {scene_description}, camera maintains angle, continuous motion"
 
                 clip_prompts.append(clip_prompt)
 
-            # Get seed from script (Agent 2) or generate deterministic fallback
+            # Get seed from storyboard segment or generate deterministic fallback
             section_seed = section_seeds.get(section)
             if section_seed is None:
                 # Fallback: use hash of section name to get consistent seed per section
@@ -1076,27 +903,27 @@ async def agent_5_process(
                         with open(clip_path, 'wb') as f:
                             f.write(response.content)
 
-                        # VERIFY CLIP (includes all 8 checks: file, duration, resolution, frames, audio, integrity, visual, text)
-                        logger.info(f"[{session_id}] Verifying {section} clip {i + 1}/{len(generated_clips)}...")
-                        verification_result = await video_verifier.verify_clip(
-                            video_url=clip_path,
-                            expected_duration=6.0,  # Veo 3 generates 6-second clips
-                            clip_index=i
-                        )
+                        # SKIP per-clip verification - adds overhead with no actionable outcome
+                        # (clips are always accepted regardless of result, final video verification still runs)
+                        # logger.info(f"[{session_id}] Verifying {section} clip {i + 1}/{len(generated_clips)}...")
+                        # verification_result = await video_verifier.verify_clip(
+                        #     video_url=clip_path,
+                        #     expected_duration=6.0,  # Veo 3 generates 6-second clips
+                        #     clip_index=i
+                        # )
+                        #
+                        # if verification_result.passed:
+                        #     logger.info(f"[{session_id}] ✓ Clip {i + 1} passed verification for {section}")
+                        # else:
+                        #     # Log verification failures as warnings but continue with clip
+                        #     failed_check_names = [c.check_name for c in verification_result.failed_checks]
+                        #     logger.warning(
+                        #         f"[{session_id}] ⚠ Clip {i + 1} for {section} failed verification: {failed_check_names}. "
+                        #         f"Continuing with clip anyway (regeneration disabled)."
+                        #     )
+                        #     for check in verification_result.failed_checks:
+                        #         logger.warning(f"[{session_id}]   - {check.check_name}: {check.message}")
 
-                        if verification_result.passed:
-                            logger.info(f"[{session_id}] ✓ Clip {i + 1} passed verification for {section}")
-                        else:
-                            # Log verification failures as warnings but continue with clip
-                            failed_check_names = [c.check_name for c in verification_result.failed_checks]
-                            logger.warning(
-                                f"[{session_id}] ⚠ Clip {i + 1} for {section} failed verification: {failed_check_names}. "
-                                f"Continuing with clip anyway (regeneration disabled)."
-                            )
-                            for check in verification_result.failed_checks:
-                                logger.warning(f"[{session_id}]   - {check.check_name}: {check.message}")
-
-                        # Accept clip regardless of verification result
                         clip_paths.append(clip_path)
 
                         # Save clip to S3 for restart capability
@@ -1182,7 +1009,7 @@ async def agent_5_process(
             # ====================
             # IMAGE GENERATION PHASE (Gemini via Replicate)
             # ====================
-            # Generate images for all 4 sections using script visual prompts
+            # Generate images for all 4 sections using storyboard visual scenes
             # These images will be used as the starting frame for video generation
 
             logger.info(f"[{session_id}] Starting image generation (Gemini) for {len(sections)} sections")
@@ -1204,10 +1031,10 @@ async def agent_5_process(
             # Generate images in parallel for all sections
             async def generate_section_image(section: str) -> tuple[str, Optional[str]]:
                 """Generate a Gemini image for a section with retry logic. Returns (section, image_url)"""
-                visual_prompt = visual_prompts[section]
+                visual_scene = visual_scenes[section]
 
                 logger.info(f"[{session_id}] Generating image for '{section}' with Gemini")
-                logger.info(f"[{session_id}] Image prompt for '{section}': {visual_prompt[:150]}...")
+                logger.info(f"[{session_id}] Visual scene for '{section}': {visual_scene.get('description', '')[:150]}...")
 
                 # Retry logic: up to 3 attempts
                 max_retries = 3
@@ -1215,10 +1042,9 @@ async def agent_5_process(
                     try:
                         logger.info(f"[{session_id}] Gemini generation attempt {attempt}/{max_retries} for '{section}'")
 
-                        # Generate image with Gemini (standard quality, 16:9 aspect ratio)
+                        # Generate image with Gemini - pass visual_scene object directly
                         result = await image_generator.generate_image(
-                            prompt=visual_prompt,
-                            style="educational",
+                            visual_scene=visual_scene,
                             quality="standard"  # ~$0.02 per image
                         )
 
@@ -1279,7 +1105,9 @@ async def agent_5_process(
                 "veo3": "Google Veo 3",
                 "kling": "Kling v1.5 Pro",
                 "minimax": "Minimax Video-01",
-                "luma": "Luma Dream Machine"
+                "luma": "Luma Dream Machine",
+                "wan-i2v": "WAN 2.2 I2V Fast",
+                "wan-video/wan-2.2-i2v-fast": "WAN 2.2 I2V Fast",
             }
             model_display = model_names.get(model, model)
 

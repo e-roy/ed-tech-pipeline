@@ -193,6 +193,26 @@ class AudioPipelineAgent:
             items=cumulative_items
         )
 
+    def _estimate_speech_duration(self, text: str, speed: float = 1.0) -> float:
+        """
+        Estimate speech duration based on text length.
+        OpenAI TTS generates audio at approximately 150 words per minute at 1.0x speed.
+        """
+        word_count = len(text.split())
+        words_per_minute = 150 * speed
+        return (word_count / words_per_minute) * 60
+
+    def _calculate_optimal_speed(self, text: str, target_duration: float) -> float:
+        """
+        Calculate optimal speed to fit text within target duration.
+        Pre-calculates speed to avoid regeneration.
+        """
+        estimated_duration = self._estimate_speech_duration(text, speed=1.0)
+        if estimated_duration <= target_duration:
+            return 1.0
+        required_speed = estimated_duration / target_duration
+        return min(required_speed, 1.25)  # Cap at 1.25x
+
     async def _generate_single_audio(
         self,
         part_name: str,
@@ -204,7 +224,7 @@ class AudioPipelineAgent:
         total_parts: int,
         voice_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generate audio for a single script part."""
+        """Generate audio for a single script part with optimized single-pass generation."""
         try:
             text = part_data.get("text", "")
 
@@ -225,124 +245,63 @@ class AudioPipelineAgent:
                     "processing"
                 )
 
-            logger.info(
-                f"[{session_id}] Generating audio for '{part_name}' "
-                f"({len(text)} chars, voice: {voice})"
-            )
-
-            # Get target duration from part_data if available
+            # Get target duration and pre-calculate speed (avoids regeneration)
             target_duration = None
+            speed = 1.0
             if "duration" in part_data:
                 try:
                     target_duration = float(part_data["duration"])
-                    logger.info(f"[{session_id}] Target duration for '{part_name}': {target_duration}s")
+                    speed = self._calculate_optimal_speed(text, target_duration)
                 except (ValueError, TypeError):
-                    logger.warning(f"[{session_id}] Invalid duration value for '{part_name}': {part_data.get('duration')}")
+                    pass
 
-            # Generate TTS audio using OpenAI with gpt-4o-mini-tts model
-            # This model supports voice instructions for better control over delivery style
-            # Default instructions: teacher presenting to middle school students
+            logger.info(
+                f"[{session_id}] Generating audio for '{part_name}' "
+                f"({len(text)} chars, voice: {voice}, speed: {speed:.2f}x)"
+            )
+
+            # Voice instructions for teacher-like delivery
             default_instructions = "Present the content like a teacher giving a lesson to middle school students. Use a clear, engaging, and encouraging tone that makes the material easy to understand and interesting."
             instructions = voice_instructions if voice_instructions else default_instructions
 
-            # Try using gpt-4o-mini-tts with instructions, fall back to tts-1 if not supported
+            # Generate TTS audio in a single pass with pre-calculated speed
             try:
                 response = self.client.audio.speech.create(
                     model="gpt-4o-mini-tts",
                     voice=voice,
                     input=text,
                     instructions=instructions,
-                    response_format="mp3"
+                    response_format="mp3",
+                    speed=speed
                 )
-            except TypeError as e:
-                # SDK doesn't support instructions parameter - fall back to tts-1
-                logger.warning(
-                    f"[{session_id}] gpt-4o-mini-tts with instructions not supported (SDK too old). "
-                    f"Falling back to tts-1 model. Update openai package to >=1.70.0 for full support. Error: {e}"
-                )
+            except TypeError:
+                # SDK doesn't support instructions - fall back to tts-1
+                logger.warning(f"[{session_id}] Using tts-1 fallback")
                 response = self.client.audio.speech.create(
                     model="tts-1",
                     voice=voice,
                     input=text,
-                    response_format="mp3"
+                    response_format="mp3",
+                    speed=speed
                 )
 
-            # Save to temporary file (cross-platform)
+            # Save to temporary file
             temp_dir = tempfile.gettempdir()
-            os.makedirs(temp_dir, exist_ok=True)
-
             filename = f"audio_{part_name}_{session_id}.mp3"
             filepath = os.path.join(temp_dir, filename)
 
-            # Write audio bytes to file
             with open(filepath, "wb") as f:
                 f.write(response.content)
 
-            logger.debug(f"[{session_id}] Saved audio file to: {filepath}")
+            # Estimate duration from text (skip ffprobe for speed)
+            estimated_duration = self._estimate_speech_duration(text, speed)
 
-            # Get actual duration using ffprobe
-            actual_duration = get_audio_duration(filepath)
-            logger.info(f"[{session_id}] Actual audio duration for '{part_name}': {actual_duration:.2f}s")
-
-            # Calculate cost (based on character count)
+            # Calculate cost
             char_count = len(text)
             cost = (char_count / 1_000_000) * self.COST_PER_1M_CHARS
 
-            # Check if we need to speed up the audio to fit target duration
-            if target_duration and actual_duration > target_duration:
-                # Calculate required speed to fit within target duration
-                required_speed = actual_duration / target_duration
-
-                # Cap speed at 1.25x (beyond this sounds unnatural)
-                if required_speed > 1.25:
-                    logger.warning(
-                        f"[{session_id}] Audio for '{part_name}' requires {required_speed:.2f}x speed "
-                        f"to fit {target_duration}s, but capping at 1.25x"
-                    )
-                    required_speed = 1.25
-
-                # Regenerate with speed adjustment
-                logger.info(f"[{session_id}] Regenerating '{part_name}' at {required_speed:.2f}x speed to fit {target_duration}s")
-
-                try:
-                    response = self.client.audio.speech.create(
-                        model="gpt-4o-mini-tts",
-                        voice=voice,
-                        input=text,
-                        instructions=instructions,
-                        response_format="mp3",
-                        speed=required_speed
-                    )
-                except TypeError as e:
-                    # SDK doesn't support instructions parameter - fall back to tts-1
-                    logger.warning(
-                        f"[{session_id}] gpt-4o-mini-tts with instructions not supported. "
-                        f"Using tts-1 with speed adjustment. Error: {e}"
-                    )
-                    response = self.client.audio.speech.create(
-                        model="tts-1",
-                        voice=voice,
-                        input=text,
-                        response_format="mp3",
-                        speed=required_speed
-                    )
-
-                # Overwrite the file with sped-up version
-                with open(filepath, "wb") as f:
-                    f.write(response.content)
-
-                # Get new duration
-                actual_duration = get_audio_duration(filepath)
-                logger.info(f"[{session_id}] Adjusted audio duration for '{part_name}': {actual_duration:.2f}s")
-
-                # Double the cost (regenerated)
-                cost *= 2
-
-            # Get file size for verification
+            # Get file size
             file_size = os.path.getsize(filepath)
-
-            # Use actual duration instead of estimation
-            estimated_duration = actual_duration
 
             # Update cumulative status: mark audio as completed
             if cumulative_items:

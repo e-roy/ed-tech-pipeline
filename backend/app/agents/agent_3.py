@@ -4,8 +4,7 @@ Agent 3 - Script Processing and Base Scene Generation
 Processes video session data and generates JSON output for video generation.
 
 Outputs agent_3_data.json containing:
-  - script: Extracted script with hook, concept, process, conclusion sections
-  - storyboard: Segment timing and visual guidance
+  - storyboard: Segment timing, narration, visual guidance, and visual_scene for each section
   - base_scene: Visual consistency settings (style, setting, teacher, students)
 """
 import json
@@ -76,7 +75,16 @@ async def agent_3_process(
         storyboard = _create_storyboard(script)
         logger.info(f"Agent3 created storyboard with {len(storyboard['segments'])} segments")
 
-        # Generate base scene
+        # Generate visual_scene for each segment (for image generation)
+        await send_status("processing", message="Generating visual scenes...")
+        storyboard = await _generate_visual_scenes(
+            storyboard=storyboard,
+            topic=data.get("topic"),
+            child_interest=data.get("child_interest")
+        )
+        logger.info("Agent3 generated visual_scene for storyboard segments")
+
+        # Generate base scene (for video generation)
         await send_status("processing", message="Generating base scene...")
         base_scene = await _generate_base_scene(
             topic=data.get("topic"),
@@ -87,8 +95,8 @@ async def agent_3_process(
         )
         logger.info("Agent3 generated base_scene")
 
-        # Upload to S3
-        agent_3_data = {"script": script, "storyboard": storyboard, "base_scene": base_scene}
+        # Upload to S3 (storyboard contains all script data in segments)
+        agent_3_data = {"storyboard": storyboard, "base_scene": base_scene}
         if storage_service.s3_client:
             s3_key = f"users/{user_id}/{session_id}/agent3/agent_3_data.json"
             storage_service.s3_client.put_object(
@@ -100,7 +108,7 @@ async def agent_3_process(
             logger.info(f"Agent3 uploaded to S3: {s3_key}")
 
         await send_status("finished", message="Script processing complete")
-        return {"status": "success", "script": script, "storyboard": storyboard,
+        return {"status": "success", "storyboard": storyboard,
                 "base_scene": base_scene, "agent_3_data": agent_3_data}
 
     except Exception as e:
@@ -194,8 +202,13 @@ def _create_storyboard(script: dict) -> dict:
         if not narration:
             continue
 
-        # Calculate duration (150 words per minute)
-        duration = max(1, round(len(narration.split()) / 150 * 60))
+        # Get duration from source script
+        duration = 15  # default
+        if isinstance(part, dict) and part.get("duration"):
+            try:
+                duration = int(part["duration"])
+            except (ValueError, TypeError):
+                pass
 
         # Get other fields from script or use defaults
         visual_guidance = part.get("visual_guidance", "") if isinstance(part, dict) else ""
@@ -302,4 +315,127 @@ def _get_fallback_base_scene() -> dict:
         "setting": "Bright modern classroom with cream walls, wood floors, large windows, student desks, teacher's desk with globe, colorful posters, bookshelf",
         "teacher": "Ms. Rivera, early 30s, warm tan skin, dark brown ponytail, brown eyes, friendly smile, sky blue cardigan, white shirt, navy pants, encouraging manner",
         "students": "8 diverse animated children with expressive eyes, various appearances, casual clothes, engaged and attentive. Key students: Maya (glasses, braids), Oliver (curly orange hair), Sofia (blonde ponytail), James (short black hair)"
+    }
+
+
+async def _generate_visual_scenes(
+    storyboard: dict,
+    topic: Optional[str] = None,
+    child_interest: Optional[str] = None
+) -> dict:
+    """Generate visual_scene objects for each storyboard segment using LLM.
+
+    Args:
+        storyboard: Storyboard dict with segments
+        topic: Video topic for context
+        child_interest: Child's interest for thematic elements
+
+    Returns:
+        Updated storyboard with visual_scene added to each segment
+    """
+    client = _get_openai_client()
+    if not client:
+        logger.warning("No OpenAI client available, using fallback visual scenes")
+        return _add_fallback_visual_scenes(storyboard)
+
+    segments = storyboard.get("segments", [])
+    if not segments:
+        return storyboard
+
+    # Build context for the LLM
+    segments_context = []
+    for seg in segments:
+        segments_context.append({
+            "type": seg.get("type"),
+            "narration": seg.get("narration", "")[:200],
+            "visual_guidance": seg.get("visual_guidance", ""),
+            "key_concepts": seg.get("key_concepts", [])
+        })
+
+    prompt = f"""Generate detailed visual scene descriptions for AI image generation.
+
+Topic: {topic or "educational content"}
+Child's interest: {child_interest or "learning"}
+
+For each segment below, create a visual_scene object optimized for AI image generation.
+The visual_scene should translate the abstract visual_guidance into concrete, renderable scene details.
+
+IMPORTANT RULES FOR AI IMAGE GENERATION:
+- Avoid requesting text, labels, captions, or writing in the scene
+- Avoid split screens or multiple panels - describe ONE cohesive scene
+- Avoid abstract concepts - describe concrete, visible elements
+- Avoid transitions or animations - describe a single moment in time
+
+Segments:
+{json.dumps(segments_context, indent=2)}
+
+Return JSON with this exact structure:
+{{
+  "visual_scenes": [
+    {{
+      "segment_type": "hook",
+      "visual_scene": {{
+        "description": "Main scene description - what the viewer sees (2-3 sentences)",
+        "composition": "How elements are arranged in frame (foreground, background, focal point)",
+        "lighting": "Lighting style and mood (warm, cool, dramatic, soft, etc.)",
+        "camera_angle": "Camera perspective (wide shot, close-up, eye level, bird's eye, etc.)",
+        "key_elements": ["list", "of", "must-have", "visual", "objects"],
+        "mood": "Emotional tone of the scene (exciting, calm, mysterious, etc.)",
+        "color_palette": ["primary", "colors", "to", "use"]
+      }}
+    }}
+  ]
+}}
+
+Generate visual_scene for each of the {len(segments)} segments in order."""
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            response_format={"type": "json_object"}
+        )
+        result = json.loads(response.choices[0].message.content)
+        visual_scenes = result.get("visual_scenes", [])
+
+        # Map visual_scenes back to segments by type
+        scene_by_type = {vs.get("segment_type"): vs.get("visual_scene") for vs in visual_scenes}
+
+        for seg in segments:
+            seg_type = seg.get("type")
+            if seg_type in scene_by_type:
+                seg["visual_scene"] = scene_by_type[seg_type]
+            else:
+                # Fallback for missing segments
+                seg["visual_scene"] = _get_fallback_visual_scene(seg)
+
+        logger.info(f"Generated visual_scene for {len(visual_scenes)} segments via OpenAI")
+        return storyboard
+
+    except Exception as e:
+        logger.error(f"OpenAI visual_scene generation failed: {e}")
+        return _add_fallback_visual_scenes(storyboard)
+
+
+def _add_fallback_visual_scenes(storyboard: dict) -> dict:
+    """Add fallback visual_scene to each segment when LLM is unavailable."""
+    for seg in storyboard.get("segments", []):
+        seg["visual_scene"] = _get_fallback_visual_scene(seg)
+    return storyboard
+
+
+def _get_fallback_visual_scene(segment: dict) -> dict:
+    """Generate a basic fallback visual_scene from segment data."""
+    visual_guidance = segment.get("visual_guidance", "")
+    key_concepts = segment.get("key_concepts", [])
+
+    return {
+        "description": visual_guidance or f"Educational scene about {', '.join(key_concepts) if key_concepts else 'the topic'}",
+        "composition": "centered subject with supportive background elements",
+        "lighting": "warm, inviting studio lighting",
+        "camera_angle": "eye level medium shot",
+        "key_elements": key_concepts[:5] if key_concepts else ["educational content"],
+        "mood": "engaging and educational",
+        "color_palette": ["blue", "green", "warm yellow", "white"]
     }
