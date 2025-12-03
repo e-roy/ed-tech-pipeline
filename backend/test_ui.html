@@ -865,9 +865,15 @@ So plants are basically solar-powered food factories! They create their own ener
             const audioFiles = data.data.audio_files || [];
             const totalCost = data.data.total_cost || 0.0;
             const totalDuration = data.data.total_duration || 0.0;
+            const finalAudio = data.data.final_audio || null;
 
-            // Show audio player
-            displayAudioPlayer(audioFiles, totalCost, totalDuration);
+            // Show audio player (with final mixed audio)
+            displayAudioPlayer(
+              audioFiles,
+              totalCost,
+              totalDuration,
+              finalAudio
+            );
 
             // Enable compose button if images are also ready
             checkAndEnableCompose();
@@ -1311,13 +1317,50 @@ So plants are basically solar-powered food factories! They create their own ener
       }
 
       // Display Audio Player
-      function displayAudioPlayer(audioFiles, totalCost, totalDuration) {
+      function displayAudioPlayer(
+        audioFiles,
+        totalCost,
+        totalDuration,
+        finalAudio = null
+      ) {
         const player = document.getElementById("audio-player");
         player.style.display = "block";
 
         let html = `<h3>Generated Audio <span class="cost-info">Cost: $${totalCost.toFixed(
           4
         )} | Duration: ${totalDuration}s</span></h3>`;
+
+        // Show Final Mixed Audio (60s narration + music) if available
+        if (finalAudio && finalAudio.url) {
+          html += `
+                    <div class="audio-file" style="background: #f0fdf4; border: 2px solid #10b981;">
+                        <h4 style="color: #065f46;">🎵 Final Mixed Audio (60s)</h4>
+                        <p style="color: #065f46;">
+                            <strong>Ready for Video!</strong> - Narration spaced across 60s timeline + background music (30% volume)
+                        </p>
+                        <p>Duration: ${finalAudio.duration}s</p>
+                        <audio controls src="${
+                          finalAudio.url
+                        }" style="margin-top: 10px;">
+                            Your browser does not support the audio element.
+                        </audio>
+                        <p style="margin-top: 10px; font-size: 0.875rem; color: #6b7280;">
+                            📁 S3 Key: <code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px;">${
+                              finalAudio.s3_key || "N/A"
+                            }</code>
+                        </p>
+                    </div>
+                `;
+        }
+
+        // Show Individual Audio Clips (collapsible)
+        html += `
+                <details style="margin-top: 20px;">
+                    <summary style="cursor: pointer; padding: 12px; background: #f9fafb; border-radius: 8px; font-weight: 600; color: #374151;">
+                        📂 Individual Audio Clips (${audioFiles.length} files)
+                    </summary>
+                    <div style="margin-top: 15px;">
+            `;
 
         audioFiles.forEach((file) => {
           html += `
@@ -1334,6 +1377,11 @@ So plants are basically solar-powered food factories! They create their own ener
                     </div>
                 `;
         });
+
+        html += `
+                    </div>
+                </details>
+            `;
 
         player.innerHTML = html;
       }
@@ -1414,12 +1462,14 @@ So plants are basically solar-powered food factories! They create their own ener
               displayImageGallery(data.micro_scenes);
             }
 
-            // Display audio
+            // Display audio (with final mixed audio)
             if (data.audio_files && data.audio_files.length > 0) {
+              const finalAudio = data.final_audio || null;
               displayAudioPlayer(
                 data.audio_files,
                 data.total_cost,
-                data.total_duration
+                data.total_duration,
+                finalAudio
               );
             }
 

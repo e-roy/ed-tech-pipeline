@@ -62,7 +62,12 @@ export const finalVideosRouter = createTRPCRouter({
             lastModified: file.last_modified,
           };
         })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .sort((a, b) => {
+          // Sort by creation date descending (newest first)
+          if (!a.createdAt || !b.createdAt) return 0;
+          return b.createdAt.getTime() - a.createdAt.getTime();
+        });
 
       // Apply pagination
       const paginatedVideos = videosWithSessions.slice(

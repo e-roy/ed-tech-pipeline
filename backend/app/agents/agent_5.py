@@ -114,160 +114,6 @@ async def generate_image_dalle(prompt: str, api_key: str, max_retries: int = 3) 
         raise RuntimeError(last_error or "DALL-E API failed after retries")
 
 
-# DEPRECATED: Remotion-based rendering has been replaced with ffmpeg-based concatenation
-# Keeping these functions commented out for reference
-#
-# def calculate_scene_timing(audio_files: List[Dict], fps: int = 30, total_duration: int = 60) -> List[Dict]:
-#     """
-#     Calculate scene timing to distribute audio across 60 seconds.
-#
-#     Returns scene data with start frames and durations.
-#     """
-#     total_frames = total_duration * fps
-#     num_scenes = len(audio_files)
-#
-#     # Calculate spacing between scenes
-#     scene_duration_frames = total_frames // num_scenes
-#
-#     scenes = []
-#     for i, audio in enumerate(audio_files):
-#         start_frame = i * scene_duration_frames
-#         duration_frames = scene_duration_frames
-#
-#         # Last scene gets any remaining frames
-#         if i == num_scenes - 1:
-#             duration_frames = total_frames - start_frame
-#
-#         audio_duration_seconds = audio.get("duration", 5.0)
-#         audio_duration_frames = int(audio_duration_seconds * fps)
-#
-#         scenes.append({
-#             "part": audio["part"],
-#             "startFrame": start_frame,
-#             "durationFrames": duration_frames,
-#             "audioDurationFrames": audio_duration_frames
-#         })
-#
-#     return scenes
-#
-#
-# async def render_video_with_remotion(
-#     scenes: List[Dict],
-#     background_music_url: str,
-#     output_path: str,
-#     temp_dir: str,
-#     websocket_manager: Optional[WebSocketManager] = None,
-#     session_id: Optional[str] = None,
-#     user_id: Optional[str] = None,
-#     supersessionid: Optional[str] = None,
-#     status_callback: Optional[Callable[[str, str, str, str, int], Awaitable[None]]] = None
-# ) -> str:
-#     """DEPRECATED - Replaced with ffmpeg-based concatenation"""
-#     pass
-
-
-async def create_timed_narration_track(audio_file_paths: List[str], output_path: str, total_duration: float = 60.0) -> str:
-    """
-    Create a timed narration track by placing audio files at calculated intervals across the total duration.
-    Each narration plays at the beginning of its segment, with silence/space between narrations.
-
-    Args:
-        audio_file_paths: List of paths to audio files in order (hook, concept, process, conclusion)
-        output_path: Path for output timed audio file
-        total_duration: Total duration in seconds for the final track (default 60s)
-
-    Returns:
-        Path to timed audio file
-    """
-    import subprocess
-
-    num_segments = len(audio_file_paths)
-    segment_duration = total_duration / num_segments  # e.g., 60s / 4 = 15s per segment
-
-    # Build ffmpeg filter_complex to place each audio at its segment start time using adelay
-    filter_parts = []
-    for i in range(num_segments):
-        # Calculate delay for this segment (in milliseconds)
-        start_time_seconds = i * segment_duration
-        delay_ms = int(start_time_seconds * 1000)
-
-        # Add atrim to limit audio to segment_duration, then adelay to position at correct time
-        # This prevents narration overlap between segments
-        # adelay takes stereo input, so we delay both channels
-        filter_parts.append(f"[{i}:a]atrim=0:{segment_duration},adelay={delay_ms}|{delay_ms}[a{i}]")
-
-    # Mix all delayed audio tracks together, extending to total duration
-    mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
-    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0[mixed]"
-
-    # Build ffmpeg command with direct MP3 inputs
-    cmd = ["ffmpeg", "-y"]
-
-    # Add all audio inputs (MP3 files work directly with adelay filter)
-    for audio_path in audio_file_paths:
-        cmd.extend(["-i", audio_path])
-
-    # Add filter complex and output options
-    cmd.extend([
-        "-filter_complex", filter_complex,
-        "-map", "[mixed]",
-        "-t", str(total_duration),  # Set total duration to 60s
-        "-ac", "2",  # Stereo
-        "-ar", "44100",  # Sample rate
-        "-c:a", "libmp3lame",  # MP3 codec
-        "-b:a", "128k",  # Bitrate
-        output_path
-    ])
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg timed narration creation failed: {result.stderr}")
-
-    logger.info(f"Created timed narration track: {num_segments} narrations across {total_duration}s")
-    return output_path
-
-
-async def mix_audio_with_background(narration_path: str, background_music_path: str, output_path: str, music_volume: float = 0.3) -> str:
-    """
-    Mix narration audio with background music.
-
-    Args:
-        narration_path: Path to concatenated narration audio
-        background_music_path: Path to background music file
-        output_path: Path for output mixed audio file
-        music_volume: Volume level for background music (0.0-1.0), default 0.3 (30%)
-
-    Returns:
-        Path to mixed audio file
-    """
-    import subprocess
-
-    # Mix narration with background music
-    # - Narration at 100% volume
-    # - Background music at specified volume (default 30%)
-    # - Loop music if needed with -stream_loop -1
-    # - Use duration of narration (first input) with -shortest
-    filter_complex = f"[1:a]volume={music_volume}[music];[0:a][music]amix=inputs=2:duration=first[aout]"
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", narration_path,
-        "-stream_loop", "-1",  # Loop background music
-        "-i", background_music_path,
-        "-filter_complex", filter_complex,
-        "-map", "[aout]",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        output_path
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg audio mixing failed: {result.stderr}")
-
-    return output_path
-
-
 async def concatenate_all_video_clips(clip_paths: List[str], output_path: str) -> str:
     """
     Concatenate all video clips into a single video file.
@@ -496,6 +342,69 @@ def sanitize_video_prompt(prompt: str) -> str:
         sanitized = f"CLEAN VISUAL ANIMATION, NO TEXT, NO NUMBERS: {sanitized}"
 
     return sanitized
+
+
+async def _download_with_fallback(
+    primary_url: str,
+    s3_key: str,
+    output_path: str,
+    storage_service: StorageService,
+    client: httpx.AsyncClient,
+    session_id: str,
+    file_description: str = "file"
+) -> bool:
+    """
+    Download a file from S3 with fallback URLs and redirect handling.
+
+    Args:
+        primary_url: Primary presigned URL
+        s3_key: S3 key for generating fallback URLs
+        output_path: Local path to save downloaded file
+        storage_service: Storage service instance
+        client: httpx client (should have follow_redirects=False)
+        session_id: Session ID for logging
+        file_description: Description for logging (e.g., "audio for hook", "background music")
+
+    Returns:
+        True if download succeeded, False otherwise
+    """
+    # Get all possible URLs (including fallbacks)
+    all_urls = [primary_url] + storage_service.generate_s3_url_with_fallback(s3_key)
+
+    # Remove duplicates while preserving order
+    seen = set()
+    urls_to_try = []
+    for u in all_urls:
+        if u not in seen:
+            seen.add(u)
+            urls_to_try.append(u)
+
+    # Try each URL until one works
+    for attempt_url in urls_to_try:
+        try:
+            logger.debug(f"[{session_id}] Downloading {file_description} from {attempt_url[:100]}...")
+            response = await client.get(attempt_url)
+
+            # Handle redirects manually
+            if response.status_code in [301, 302, 303, 307, 308]:
+                redirect_url = response.headers.get('Location')
+                logger.debug(f"[{session_id}] Got redirect to: {redirect_url[:100]}..., following...")
+                response = await client.get(redirect_url)
+
+            response.raise_for_status()
+
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+
+            logger.info(f"[{session_id}] Successfully downloaded {file_description} ({len(response.content)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.debug(f"[{session_id}] URL failed: {attempt_url[:100]}... - {e}")
+            continue
+
+    logger.error(f"[{session_id}] Failed to download {file_description} after trying {len(urls_to_try)} URLs")
+    return False
 
 
 async def agent_5_process(
@@ -821,41 +730,6 @@ async def agent_5_process(
                     except Exception as e:
                         logger.warning(f"Failed to verify/generate URL for background music {key}: {e}")
                         # Continue without background music
-            
-            # If no pipeline_data provided and we couldn't find files, try querying database
-            if not pipeline_data and not script and not audio_files:
-                if db is not None:
-                    try:
-                        result = db.execute(
-                            sql_text(
-                                "SELECT * FROM video_session WHERE id = :session_id AND user_id = :user_id"
-                            ),
-                            {"session_id": session_id, "user_id": user_id},
-                        ).fetchone()
-                        
-                        if result:
-                            if hasattr(result, "_mapping"):
-                                video_session_data = dict(result._mapping)
-                            else:
-                                video_session_data = {
-                                    "id": getattr(result, "id", None),
-                                    "user_id": getattr(result, "user_id", None),
-                                    "generated_script": getattr(result, "generated_script", None),
-                                }
-                            
-                            # Extract script from video_session
-                            if video_session_data.get("generated_script"):
-                                from app.agents.agent_2 import extract_script_from_generated_script
-                                extracted_script = extract_script_from_generated_script(video_session_data.get("generated_script"))
-                                if extracted_script:
-                                    script = extracted_script
-                    except Exception as db_error:
-                        logger.warning(f"Agent5 failed to query video_session as fallback: {db_error}")
-                
-                # If still no script or audio files, raise error
-                if not script and not audio_files:
-                    raise ValueError(f"No content found in S3 folders or database. Agent3: {len(agent3_files)} files, Agent4: {len(agent4_files)} files")
-            
             # If pipeline_data is provided, use it (for backwards compatibility)
             if pipeline_data:
                 agent_3_data = pipeline_data.get("agent_3_data", {})
@@ -905,21 +779,10 @@ async def agent_5_process(
         for part in sections:
             # Get section data and visual prompt
             section_data = script.get(part, {})
-            # Check for both visual_prompt and visual_guidance (Agent 2 uses visual_guidance)
-            visual_prompt = section_data.get("visual_prompt", "") or section_data.get("visual_guidance", "")
+            # Check for visual_guidance (primary, from Agent 3) or visual_prompt (legacy fallback)
+            visual_prompt = section_data.get("visual_guidance", "") or section_data.get("visual_prompt", "")
             video_description = section_data.get("video_description", "")
             seed = section_data.get("seed")
-
-            # Debug logging for prompt verification
-            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - section_data keys: {list(section_data.keys())}")
-            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - visual_prompt from script: '{visual_prompt[:100] if visual_prompt else '(empty)'}'")
-            logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - duration from script: {section_data.get('duration', '(not set)')}")
-
-            # Also log text and visual_guidance if present
-            if "text" in section_data:
-                logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - text preview: {section_data['text'][:100] if section_data['text'] else '(empty)'}")
-            if "visual_guidance" in section_data:
-                logger.info(f"[VISUAL PROMPT TRACE] Section '{part}' - visual_guidance: {section_data['visual_guidance'][:100] if section_data['visual_guidance'] else '(empty)'}")
 
             # If storyboard is available, try to get enhanced data from it
             if storyboard and storyboard.get("segments"):
@@ -939,13 +802,10 @@ async def agent_5_process(
                         None
                     )
                     if storyboard_segment:
-                        logger.info(f"[VISUAL PROMPT TRACE] Found storyboard segment for '{part}': {segment_type}")
                         # Use visual_guidance from storyboard if available
                         storyboard_visual = storyboard_segment.get("visual_guidance", "")
-                        logger.info(f"[VISUAL PROMPT TRACE] Storyboard visual_guidance for '{part}': {storyboard_visual[:100] if storyboard_visual else '(empty)'}")
                         if storyboard_visual and not visual_prompt:
                             visual_prompt = storyboard_visual
-                            logger.info(f"[VISUAL PROMPT TRACE] Using storyboard visual_guidance as visual_prompt for '{part}'")
                         # Use key_concepts from storyboard if available
                         if storyboard_segment.get("key_concepts") and not section_data.get("key_concepts"):
                             section_data["key_concepts"] = storyboard_segment.get("key_concepts")
@@ -964,21 +824,17 @@ async def agent_5_process(
 
             # Store segment duration (from storyboard or script, with defaults)
             duration_str = section_data.get("duration")
+            default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
             if duration_str:
                 try:
                     segment_durations[part] = float(duration_str)
                 except (ValueError, TypeError):
-                    # Fallback to defaults if duration is invalid
-                    default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
                     segment_durations[part] = default_durations.get(part, 15.0)
             else:
-                # Use default segment durations from segments.md
-                default_durations = {"hook": 10.0, "concept": 15.0, "process": 20.0, "conclusion": 15.0}
                 segment_durations[part] = default_durations.get(part, 15.0)
 
-            # Log the visual prompt and duration for verification
-            logger.info(f"[{session_id}] Section '{part}' visual prompt: {visual_prompt[:100]}...")
-            logger.info(f"[{session_id}] Section '{part}' duration: {segment_durations[part]}s")
+            # Log the final visual prompt and duration
+            logger.info(f"[{session_id}] Section '{part}': {segment_durations[part]}s, prompt: {visual_prompt[:100]}...")
 
         # Generate all videos in parallel using asyncio.gather
         # Track completion for progress updates
@@ -1466,215 +1322,56 @@ async def agent_5_process(
             )
 
         # ====================
-        # AUDIO CONCATENATION
+        # DOWNLOAD FINAL AUDIO FROM AGENT 4
         # ====================
+        # Agent 4 creates the final mixed 60-second audio (narration + music)
+        # We just need to download it here
 
-        # Track if we need to regenerate audio (separate from restart_from_concat flag)
-        need_to_regenerate_audio = True
-        
-        if restart_from_concat:
-            # In restart mode, try to download existing final audio from S3
-            logger.info(f"[{session_id}] Restart mode: Attempting to load existing final audio from S3")
-            final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
-            final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
-            
-            try:
-                # Check if final audio exists in S3
-                storage_service.s3_client.head_object(
-                    Bucket=storage_service.bucket_name,
-                    Key=final_audio_s3_key
-                )
-                # Download existing final audio with fallback URLs
-                audio_urls = storage_service.generate_s3_url_with_fallback(final_audio_s3_key)
-                audio_downloaded = False
-                async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
-                    for audio_url in audio_urls:
-                        try:
-                            response = await client.get(audio_url)
-                            # Handle redirects manually
-                            if response.status_code in [301, 302, 303, 307, 308]:
-                                redirect_url = response.headers.get('Location')
-                                response = await client.get(redirect_url)
-                            response.raise_for_status()
-                            with open(final_audio_path, 'wb') as f:
-                                f.write(response.content)
-                            logger.info(f"[{session_id}] Restart mode: Loaded existing final audio from S3")
-                            audio_downloaded = True
-                            break
-                        except Exception:
-                            continue
-                
-                if audio_downloaded:
-                    need_to_regenerate_audio = False  # Audio loaded successfully, skip regeneration
-                else:
-                    raise Exception("Failed to download final audio from all fallback URLs")
-            except Exception as e:
-                logger.warning(f"[{session_id}] Restart mode: Could not load existing audio, regenerating: {e}")
-                # Fall through to normal audio processing
-                need_to_regenerate_audio = True  # Need to regenerate audio
-        
-        if need_to_regenerate_audio:
-            await send_status(
-                "Agent5", "processing",
-                supersessionID=supersessionid,
-                message="Step 1/4: Creating timed narration track (60-second timeline)...",
-                cost=total_cost,
-                cost_breakdown=cost_per_section
+        await send_status(
+            "Agent5", "processing",
+            supersessionID=supersessionid,
+            message="Downloading final audio from Agent 4...",
+            cost=total_cost if not restart_from_concat else 0.0,
+            cost_breakdown=cost_per_section if not restart_from_concat else {}
+        )
+
+        final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
+        final_audio_s3_key = f"users/{user_id}/{session_id}/agent4/final_audio.mp3"
+
+        # Try to get final_audio from agent_4_data (if loaded from S3)
+        final_audio_url = None
+        if agent_4_data and agent_4_data.get("final_audio"):
+            final_audio_url = agent_4_data["final_audio"].get("url")
+            logger.info(f"[{session_id}] Found final_audio URL in agent_4_data")
+
+        if not final_audio_url:
+            # Generate presigned URL directly
+            final_audio_url = storage_service.generate_presigned_url(final_audio_s3_key, expires_in=86400)
+            logger.info(f"[{session_id}] Generated presigned URL for final_audio")
+
+        # Download final audio
+        import httpx
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+            success = await _download_with_fallback(
+                primary_url=final_audio_url,
+                s3_key=final_audio_s3_key,
+                output_path=final_audio_path,
+                storage_service=storage_service,
+                client=client,
+                session_id=session_id,
+                file_description="final mixed audio from Agent 4"
             )
 
-            # Download all audio files to temp directory (reuse single HTTP client)
-            import httpx
-            audio_file_paths = []
-            # Disable follow_redirects and handle redirects manually to avoid 301 errors
-            async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
-                for audio_file in audio_files:
-                    part = audio_file["part"]
-                    url = audio_file["url"]
-                    s3_key = audio_file.get("s3_key", "unknown")
-                    
-                    downloaded = False
-                    last_error = None
-                    
-                    # Get all possible URLs (including fallbacks)
-                    all_urls = [url] + storage_service.generate_s3_url_with_fallback(s3_key)
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    urls_to_try = []
-                    for u in all_urls:
-                        if u not in seen:
-                            seen.add(u)
-                            urls_to_try.append(u)
-                    
-                    # Try each URL until one works
-                    for attempt_url in urls_to_try:
-                        try:
-                            logger.debug(f"[{session_id}] Downloading audio for part '{part}' from {attempt_url}")
-                            response = await client.get(attempt_url)
-                            
-                            # Handle redirects manually
-                            if response.status_code in [301, 302, 303, 307, 308]:
-                                redirect_url = response.headers.get('Location')
-                                logger.debug(f"[{session_id}] Got redirect to: {redirect_url}, following...")
-                                response = await client.get(redirect_url)
-                            
-                            response.raise_for_status()
-                            audio_path = os.path.join(temp_dir, f"audio_{part}.mp3")
-                            with open(audio_path, 'wb') as f:
-                                f.write(response.content)
-                            audio_file_paths.append(audio_path)
-                            logger.info(f"[{session_id}] Successfully downloaded audio for part '{part}' ({len(response.content)} bytes)")
-                            downloaded = True
-                            break
-                        except Exception as e:
-                            logger.debug(f"[{session_id}] URL failed: {attempt_url} - {e}")
-                            last_error = e
-                            continue
-                    
-                    if not downloaded:
-                        logger.error(f"[{session_id}] Failed to download audio for part '{part}' after trying {len(urls_to_try)} URLs")
-                        raise ValueError(f"Failed to download audio file for part '{part}' from S3. Last error: {last_error}")
+            if not success:
+                raise ValueError(f"Failed to download final audio from Agent 4. Expected at: {final_audio_s3_key}")
 
-            # Create timed narration track (places narrations at 0s, 15s, 30s, 45s across 60s timeline)
-            timed_narration_path = os.path.join(temp_dir, "timed_narration.mp3")
-            await create_timed_narration_track(audio_file_paths, timed_narration_path, total_duration=60.0)
-            logger.info(f"[{session_id}] Created timed narration track with {len(audio_file_paths)} narrations across 60 seconds")
-
-            # ====================
-            # AUDIO MIXING
-            # ====================
-
-            await send_status(
-                "Agent5", "processing",
-                supersessionID=supersessionid,
-                message="Step 2/4: Mixing narration with background music...",
-                cost=total_cost,
-                cost_breakdown=cost_per_section
-            )
-
-            # Download background music
-            background_music_url = background_music.get("url", "")
-            if background_music_url:
-                background_music_s3_key = background_music.get("s3_key", "unknown")
-                # Disable follow_redirects and handle redirects manually to avoid 301 errors
-                async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
-                    music_downloaded = False
-                    
-                    # Get all possible URLs (including fallbacks)
-                    all_urls = [background_music_url] + storage_service.generate_s3_url_with_fallback(background_music_s3_key)
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    urls_to_try = []
-                    for u in all_urls:
-                        if u not in seen:
-                            seen.add(u)
-                            urls_to_try.append(u)
-                    
-                    # Try each URL until one works
-                    for attempt_url in urls_to_try:
-                        try:
-                            logger.debug(f"[{session_id}] Downloading background music from {attempt_url}")
-                            response = await client.get(attempt_url)
-                            
-                            # Handle redirects manually
-                            if response.status_code in [301, 302, 303, 307, 308]:
-                                redirect_url = response.headers.get('Location')
-                                logger.debug(f"[{session_id}] Got redirect to: {redirect_url}, following...")
-                                response = await client.get(redirect_url)
-                            
-                            response.raise_for_status()
-                            background_music_path = os.path.join(temp_dir, "background_music.mp3")
-                            with open(background_music_path, 'wb') as f:
-                                f.write(response.content)
-                            logger.info(f"[{session_id}] Successfully downloaded background music ({len(response.content)} bytes)")
-                            music_downloaded = True
-                            break
-                        except Exception as e:
-                            logger.debug(f"[{session_id}] URL failed for background music: {attempt_url} - {e}")
-                            continue
-                    
-                    if not music_downloaded:
-                        logger.warning(f"[{session_id}] All download attempts failed for background music, continuing without it")
-                        background_music_url = ""  # Continue without background music
-
-                # Mix timed narration with background music
-                final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
-                await mix_audio_with_background(
-                    timed_narration_path,
-                    background_music_path,
-                    final_audio_path,
-                    music_volume=0.3
-                )
-                logger.info(f"[{session_id}] Mixed timed narration with background music")
-                
-                # Save final audio to S3 for future restarts
-                try:
-                    with open(final_audio_path, 'rb') as f:
-                        audio_content = f.read()
-                    final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
-                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
-                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
-                except Exception as e:
-                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
-            else:
-                # No background music, use timed narration as-is
-                final_audio_path = timed_narration_path
-                logger.info(f"[{session_id}] No background music, using timed narration only")
-                
-                # Save final audio to S3 for future restarts
-                try:
-                    with open(final_audio_path, 'rb') as f:
-                        audio_content = f.read()
-                    final_audio_s3_key = f"users/{user_id}/{session_id}/agent5/final_audio.mp3"
-                    storage_service.upload_file_direct(audio_content, final_audio_s3_key, "audio/mpeg")
-                    logger.debug(f"[{session_id}] Saved final audio to S3: {final_audio_s3_key}")
-                except Exception as e:
-                    logger.warning(f"[{session_id}] Failed to save final audio to S3: {e}")
+        logger.info(f"[{session_id}] Downloaded final mixed audio from Agent 4 (60s narration + music)")
 
         # ====================
         # VIDEO CONCATENATION
         # ====================
 
-        step_num = "3/4" if not restart_from_concat else "1/2"
+        step_num = "1/2" if not restart_from_concat else "1/2"
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,
@@ -1692,7 +1389,7 @@ async def agent_5_process(
         # FINAL VIDEO + AUDIO COMBINATION
         # ====================
 
-        step_num = "4/4" if not restart_from_concat else "2/2"
+        step_num = "2/2"
         await send_status(
             "Agent5", "processing",
             supersessionID=supersessionid,

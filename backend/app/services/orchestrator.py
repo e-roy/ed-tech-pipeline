@@ -3083,10 +3083,9 @@ class VideoGenerationOrchestrator:
                 user_id=userId,
                 session_id=sessionId,
                 script={},  # Will be extracted from video_session by Agent4
-                voice="alloy",
+                voice="nova",
                 audio_option="tts",
                 storage_service=self.storage_service,
-                agent2_data=None,
                 video_session_data=video_session_data,  # Pass video_session_data if db is not available
                 db=db,  # Pass db so Agent4 can query if needed
                 status_callback=status_callback

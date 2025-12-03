@@ -3,11 +3,14 @@ Agent 4 - Audio Pipeline Agent
 
 This agent generates TTS audio from script text using OpenAI's TTS API.
 It receives a script with hook, concept, process, and conclusion parts,
-generates audio for each.
+generates audio for each, creates timed narration, mixes with background music,
+and outputs a final 60-second audio track.
 
 Called via orchestrator in Full Test mode.
 """
 import json
+import os
+import tempfile
 import time
 import logging
 from typing import Optional, Dict, Any, Callable, Awaitable
@@ -89,12 +92,142 @@ async def _upload_audio_to_s3(
     return storage_service.generate_presigned_url(s3_key, expires_in=86400)
 
 
+async def get_audio_duration(file_path: str) -> float:
+    """Get the duration of an audio file using ffprobe."""
+    import subprocess
+    import json
+
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "json",
+        file_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.warning(f"Failed to get audio duration: {result.stderr}")
+        return 60.0  # Default fallback
+
+    try:
+        data = json.loads(result.stdout)
+        duration = float(data["format"]["duration"])
+        return duration
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.warning(f"Failed to parse audio duration: {e}")
+        return 60.0  # Default fallback
+
+
+async def create_timed_narration_track(audio_file_paths: list[str], output_path: str, total_duration: float = 60.0) -> str:
+    """
+    Create a timed narration track by placing audio files at calculated intervals across the total duration.
+    Each narration plays at the beginning of its segment, with silence/space between narrations.
+
+    Args:
+        audio_file_paths: List of paths to audio files in order (hook, concept, process, conclusion)
+        output_path: Path for output timed audio file
+        total_duration: Total duration in seconds for the final track (default 60s)
+
+    Returns:
+        Path to timed audio file
+    """
+    import subprocess
+
+    num_segments = len(audio_file_paths)
+    segment_duration = total_duration / num_segments  # e.g., 60s / 4 = 15s per segment
+
+    # Build ffmpeg filter_complex to place each audio at its segment start time using adelay
+    filter_parts = []
+    for i in range(num_segments):
+        # Calculate delay for this segment (in milliseconds)
+        start_time_seconds = i * segment_duration
+        delay_ms = int(start_time_seconds * 1000)
+
+        # Add atrim to limit audio to segment_duration, then adelay to position at correct time
+        # This prevents narration overlap between segments
+        # adelay takes stereo input, so we delay both channels
+        filter_parts.append(f"[{i}:a]atrim=0:{segment_duration},adelay={delay_ms}|{delay_ms}[a{i}]")
+
+    # Mix all delayed audio tracks together, then pad to exact total_duration
+    mix_inputs = ''.join(f"[a{i}]" for i in range(num_segments))
+    # Use apad to pad the mixed audio to exactly total_duration (60s)
+    filter_complex = ';'.join(filter_parts) + f";{mix_inputs}amix=inputs={num_segments}:duration=longest:dropout_transition=0,apad=whole_dur={total_duration}[mixed]"
+
+    # Build ffmpeg command with direct MP3 inputs
+    cmd = ["ffmpeg", "-y"]
+
+    # Add all audio inputs (MP3 files work directly with adelay filter)
+    for audio_path in audio_file_paths:
+        cmd.extend(["-i", audio_path])
+
+    # Add filter complex and output options
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[mixed]",
+        "-ac", "2",  # Stereo
+        "-ar", "44100",  # Sample rate
+        "-c:a", "libmp3lame",  # MP3 codec
+        "-b:a", "128k",  # Bitrate
+        output_path
+    ])
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg timed narration creation failed: {result.stderr}")
+
+    logger.info(f"Created timed narration track: {num_segments} narrations across {total_duration}s")
+    return output_path
+
+
+async def mix_audio_with_background(narration_path: str, background_music_path: str, output_path: str, music_volume: float = 0.3) -> str:
+    """
+    Mix narration audio with background music.
+
+    Args:
+        narration_path: Path to concatenated narration audio
+        background_music_path: Path to background music file
+        output_path: Path for output mixed audio file
+        music_volume: Volume level for background music (0.0-1.0), default 0.3 (30%)
+
+    Returns:
+        Path to mixed audio file
+    """
+    import subprocess
+
+    # Mix narration with background music
+    # - Narration at 2.0x volume (boost to be prominent)
+    # - Background music at specified volume (default 0.3 = 30%)
+    # - Loop music if needed with -stream_loop -1
+    # - amix with dropout_transition=0 to prevent volume ducking
+    # - Explicitly set output duration to match narration (60s)
+    filter_complex = f"[0:a]volume=2.0[narration];[1:a]volume={music_volume}[music];[narration][music]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", narration_path,
+        "-stream_loop", "-1",  # Loop background music
+        "-i", background_music_path,
+        "-filter_complex", filter_complex,
+        "-map", "[aout]",
+        "-c:a", "libmp3lame",  # Use MP3 codec for consistency
+        "-b:a", "128k",
+        output_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg audio mixing failed: {result.stderr}")
+
+    return output_path
+
+
 async def agent_4_process(
     websocket_manager: Optional[WebSocketManager],
     user_id: str,
     session_id: str,
     script: Dict[str, Any],
-    voice: str = "alloy",
+    voice: str = "nova",
     audio_option: str = "tts",
     storage_service: Optional[StorageService] = None,
     agent2_data: Optional[Dict[str, Any]] = None,
@@ -110,7 +243,7 @@ async def agent_4_process(
         user_id: User identifier
         session_id: Session identifier
         script: Script with hook, concept, process, conclusion parts
-        voice: TTS voice to use (default: alloy)
+        voice: TTS voice to use (default: nova)
         audio_option: Audio generation option (tts, upload, none, instrumental)
         storage_service: Storage service for S3 operations
         agent2_data: Data passed from Agent2 (deprecated, unused)
@@ -231,9 +364,10 @@ async def agent_4_process(
             openai_key = None
 
         # Create AudioPipelineAgent
+        # Pass db to enable background music selection
         audio_agent = AudioPipelineAgent(
             api_key=openai_key,
-            db=None,
+            db=db,
             storage_service=storage_service,
             websocket_manager=websocket_manager
         )
@@ -271,6 +405,11 @@ async def agent_4_process(
         audio_files_output = []
         background_music_output = None
 
+        # Debug: Log all audio files from result
+        logger.info(f"Agent4 received {len(result_data.get('audio_files', []))} audio files from AudioPipelineAgent")
+        for af in result_data.get("audio_files", []):
+            logger.info(f"  - Part: {af.get('part')}, has filepath: {bool(af.get('filepath'))}, has url: {bool(af.get('url'))}")
+
         for audio_file in result_data.get("audio_files", []):
             filepath = audio_file.get("filepath")
             if not filepath:
@@ -299,10 +438,112 @@ async def agent_4_process(
             except Exception as e:
                 logger.warning(f"Failed to upload {part} audio to S3: {e}")
 
+        # ====================
+        # CREATE FINAL MIXED AUDIO (60 seconds)
+        # ====================
+        logger.info(f"Agent4 creating final mixed audio for session {session_id}")
+
+        temp_dir = None
+        final_audio_output = None
+
+        try:
+            # Create temp directory for audio processing
+            temp_dir = tempfile.mkdtemp(prefix="agent4_audio_")
+
+            # Get local file paths for narration clips (in order: hook, concept, process, conclusion)
+            narration_file_paths = []
+            for part_name in REQUIRED_SCRIPT_PARTS:
+                audio_file = next((af for af in result_data.get("audio_files", []) if af["part"] == part_name), None)
+                if audio_file and audio_file.get("filepath"):
+                    narration_file_paths.append(audio_file["filepath"])
+                else:
+                    logger.warning(f"Agent4: Missing audio file for part '{part_name}'")
+
+            if len(narration_file_paths) != 4:
+                raise ValueError(f"Agent4: Expected 4 narration files, found {len(narration_file_paths)}")
+
+            # Get background music - download from S3 if needed
+            background_music_file = None
+            logger.info(f"Agent4 searching for background music in {len(result_data.get('audio_files', []))} audio files")
+            for audio_file in result_data.get("audio_files", []):
+                if audio_file["part"] == "music":
+                    logger.info(f"Agent4 found music part: filepath={audio_file.get('filepath')}, url={audio_file.get('url')}")
+                    # Check if we have a local filepath
+                    if audio_file.get("filepath"):
+                        background_music_file = audio_file["filepath"]
+                        logger.info(f"Agent4 using local background music file: {background_music_file}")
+                    # Otherwise download from S3 URL
+                    elif audio_file.get("url"):
+                        import httpx
+                        music_url = audio_file["url"]
+                        music_download_path = os.path.join(temp_dir, "background_music.mp3")
+                        logger.info(f"Agent4 downloading background music from URL: {music_url}")
+
+                        async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+                            response = await client.get(music_url)
+                            response.raise_for_status()
+                            with open(music_download_path, "wb") as f:
+                                f.write(response.content)
+
+                        background_music_file = music_download_path
+                        logger.info(f"Agent4 downloaded background music to: {background_music_file}")
+                    else:
+                        logger.warning(f"Agent4 music part has no filepath or url!")
+                    break
+
+            if not background_music_file:
+                logger.warning(f"Agent4 NO BACKGROUND MUSIC FOUND - will create narration-only final audio")
+
+            # Step 1: Create timed narration track (60s with spacing)
+            timed_narration_path = os.path.join(temp_dir, "timed_narration.mp3")
+            await create_timed_narration_track(narration_file_paths, timed_narration_path, total_duration=60.0)
+            logger.info(f"Agent4 created timed narration track: {len(narration_file_paths)} clips across 60s")
+
+            # Step 2: Mix narration with background music (if available)
+            final_audio_path = os.path.join(temp_dir, "final_audio.mp3")
+            if background_music_file:
+                await mix_audio_with_background(
+                    timed_narration_path,
+                    background_music_file,
+                    final_audio_path,
+                    music_volume=0.05  # 30% volume for music bed
+                )
+                logger.info(f"Agent4 mixed narration with background music at 30% volume")
+            else:
+                # No background music, use timed narration as final audio
+                import shutil
+                shutil.copy(timed_narration_path, final_audio_path)
+                logger.info(f"Agent4 using timed narration only (no background music)")
+
+            # Step 3: Get actual duration of final audio
+            actual_duration = await get_audio_duration(final_audio_path)
+            logger.info(f"Agent4 final audio actual duration: {actual_duration:.2f}s")
+
+            # Step 4: Upload final_audio.mp3 to S3
+            final_audio_s3_key = f"users/{user_id}/{session_id}/agent4/final_audio.mp3"
+            final_audio_url = await _upload_audio_to_s3(storage_service, final_audio_path, final_audio_s3_key)
+            final_audio_output = {
+                "url": final_audio_url,
+                "duration": actual_duration,
+                "s3_key": final_audio_s3_key
+            }
+            logger.info(f"Agent4 uploaded final mixed audio to S3: {final_audio_s3_key}")
+
+        except Exception as e:
+            logger.error(f"Agent4 failed to create final mixed audio: {e}", exc_info=True)
+            # Don't fail the entire process - Agent 5 can fall back to individual files if needed
+            logger.warning(f"Agent4 continuing without final mixed audio")
+        finally:
+            # Clean up temp directory
+            if temp_dir and os.path.exists(temp_dir):
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
         # Create agent_4_data output
         agent_4_data = {
             "audio_files": audio_files_output,
-            "background_music": background_music_output or {"url": "", "duration": 60}
+            "background_music": background_music_output or {"url": "", "duration": 60},
+            "final_audio": final_audio_output  # NEW: Final mixed 60s audio track
         }
 
         # Upload agent_4_data to S3
@@ -332,7 +573,8 @@ async def agent_4_process(
             "status": "success",
             "audio_files": result_data.get("audio_files", []),
             "total_duration": result_data.get("total_duration", 0),
-            "total_cost": result_data.get("total_cost", 0)
+            "total_cost": result_data.get("total_cost", 0),
+            "final_audio": final_audio_output  # Final mixed 60s audio track
         }
 
     except Exception as e:

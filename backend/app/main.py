@@ -1012,7 +1012,8 @@ async def test_agent4_audio(
                 "audio_files": result.get("audio_files", []),
                 "total_duration": result.get("total_duration", 0.0),
                 "total_cost": total_cost,
-                "session_id": request.session_id
+                "session_id": request.session_id,
+                "final_audio": result.get("final_audio")  # Final mixed 60s audio track
             },
             cost=total_cost,
             duration=time.time() - start_time,
